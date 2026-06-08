@@ -27,8 +27,10 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { Badge } from "@nous-research/ui/ui/components/badge";
 import { Card } from "@nous-research/ui/ui/components/card";
 
+import { ContextVisPanel } from "@/components/ContextVisPanel";
 import { ModelPickerDialog } from "@/components/ModelPickerDialog";
 import { ToolCall, type ToolEntry } from "@/components/ToolCall";
+import { useContextSnapshot } from "@/lib/contextvis/adapter";
 import { GatewayClient, type ConnectionState } from "@/lib/gatewayClient";
 import { HERMES_BASE_PATH, buildWsAuthParam } from "@/lib/api";
 
@@ -89,6 +91,9 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
   const [tools, setTools] = useState<ToolEntry[]>([]);
   const [modelOpen, setModelOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ContextVis：真实占用快照，独立订阅本标签的事件通道（见 adapter 注释）。
+  const contextSnapshot = useContextSnapshot(channel);
 
   useEffect(() => {
     let cancelled = false;
@@ -342,6 +347,8 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
 
         <Badge tone={STATE_TONE[state]}>{STATE_LABEL[state]}</Badge>
       </Card>
+
+      <ContextVisPanel snapshot={contextSnapshot} />
 
       {banner && (
         <Card className="flex items-start gap-2 border-destructive/40 bg-destructive/5 px-3 py-2 text-xs">
