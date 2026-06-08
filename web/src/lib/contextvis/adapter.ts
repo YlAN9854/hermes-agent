@@ -21,6 +21,7 @@ import { HERMES_BASE_PATH, buildWsAuthParam } from "@/lib/api";
 import {
   EMPTY_SNAPSHOT,
   type CompactionEvent,
+  type ContextChunk,
   type ContextSnapshot,
 } from "@/lib/contextvis/types";
 
@@ -33,9 +34,18 @@ interface SessionUsage {
   calls?: number;
 }
 
+/** context.snapshot 载荷（对齐 agent/contextvis/chunking.build_snapshot_chunks）。 */
+interface ContextSnapshotPayload {
+  chunks?: ContextChunk[];
+  compact_at?: number;
+}
+
 interface EventFrame {
   method?: string;
-  params?: { type?: string; payload?: { usage?: SessionUsage } };
+  params?: {
+    type?: string;
+    payload?: { usage?: SessionUsage } & ContextSnapshotPayload;
+  };
 }
 
 /** sparkline 采样的环形上限。 */
@@ -76,10 +86,22 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
         } catch {
           return;
         }
-        if (frame.method !== "event" || frame.params?.type !== "session.info") {
+        if (frame.method !== "event") return;
+        const evType = frame.params?.type;
+
+        // ContextVis 档3：逐块构成。与 session.info 合并进同一 snapshot
+        // （budget/used/percent 仍来自 session.info）。
+        if (evType === "context.snapshot") {
+          const chunks = frame.params?.payload?.chunks;
+          if (Array.isArray(chunks)) {
+            const compactAt = frame.params?.payload?.compact_at;
+            setSnapshot((prev) => ({ ...prev, chunks, compactAt }));
+          }
           return;
         }
-        const usage = frame.params.payload?.usage;
+
+        if (evType !== "session.info") return;
+        const usage = frame.params?.payload?.usage;
         // 无真实窗口不更新 —— 可信度系于真实计数，宁可不显示也不假装。
         if (!usage || !usage.context_max) return;
 
@@ -114,7 +136,17 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
             { turn, used, percent },
           ].slice(-HISTORY_CAP);
 
-          return { budget, used, percent, turn, history, compactions, chunks: [] };
+          // chunks / compactAt 由 context.snapshot 事件维护，这里保留上一帧不清空。
+          return {
+            budget,
+            used,
+            percent,
+            turn,
+            history,
+            compactions,
+            chunks: prev.chunks,
+            compactAt: prev.compactAt,
+          };
         });
       });
     })();

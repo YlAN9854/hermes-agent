@@ -10,24 +10,44 @@
  * 届时上层渲染据 `chunks` 是否非空切换到按类型树图，契约本身不变。
  */
 
-/** 内容的固定小类型，在所有形态中以恒定方式区分。 */
+/**
+ * 渲染带（chunk 的类型，5 个）—— 概念图的 5 个区域。
+ *
+ * 服务端把细粒度 segment（user/assistant/tool_call…）聚合进这 5 个带；细分只
+ * 在服务端 segment 层保留，给 provenance / 未来语义聚类用。「类型恒定可辨」。
+ */
 export type ChunkType =
   | "system"
-  | "user"
-  | "assistant"
-  | "tool_call"
-  | "tool_result"
-  | "file";
+  | "tool_schema"
+  | "history"
+  | "file"
+  | "tool_result";
 
-/** 块：类型 · token 量级 · 所属轮次 · 可选原文 · 可选命运。 */
+/** provenance：指回真实会话单元，是"只读视图"升级"可编辑视图"的地基。 */
+export interface SegmentRef {
+  messageIndex?: number;
+  part?: string;
+}
+
+/** 块：类型 · token 量级 · 所属轮次 · 来源引用 · 可选分组/命运。 */
 export interface ContextChunk {
   id: string;
   type: ChunkType;
   tokens: number;
+  /** 代表轮次（用于时间轴排序）。语义主题可跨非连续轮，见 turnSpan。 */
   turn: number;
   label: string;
-  raw?: string;
+  /** provenance：组成本块的源 segment 引用。 */
+  sourceRefs: SegmentRef[];
+  /** 分组标签（v1：toolset 名；未来：主题名）。 */
+  group?: string;
+  /** 折叠了几个 segment（v1：一轮的消息数；未来：主题成员数）。 */
+  members?: number;
+  /** 代表轮次的跨度，[起,止]。 */
+  turnSpan?: [number, number];
+  /** 预留：未来交互式压缩的命运标记，v1 恒空。 */
   fate?: "keep" | "fold" | "drop";
+  raw?: string;
 }
 
 /** 压缩事件：给历史块分配命运后，容器占用的一次骤降。 */
@@ -62,6 +82,8 @@ export interface ContextSnapshot {
   compactions: CompactionEvent[];
   /** 档1 留空；档3 填真值。非空时上层渲染按类型树图。 */
   chunks: ContextChunk[];
+  /** 压缩阈值（绝对 token，与 budget 同尺度）。「实际占用」模式据此画 compact 线。 */
+  compactAt?: number;
 }
 
 /** 空快照：尚未收到任何带真实窗口的 session.info 时的初始态。 */

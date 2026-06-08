@@ -516,6 +516,39 @@ def _emit(event: str, sid: str, payload: dict | None = None):
     write_json({"jsonrpc": "2.0", "method": "event", "params": params})
 
 
+def _emit_context_snapshot(sid: str) -> None:
+    """ContextVis：与 session.info 并发发一份"当前 prompt 由哪些 chunk 构成"。
+
+    只读、best-effort：失败只记 debug，绝不影响对话。默认开，``HERMES_CONTEXTVIS``
+    设为假值可关。载荷沿 /api/pub → /api/events 抵达 dashboard 的 ContextVis 面板。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return
+    try:
+        session = _sessions.get(sid)
+        if not session:
+            return
+        agent = session.get("agent")
+        if agent is None:
+            return
+        from agent.contextvis import build_snapshot_chunks
+
+        payload = build_snapshot_chunks(agent, session)
+        if payload.get("chunks"):
+            _emit("context.snapshot", sid, payload)
+    except Exception as e:  # noqa: BLE001 — viz must never break a turn
+        logger.debug("context.snapshot emit skipped: %s", e)
+
+
+_SESSION_INFO_EVENT = "session.info"
+
+
+def _emit_session_info(sid: str, info: dict | None = None) -> None:
+    """发 session.info，并顺带 co-emit 一份 ContextVis 快照（同一 cadence）。"""
+    _emit(_SESSION_INFO_EVENT, sid, info)
+    _emit_context_snapshot(sid)
+
+
 def _status_update(sid: str, kind: str, text: str | None = None):
     body = (text if text is not None else kind).strip()
     if not body:
@@ -743,7 +776,7 @@ def _start_agent_build(sid: str, session: dict) -> None:
             if cfg_warn:
                 info["config_warning"] = cfg_warn
                 logger.warning(cfg_warn)
-            _emit("session.info", sid, info)
+            _emit_session_info(sid, info)
         except Exception as e:
             current["agent_error"] = str(e)
             _emit("error", sid, {"message": f"agent init failed: {e}"})
@@ -1519,7 +1552,7 @@ def _apply_model_switch(sid: str, session: dict, raw_input: str) -> dict:
             api_mode=result.api_mode,
         )
         _restart_slash_worker(session)
-        _emit("session.info", sid, _session_info(agent, session))
+        _emit_session_info(sid, _session_info(agent, session))
 
     # Record the switch as a PER-SESSION override so a later rebuild of THIS
     # session (e.g. /new via _reset_session_agent, or resume) re-derives the
@@ -2355,7 +2388,7 @@ def _apply_personality_to_session(
             session["history"].append({"role": "user", "content": marker})
             session["history_version"] = int(session.get("history_version", 0)) + 1
         info = _session_info(agent)
-        _emit("session.info", sid, info)
+        _emit_session_info(sid, info)
         return False, info
     return False, None
 
@@ -2575,7 +2608,7 @@ def _reset_session_agent(sid: str, session: dict) -> dict:
         session["history"] = []
         session["history_version"] = int(session.get("history_version", 0)) + 1
     info = _session_info(new_agent, session)
-    _emit("session.info", sid, info)
+    _emit_session_info(sid, info)
     _restart_slash_worker(session)
     return info
 
@@ -2755,7 +2788,7 @@ def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
         if sid in _sessions:
             _sessions[sid]["_notif_stop"] = _start_notification_poller(sid, _sessions[sid])
     _notify_session_boundary("on_session_reset", key)
-    _emit("session.info", sid, _session_info(agent, _sessions.get(sid, {})))
+    _emit_session_info(sid, _session_info(agent, _sessions.get(sid, {})))
 
 
 def _new_session_key() -> str:
@@ -3423,7 +3456,7 @@ def _(rid, params: dict) -> dict:
         "branch": _git_branch_for_cwd(cwd),
         "lazy": True,
     }
-    _emit("session.info", params.get("session_id", ""), info)
+    _emit_session_info(params.get("session_id", ""), info)
     return _ok(rid, info)
 
 
@@ -3898,7 +3931,7 @@ def _(rid, params: dict) -> dict:
                 before_messages, messages, before_tokens, after_tokens
             )
             info = _session_info(agent, session)
-            _emit("session.info", sid, info)
+            _emit_session_info(sid, info)
             return _ok(
                 rid,
                 {
@@ -4954,7 +4987,7 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
                 session["running"] = False
                 session["last_active"] = time.time()
                 _clear_inflight_turn(session)
-            _emit("session.info", sid, _session_info(agent, session))
+            _emit_session_info(sid, _session_info(agent, session))
 
         # Chain a goal-continuation turn if the judge said so. We do
         # this AFTER the finally releases session["running"], so the
@@ -5829,7 +5862,7 @@ def _(rid, params: dict) -> dict:
                 for sid, sess in list(_sessions.items()):
                     agent = sess.get("agent")
                     if agent is not None:
-                        _emit("session.info", sid, _session_info(agent, sess))
+                        _emit_session_info(sid, _session_info(agent, sess))
                 return _ok(rid, {"key": key, "value": nv, "scope": "global"})
 
             if session:
@@ -7681,14 +7714,14 @@ def _mirror_slash_side_effects(sid: str, session: dict, command: str) -> str:
         elif name == "compress" and agent:
             _compress_session_history(session, arg)
             _sync_session_key_after_compress(sid, session)
-            _emit("session.info", sid, _session_info(agent, session))
+            _emit_session_info(sid, _session_info(agent, session))
         elif name == "fast" and agent:
             mode = arg.lower()
             if mode in {"fast", "on"}:
                 agent.service_tier = "priority"
             elif mode in {"normal", "off"}:
                 agent.service_tier = None
-            _emit("session.info", sid, _session_info(agent, session))
+            _emit_session_info(sid, _session_info(agent, session))
         elif name == "reload-mcp" and agent and hasattr(agent, "reload_mcp_tools"):
             agent.reload_mcp_tools()
         elif name == "stop":
