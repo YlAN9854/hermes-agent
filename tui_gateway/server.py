@@ -2713,8 +2713,36 @@ def _make_agent(
     )
 
 
+def _seed_context_tokens_from_history(agent, history: list) -> None:
+    """Resume 后预播种 ``compressor.last_prompt_tokens``。
+
+    resume 会重建全新 agent，其 compressor 计数从 0 起，要等下一轮真实 API
+    usage 才填上——期间 TUI 占用条与 ContextVis 都显示 0，尽管历史已载入
+    prompt。这里按已载入历史(+system+tools)粗估一次播种，使占用立刻可见且
+    与首轮后的真实值接近。best-effort：失败不影响 resume。
+    """
+    if not history:
+        return  # 新会话(/new)历史为空，保持原行为不动
+    comp = getattr(agent, "context_compressor", None)
+    if comp is None or getattr(comp, "last_prompt_tokens", 0) > 0:
+        return
+    try:
+        from agent.model_metadata import estimate_request_tokens_rough
+
+        est = estimate_request_tokens_rough(
+            history,
+            system_prompt=getattr(agent, "_cached_system_prompt", "") or "",
+            tools=getattr(agent, "tools", None),
+        )
+        if est > 0:
+            comp.last_prompt_tokens = est
+    except Exception:
+        logger.debug("resume context-token seed skipped", exc_info=True)
+
+
 def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
     now = time.time()
+    _seed_context_tokens_from_history(agent, history)
     with _sessions_lock:
         _sessions[sid] = {
             "agent": agent,

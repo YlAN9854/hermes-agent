@@ -95,7 +95,29 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
           const chunks = frame.params?.payload?.chunks;
           if (Array.isArray(chunks)) {
             const compactAt = frame.params?.payload?.compact_at;
-            setSnapshot((prev) => ({ ...prev, chunks, compactAt }));
+            setSnapshot((prev) => {
+              // resume 场景：agent 刚重建，compressor.last_prompt_tokens 未恢复，
+              // session.info 的真实 used=0；但 chunks 来自真实已载入的
+              // session["history"] → 用 chunk 总和补出占用，避免显示 0。
+              // 首轮之后真实 usage>0，session.info 会以真实值覆盖（见下）。
+              const chunkTotal = chunks.reduce((s, c) => s + (c.tokens || 0), 0);
+              const useEstimate =
+                (prev.used || 0) <= 0 && chunkTotal > 0 && prev.budget > 0;
+              return {
+                ...prev,
+                chunks,
+                compactAt,
+                ...(useEstimate
+                  ? {
+                      used: chunkTotal,
+                      percent: Math.min(
+                        100,
+                        Math.round((chunkTotal / prev.budget) * 100),
+                      ),
+                    }
+                  : {}),
+              };
+            });
           }
           return;
         }
