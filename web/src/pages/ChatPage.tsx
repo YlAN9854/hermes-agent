@@ -31,8 +31,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 
-import { ChatSidebar } from "@/components/ChatSidebar";
+import { ChunkInspector } from "@/components/ChunkInspector";
 import { ContextVisOverlay } from "@/components/ContextVisOverlay";
+import { useContextSnapshot } from "@/lib/contextvis/adapter";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
@@ -175,6 +176,13 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // terminal session when it changes.
   const resumeParam = searchParams.get("resume");
   const channel = useMemo(() => generateChannelId(), [resumeParam]);
+
+  // ContextVis：快照 + 选中态在此持有，供终端浮层（treemap）与右侧栏
+  // （chunk 原文检视器）共享——master-detail 联动。
+  const contextSnapshot = useContextSnapshot(channel);
+  const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
+  const selectedChunk =
+    contextSnapshot.chunks.find((c) => c.id === selectedChunkId) ?? null;
 
   useEffect(() => {
     if (!resumeParam) return;
@@ -848,11 +856,14 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
 
           <div
             className={cn(
-              "min-h-0 flex-1 overflow-y-auto overflow-x-hidden",
+              "min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3",
               "border-t border-current/10",
             )}
           >
-            <ChatSidebar channel={channel} />
+            <ChunkInspector
+              chunk={selectedChunk}
+              onClose={() => setSelectedChunkId(null)}
+            />
           </div>
         </div>
       </>,
@@ -886,7 +897,11 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             className="hermes-chat-xterm-host min-h-0 min-w-0 flex-1"
           />
 
-          <ContextVisOverlay channel={channel} />
+          <ContextVisOverlay
+            snapshot={contextSnapshot}
+            selected={selectedChunkId}
+            onSelect={setSelectedChunkId}
+          />
 
           <Button
             ghost
@@ -922,7 +937,10 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             className="flex min-h-0 shrink-0 flex-col overflow-hidden lg:h-full lg:w-80"
           >
             <div className="min-h-0 flex-1 overflow-hidden">
-              <ChatSidebar channel={channel} />
+              <ChunkInspector
+                chunk={selectedChunk}
+                onClose={() => setSelectedChunkId(null)}
+              />
             </div>
           </div>
         )}

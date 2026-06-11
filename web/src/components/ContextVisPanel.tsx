@@ -270,20 +270,23 @@ function ModeToggle({
 
 export function ContextVisPanel({
   snapshot,
+  selected,
+  onSelect,
   onCollapse,
 }: {
   snapshot: ContextSnapshot;
+  /** 受控选中：选中态上提到挂载壳，与右侧栏 inspector 共享。 */
+  selected: string | null;
+  onSelect: (id: string | null) => void;
   /** 挂载壳传入：渲染一个折叠按钮（核心渲染本身不关心折叠语义）。 */
   onCollapse?: () => void;
 }) {
-  const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<TreemapMode>("proportional");
   const { budget, used, percent, compactions, chunks } = snapshot;
   const ready = budget > 0;
   const tone = occupancyTone(percent);
   const hasChunks = chunks.length > 0;
   const lastDrop = compactions.length ? compactions[compactions.length - 1].removed : 0;
-  const sel = selected ? chunks.find((c) => c.id === selected) : null;
 
   return (
     <Card className="flex flex-none flex-col gap-2 px-3 py-2">
@@ -342,19 +345,7 @@ export function ContextVisPanel({
           </div>
 
           {hasChunks && (
-            <Treemap snapshot={snapshot} mode={mode} selected={selected} onSelect={setSelected} />
-          )}
-
-          {sel && (
-            <div className="rounded border border-current/15 bg-current/5 px-2 py-1 text-xs">
-              <div className="truncate font-medium text-text-secondary" title={sel.label}>
-                {sel.label}
-              </div>
-              <div className="text-text-tertiary tabular-nums">
-                {sel.type} · {formatTokenCount(sel.tokens)} tok
-                {sel.members && sel.members > 1 ? ` · ${sel.members} 项` : ""}
-              </div>
-            </div>
+            <Treemap snapshot={snapshot} mode={mode} selected={selected} onSelect={onSelect} />
           )}
 
           <Sparkline snapshot={snapshot} />

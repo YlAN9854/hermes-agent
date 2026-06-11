@@ -16,7 +16,7 @@
 import { useState } from "react";
 
 import { ContextVisPanel } from "@/components/ContextVisPanel";
-import { useContextSnapshot } from "@/lib/contextvis/adapter";
+import type { ContextSnapshot } from "@/lib/contextvis/types";
 import { cn } from "@/lib/utils";
 
 function toneClasses(percent: number): { bar: string; text: string } {
@@ -25,8 +25,15 @@ function toneClasses(percent: number): { bar: string; text: string } {
   return { bar: "bg-success", text: "text-success" };
 }
 
-export function ContextVisOverlay({ channel }: { channel: string }) {
-  const snapshot = useContextSnapshot(channel);
+export function ContextVisOverlay({
+  snapshot,
+  selected,
+  onSelect,
+}: {
+  snapshot: ContextSnapshot;
+  selected: string | null;
+  onSelect: (id: string | null) => void;
+}) {
   const [collapsed, setCollapsed] = useState(false);
 
   // 没有真实窗口（尚未开始对话）时不挂任何东西，保持终端干净。
@@ -65,7 +72,12 @@ export function ContextVisOverlay({ channel }: { channel: string }) {
         </button>
       ) : (
         <div className="max-h-[calc(100%-0.5rem)] overflow-y-auto rounded-lg shadow-xl">
-          <ContextVisPanel snapshot={snapshot} onCollapse={() => setCollapsed(true)} />
+          <ContextVisPanel
+            snapshot={snapshot}
+            selected={selected}
+            onSelect={onSelect}
+            onCollapse={() => setCollapsed(true)}
+          />
         </div>
       )}
     </div>

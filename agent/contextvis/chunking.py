@@ -26,9 +26,29 @@ chunk 构成"的真值快照。token 用 Hermes 既有的 chars//4 估算
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
+
+# 每个 chunk 原文的截断上限（字符）。超出标注省略 + 真实 token 数。原文随快照
+# 推送供右侧栏检视器显示；localhost 下可接受，HERMES_CONTEXTVIS_RAW=0 可关。
+_RAW_CAP = 32_000
+
+
+def _raw_enabled() -> bool:
+    val = os.environ.get("HERMES_CONTEXTVIS_RAW", "1")
+    return str(val).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _cap_raw(text: str, tokens: int) -> str:
+    if len(text) <= _RAW_CAP:
+        return text
+    return text[:_RAW_CAP] + f"\n\n…（已截断，本块约 {tokens:,} tok）"
+
+
+def _join_raw(segs: "List[Segment]") -> str:
+    return "\n\n".join(s.raw for s in segs if s.raw)
 
 # ── segment 类型（细粒度，内部用） ────────────────────────────────────
 SEG_SYSTEM = "system"
@@ -78,6 +98,7 @@ class Segment:
     label: str
     ref: Dict[str, Any]
     group: Optional[str] = None  # tool_schema 的 toolset 名等
+    raw: str = ""  # 原文，供右侧栏检视器显示
 
 
 @dataclass
@@ -94,6 +115,7 @@ class Chunk:
     members: int = 1
     turnSpan: Optional[List[int]] = None
     fate: Optional[str] = None  # 预留：未来交互式压缩用，v1 恒空
+    raw: Optional[str] = None  # 成员原文拼接（截断），供检视器
 
 
 # ── token 估算（复用 Hermes 既有 chars//4 口径） ──────────────────────
@@ -126,7 +148,7 @@ def _segment_system(agent: Any) -> List[Segment]:
         cached = getattr(agent, "_cached_system_prompt", "") or ""
         if cached:
             return [Segment("sys:all", SEG_SYSTEM, 0, _est_str(cached),
-                            "system prompt", {"part": "system:all"})]
+                            "system prompt", {"part": "system:all"}, raw=cached)]
         return out
     for key in ("stable", "context", "volatile"):
         text = parts.get(key) or ""
@@ -140,6 +162,7 @@ def _segment_system(agent: Any) -> List[Segment]:
                 tokens=_est_str(text),
                 label=key,
                 ref={"part": f"system:{key}"},
+                raw=text,
             )
         )
     return out
@@ -157,6 +180,7 @@ def _segment_tool_schemas(agent: Any) -> List[Segment]:
         try:
             fn = tool.get("function", tool) if isinstance(tool, dict) else {}
             name = fn.get("name") or f"tool_{i}"
+            raw = json.dumps(tool, ensure_ascii=False, indent=2)
             tokens = _est_str(json.dumps(tool, ensure_ascii=False))
         except Exception:
             continue
@@ -175,6 +199,7 @@ def _segment_tool_schemas(agent: Any) -> List[Segment]:
                 label=name,
                 ref={"part": f"tool:{name}"},
                 group=toolset or "tools",
+                raw=raw,
             )
         )
     return out
@@ -228,14 +253,15 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
             turn += 1
         tokens = _est_msg(msg)
         ref = {"messageIndex": i}
+        raw = _msg_raw(msg)
         if role == "user":
             text = _content_text(msg)
             out.append(Segment(f"msg:{i}", SEG_USER, turn, tokens,
-                               _snippet(text) or "user", ref))
+                               _snippet(text) or "user", ref, raw=raw))
         elif role == "assistant":
             text = _content_text(msg)
             label = _snippet(text) or ("tool call" if msg.get("tool_calls") else "assistant")
-            out.append(Segment(f"msg:{i}", SEG_ASSISTANT, turn, tokens, label, ref))
+            out.append(Segment(f"msg:{i}", SEG_ASSISTANT, turn, tokens, label, ref, raw=raw))
         elif role == "tool":
             cid = msg.get("tool_call_id") or ""
             paired = call_index.get(cid, {})
@@ -244,12 +270,29 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
             content = _content_text(msg)
             if tool_name in _FILE_TOOLS:
                 out.append(Segment(f"msg:{i}", SEG_FILE, turn, tokens,
-                                   _path_from_args(args_json), ref))
+                                   _path_from_args(args_json), ref, raw=raw))
             else:
                 out.append(Segment(f"msg:{i}", SEG_TOOL_RESULT, turn, tokens,
-                                   _summarize(tool_name, args_json, content), ref))
+                                   _summarize(tool_name, args_json, content), ref, raw=raw))
         # 其它 role 忽略
     return out
+
+
+def _msg_raw(msg: Dict[str, Any]) -> str:
+    """一条消息的可读原文：正文 + 工具调用详情（name(arguments)）。"""
+    parts: List[str] = []
+    txt = _content_text(msg)
+    if txt:
+        parts.append(txt)
+    for call in (msg.get("tool_calls") or []):
+        try:
+            fn = call.get("function") or {}
+            name = fn.get("name") or "tool"
+            args = fn.get("arguments") or ""
+            parts.append(f"→ {name}({args})")
+        except Exception:
+            continue
+    return "\n".join(parts)
 
 
 def _content_text(msg: Dict[str, Any]) -> str:
@@ -297,6 +340,7 @@ def _strat_identity(band: str, segs: List[Segment]) -> List[Chunk]:
             group=s.group,
             members=1,
             turnSpan=[s.turn, s.turn],
+            raw=_cap_raw(s.raw, s.tokens),
         )
         for s in segs
     ]
@@ -322,6 +366,7 @@ def _strat_group_by_turn(band: str, segs: List[Segment]) -> List[Chunk]:
                 sourceRefs=[g.ref for g in group],
                 members=len(group),
                 turnSpan=[turn, turn],
+                raw=_cap_raw(_join_raw(group), sum(g.tokens for g in group)),
             )
         )
     return chunks
@@ -345,6 +390,7 @@ def _strat_group_by_toolset(band: str, segs: List[Segment]) -> List[Chunk]:
                 sourceRefs=[g.ref for g in group],
                 group=toolset,
                 members=len(group),
+                raw=_cap_raw(_join_raw(group), sum(g.tokens for g in group)),
             )
         )
     return chunks
@@ -425,4 +471,6 @@ def _chunk_dict(c: Chunk) -> Dict[str, Any]:
         d["turnSpan"] = c.turnSpan
     if c.fate is not None:
         d["fate"] = c.fate
+    if _raw_enabled() and c.raw:
+        d["raw"] = c.raw
     return d
