@@ -18,6 +18,7 @@ import { useState } from "react";
 
 import { formatTokenCount } from "@/lib/format";
 import { squarify } from "@/lib/contextvis/treemap";
+import { projectFates, type Fate, type FateMap } from "@/lib/contextvis/plan";
 import type {
   ChunkType,
   ContextChunk,
@@ -26,6 +27,18 @@ import type {
 import { cn } from "@/lib/utils";
 
 type TreemapMode = "proportional" | "actual";
+
+/** 命运 → treemap 描边色（Tailwind 语义 token,与检视器按钮呼应）。 */
+const FATE_STROKE: Record<Fate, string> = {
+  keep: "stroke-success",
+  fold: "stroke-warning",
+  drop: "stroke-destructive",
+};
+const FATE_LABEL: Record<Fate, string> = {
+  keep: "保留",
+  fold: "折叠",
+  drop: "丢弃",
+};
 
 /** 渲染带的顺序与配色（自顶向下；紫/teal 顶、绿文件、橙结果）。 */
 const BANDS: { type: ChunkType; color: string }[] = [
@@ -61,11 +74,13 @@ function Treemap({
   mode,
   selected,
   onSelect,
+  fateMap,
 }: {
   snapshot: ContextSnapshot;
   mode: TreemapMode;
   selected: string | null;
   onSelect: (id: string | null) => void;
+  fateMap: FateMap;
 }) {
   const { chunks, percent, budget, compactAt } = snapshot;
   const total = chunks.reduce((s, c) => s + c.tokens, 0);
@@ -172,26 +187,58 @@ function Treemap({
       )}
       {cells.map(({ x, y, w, h, chunk, color }) => {
         const isSel = chunk.id === selected;
+        const fate = fateMap[chunk.id];
         const showLabel = w > 44 && h > 26;
         const label = fitText(chunk.label, w);
+        // 命运叠加:drop 降不透明度 + 红斜划;fold 虚线边;keep 实线边。
+        // 选中环优先(stroke-background-base@2),命运仍靠 dim/strike/dash 可辨。
+        const fillOpacity = fate === "drop" ? 0.3 : isSel ? 0.95 : 0.8;
+        const strokeClass = isSel
+          ? "stroke-background-base"
+          : fate
+            ? FATE_STROKE[fate]
+            : "stroke-background-base";
         return (
           <g
             key={chunk.id}
             onClick={() => onSelect(isSel ? null : chunk.id)}
             className="cursor-pointer"
           >
-            <title>{`${chunk.label} · ${formatTokenCount(chunk.tokens)} tok${chunk.group ? ` · ${chunk.group}` : ""}${chunk.members && chunk.members > 1 ? ` · ${chunk.members} 项` : ""}`}</title>
+            <title>{`${chunk.label} · ${formatTokenCount(chunk.tokens)} tok${chunk.group ? ` · ${chunk.group}` : ""}${chunk.members && chunk.members > 1 ? ` · ${chunk.members} 项` : ""}${fate ? ` · 标记:${FATE_LABEL[fate]}` : ""}`}</title>
             <rect
               x={x}
               y={y}
               width={Math.max(0, w)}
               height={Math.max(0, h)}
               fill={color}
-              fillOpacity={isSel ? 0.95 : 0.8}
-              className="stroke-background-base"
-              strokeWidth={isSel ? 2 : 0.75}
+              fillOpacity={fillOpacity}
+              className={strokeClass}
+              strokeWidth={isSel ? 2 : fate ? 1.5 : 0.75}
+              strokeDasharray={fate === "fold" ? "3 2" : undefined}
               vectorEffect="non-scaling-stroke"
             />
+            {fate === "drop" && (
+              <>
+                <line
+                  x1={x}
+                  y1={y}
+                  x2={x + w}
+                  y2={y + h}
+                  className="stroke-destructive"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <line
+                  x1={x}
+                  y1={y + h}
+                  x2={x + w}
+                  y2={y}
+                  className="stroke-destructive"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+              </>
+            )}
             {showLabel && (
               <text
                 x={x + 4}
@@ -273,6 +320,8 @@ export function ContextVisPanel({
   selected,
   onSelect,
   onCollapse,
+  fateMap,
+  onClearFates,
 }: {
   snapshot: ContextSnapshot;
   /** 受控选中：选中态上提到挂载壳，与右侧栏 inspector 共享。 */
@@ -280,6 +329,10 @@ export function ContextVisPanel({
   onSelect: (id: string | null) => void;
   /** 挂载壳传入：渲染一个折叠按钮（核心渲染本身不关心折叠语义）。 */
   onCollapse?: () => void;
+  /** 命运标记（用户意图,来自 ChatPage fateMap）—— 驱动叠加渲染与预览。 */
+  fateMap: FateMap;
+  /** 清除全部命运标记。 */
+  onClearFates: () => void;
 }) {
   const [mode, setMode] = useState<TreemapMode>("proportional");
   const { budget, used, percent, compactions, chunks } = snapshot;
@@ -287,6 +340,17 @@ export function ContextVisPanel({
   const tone = occupancyTone(percent);
   const hasChunks = chunks.length > 0;
   const lastDrop = compactions.length ? compactions[compactions.length - 1].removed : 0;
+
+  // 命运投影（纯函数,无副作用）:预计释放量 + 应用后占用。
+  const projected = projectFates(snapshot, fateMap);
+  const projTone = occupancyTone(projected.projectedPercent);
+  const markSummary = [
+    projected.counts.drop && `丢弃×${projected.counts.drop}`,
+    projected.counts.fold && `折叠×${projected.counts.fold}`,
+    projected.counts.keep && `保留×${projected.counts.keep}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <Card className="flex flex-none flex-col gap-2 px-3 py-2">
@@ -316,7 +380,7 @@ export function ContextVisPanel({
         <>
           {/* 占用对抗上限：始终可读的细条。 */}
           <div
-            className="h-2 w-full overflow-hidden rounded-full bg-current/10"
+            className="relative h-2 w-full overflow-hidden rounded-full bg-current/10"
             role="meter"
             aria-valuenow={percent}
             aria-valuemin={0}
@@ -327,6 +391,22 @@ export function ContextVisPanel({
               className={cn("h-full rounded-full transition-[width] duration-300", tone.bar)}
               style={{ width: `${Math.max(2, Math.min(100, percent))}%` }}
             />
+            {/* 命运预览:将释放区(虚化)+ 幽灵目标刻度,直观看占用会降到哪。 */}
+            {projected.hasMarks && projected.freed > 0 && (
+              <>
+                <div
+                  className="absolute inset-y-0 bg-background-base/55"
+                  style={{
+                    left: `${projected.projectedPercent}%`,
+                    width: `${Math.max(0, percent - projected.projectedPercent)}%`,
+                  }}
+                />
+                <div
+                  className="absolute inset-y-0 w-px bg-current/70"
+                  style={{ left: `${projected.projectedPercent}%` }}
+                />
+              </>
+            )}
           </div>
 
           <div className="flex items-center justify-between text-xs tabular-nums text-text-secondary">
@@ -344,8 +424,38 @@ export function ContextVisPanel({
             )}
           </div>
 
+          {/* 命运预览行：标记构成 + 预计释放 + 占用投影 + 清除。 */}
+          {projected.hasMarks && (
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="min-w-0 truncate tabular-nums text-text-secondary">
+                {markSummary} · 预计释放{" "}
+                <span className="text-warning">~{formatTokenCount(projected.freed)}</span>
+                {projected.freed > 0 && (
+                  <>
+                    {" "}· <span className={tone.text}>{percent}%</span>
+                    <span className="text-text-tertiary">→</span>
+                    <span className={projTone.text}>{projected.projectedPercent}%</span>
+                  </>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={onClearFates}
+                className="shrink-0 rounded px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary hover:text-text-secondary"
+              >
+                清除标记
+              </button>
+            </div>
+          )}
+
           {hasChunks && (
-            <Treemap snapshot={snapshot} mode={mode} selected={selected} onSelect={onSelect} />
+            <Treemap
+              snapshot={snapshot}
+              mode={mode}
+              selected={selected}
+              onSelect={onSelect}
+              fateMap={fateMap}
+            />
           )}
 
           <Sparkline snapshot={snapshot} />

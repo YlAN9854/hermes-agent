@@ -10,9 +10,10 @@
  * `chunk.raw`；这里只负责展示。v1 纯原文 `<pre>`，仅 tool_schema 已是 JSON。
  */
 
-import { X } from "lucide-react";
+import { RotateCcw, X } from "lucide-react";
 
 import { formatTokenCount } from "@/lib/format";
+import { freedTokens, type Fate } from "@/lib/contextvis/plan";
 import type { ContextChunk } from "@/lib/contextvis/types";
 import { cn } from "@/lib/utils";
 
@@ -25,11 +26,24 @@ const TYPE_COLOR: Record<string, string> = {
   tool_result: "#d39a5c",
 };
 
+/** 命运动作配置:标签 + 选中态配色（呼应 treemap 叠加色）。 */
+const FATE_ACTIONS: { fate: Fate; label: string; active: string }[] = [
+  { fate: "keep", label: "保留", active: "border-success bg-success/15 text-success" },
+  { fate: "fold", label: "折叠", active: "border-warning bg-warning/15 text-warning" },
+  { fate: "drop", label: "丢弃", active: "border-destructive bg-destructive/15 text-destructive" },
+];
+
 export function ChunkInspector({
   chunk,
+  fate,
+  onSetFate,
   onClose,
 }: {
   chunk: ContextChunk | null;
+  /** 该块当前标记的命运（用户意图,来自 ChatPage fateMap）。 */
+  fate?: Fate;
+  /** 标记/改命运;传 null = 恢复（取消标记,交还系统自动压缩）。 */
+  onSetFate: (id: string, fate: Fate | null) => void;
   onClose: () => void;
 }) {
   if (!chunk) {
@@ -85,6 +99,47 @@ export function ChunkInspector({
         {chunk.members && chunk.members > 1 && <span>{chunk.members} 项</span>}
         {chunk.group && <span>{chunk.group}</span>}
         {chunk.raw != null && <span>{chunk.raw.length.toLocaleString()} 字符</span>}
+      </div>
+
+      {/* 命运标记（方向 A 阶段 1）:标 keep/fold/drop → 浮层预览释放量。
+          纯前端意图,不改真实上下文(应用留待阶段 3 的命令通道)。 */}
+      <div className="flex items-center gap-1 px-1">
+        {FATE_ACTIONS.map(({ fate: f, label, active }) => {
+          const isActive = fate === f;
+          const freed = freedTokens(chunk, f);
+          return (
+            <button
+              key={f}
+              type="button"
+              onClick={() => onSetFate(chunk.id, isActive ? null : f)}
+              aria-pressed={isActive}
+              className={cn(
+                "flex flex-1 flex-col items-center rounded border px-1.5 py-1 text-xs transition-colors",
+                isActive
+                  ? active
+                  : "border-current/15 text-text-tertiary hover:text-text-secondary",
+              )}
+            >
+              <span className="font-medium">{label}</span>
+              <span className="text-[10px] tabular-nums opacity-70">
+                {freed > 0 ? `释放 ~${formatTokenCount(Math.floor(freed))}` : "保护"}
+              </span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => onSetFate(chunk.id, null)}
+          disabled={!fate}
+          aria-label="恢复（取消标记）"
+          title="恢复（取消标记）"
+          className={cn(
+            "shrink-0 rounded border border-current/15 p-1.5 text-text-tertiary transition-colors",
+            fate ? "hover:text-text-secondary" : "cursor-default opacity-40",
+          )}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {/* 原文 */}

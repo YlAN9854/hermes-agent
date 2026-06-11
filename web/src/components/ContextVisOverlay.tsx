@@ -16,6 +16,7 @@
 import { useState } from "react";
 
 import { ContextVisPanel } from "@/components/ContextVisPanel";
+import type { FateMap } from "@/lib/contextvis/plan";
 import type { ContextSnapshot } from "@/lib/contextvis/types";
 import { cn } from "@/lib/utils";
 
@@ -29,10 +30,14 @@ export function ContextVisOverlay({
   snapshot,
   selected,
   onSelect,
+  fateMap,
+  onClearFates,
 }: {
   snapshot: ContextSnapshot;
   selected: string | null;
   onSelect: (id: string | null) => void;
+  fateMap: FateMap;
+  onClearFates: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -77,6 +82,8 @@ export function ContextVisOverlay({
             selected={selected}
             onSelect={onSelect}
             onCollapse={() => setCollapsed(true)}
+            fateMap={fateMap}
+            onClearFates={onClearFates}
           />
         </div>
       )}

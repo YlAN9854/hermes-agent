@@ -34,6 +34,7 @@ import { useSearchParams } from "react-router-dom";
 import { ChunkInspector } from "@/components/ChunkInspector";
 import { ContextVisOverlay } from "@/components/ContextVisOverlay";
 import { useContextSnapshot } from "@/lib/contextvis/adapter";
+import type { Fate, FateMap } from "@/lib/contextvis/plan";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
@@ -183,6 +184,25 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
   const selectedChunk =
     contextSnapshot.chunks.find((c) => c.id === selectedChunkId) ?? null;
+
+  // 方向 A：命运标记（用户意图）。与后端真值分离 —— 不写回 snapshot.chunks，
+  // 单独持有一张 chunkId→命运 的图。chunk id 确定性（sys:/history:turn{n}/…），
+  // 标记能跨每轮 context.snapshot 重发存活。无需主动剪除孤儿：所有消费方
+  // （projectFates / treemap cell / inspector）都只按当前 chunks 查表，指向已
+  // 消失 chunk 的条目天然惰性、不影响任何渲染或计算；「清除标记」整体重置。
+  const [fateMap, setFateMap] = useState<FateMap>({});
+  const setFate = useCallback((id: string, fate: Fate | null) => {
+    setFateMap((prev) => {
+      if (!fate) {
+        if (!(id in prev)) return prev;
+        const rest = { ...prev };
+        delete rest[id];
+        return rest;
+      }
+      if (prev[id] === fate) return prev;
+      return { ...prev, [id]: fate };
+    });
+  }, []);
 
   useEffect(() => {
     if (!resumeParam) return;
@@ -862,6 +882,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
           >
             <ChunkInspector
               chunk={selectedChunk}
+              fate={selectedChunkId ? fateMap[selectedChunkId] : undefined}
+              onSetFate={setFate}
               onClose={() => setSelectedChunkId(null)}
             />
           </div>
@@ -901,6 +923,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             snapshot={contextSnapshot}
             selected={selectedChunkId}
             onSelect={setSelectedChunkId}
+            fateMap={fateMap}
+            onClearFates={() => setFateMap({})}
           />
 
           <Button
@@ -939,6 +963,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             <div className="min-h-0 flex-1 overflow-hidden">
               <ChunkInspector
                 chunk={selectedChunk}
+                fate={selectedChunkId ? fateMap[selectedChunkId] : undefined}
+                onSetFate={setFate}
                 onClose={() => setSelectedChunkId(null)}
               />
             </div>

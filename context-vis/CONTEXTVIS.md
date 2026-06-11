@@ -6,8 +6,9 @@
 > 与 [../CLAUDE.md](../CLAUDE.md) 分工:CLAUDE.md 是**设计理念**(使命/隐喻/不变量,
 > 与渲染无关);本目录是**落地决策 + 路线图**。
 >
-> 状态:分支 `feat/contextvis-occupancy-panel`。档1 / 档3 / resume 修复 / 原文检视器
-> 完成;已同步上游。下一步候选见 [roadmap.md](roadmap.md)。
+> 状态:分支 `feat/contextvis-occupancy-panel`。档1 / 档3 / resume 修复 / 原文检视器 /
+> 方向 A 阶段 1+2(命运标记+预览)完成;已同步上游。下一步:方向 A 阶段 3(应用)
+> 卡在"浏览器→PTY"命令通道,见 [roadmap.md](roadmap.md)。
 
 ---
 

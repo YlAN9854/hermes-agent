@@ -37,6 +37,21 @@ prompt 节、tool schema JSON、工具调用详情、文件内容、对话原文
 `HERMES_CONTEXTVIS_RAW=0` 可关)。选中态上提 ChatPage,浮层(地图)↔侧栏(详情)
 master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧栏改作检视器。
 
+### 交互式压缩 · 阶段 1+2(方向 A,纯前端零风险)
+视图从"观察"升级到"治理"的第一步:用户**手动标记** chunk 的命运 + **实时预览**释放量。
+- **核心层** `web/src/lib/contextvis/plan.ts`:`projectFates(snapshot, fateMap)` 纯函数
+  (即 roadmap 的 `context.plan` 纯投影),按 Hermes 压缩语义算释放——
+  **drop 释放 100% / fold 释放 80%(对齐 `summary_target_ratio=0.20`)/ keep 0**。
+- **检视器** 加 **保留/折叠/丢弃** 按钮(各带"释放 ~Xtok"估算)+ 恢复。
+- **浮层** treemap 命运叠加(drop 红斜划+降透明 / fold 虚线边 / keep 实线边)+ 占用条
+  **幽灵目标刻度** + 预览行 `丢弃×2 折叠×1 · 预计释放 ~45K · 78%→52%` + 清除标记。
+- **状态**:命运存 ChatPage 的 `fateMap`(用户意图),**不写回 `snapshot.chunks`**
+  (`ContextChunk.fate` 留给阶段 3 的后端确认)。chunk id 确定性,标记跨快照重发存活;
+  孤儿条目惰性(消费方只按当前 chunks 查表),无需主动剪除。
+- **零副作用**:不碰 chunking.py / server.py / adapter.ts,不发命令、不改真实上下文。
+  **阶段 3(应用)**——把 fateMap 下发驱动 `compress()`——卡在"浏览器→真实 PTY 会话"
+  命令通道,见 [roadmap.md](roadmap.md)。
+
 ---
 
 ## 决策日志(辩过并定下的)
@@ -72,3 +87,13 @@ master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧
   代码高亮 / 结构化)留后续。
 - **小块不显标签是刻意的**:`showLabel = w>44 && h>26`(`ContextVisPanel.tsx`)。
   面积 ∝ token,小块放不下文字会变噪音;信息不丢——悬停 `<title>` + 点击进检视器兜底。
+- **方向 A 先做阶段 1+2、不碰阶段 3**(用户敲定):标记+预览是纯前端零风险,
+  先出"治理"手感;应用(动真上下文)的命令通道是独立架构决策,留下一轮专题。
+- **命运标记入口在检视器按钮,不在 treemap 点击**(用户敲定):treemap 点击保持
+  =选中看原文;命运靠按钮设、靠叠加渲染显,分工清晰、有空间放释放量估算。
+- **命运意图与后端真值分离**:用户标记存 `fateMap`,**不写回 `snapshot.chunks`**;
+  `ContextChunk.fate` 留给阶段 3 的"后端已应用命运"。两者互不污染。
+- **孤儿命运不主动剪除**:lint 禁止 effect 内同步 setState;且所有消费方只按当前
+  chunks 查表,孤儿天然惰性。改"主动剪除"为"惰性无效",代码更简、行为等价。
+- **释放量估算对齐 Hermes 压缩语义**:fold≈80% / drop≈100% / keep=0
+  (`summary_target_ratio=0.20`)。与逐块 token 一样:比例真实、不冒充精确值。
