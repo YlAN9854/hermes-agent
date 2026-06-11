@@ -4,7 +4,7 @@
 > 与 [CLAUDE.md](CLAUDE.md) 分工:CLAUDE.md 是**设计理念**(使命/隐喻/不变量,
 > 与渲染形式无关),本文件是**落地决策 + 路线图**。回顾项目看这一份即可。
 >
-> 状态:分支 `feat/contextvis-occupancy-panel`(已推送)。档1 / 档3 / resume 修复
+> 状态:分支 `feat/contextvis-occupancy-panel`。档1 / 档3 / resume 修复 / 原文检视器
 > 完成;已同步上游。
 
 ---
@@ -31,8 +31,8 @@
 |---|---|---|
 | **适配器**(宿主专属) | 订阅 `/api/events`,把真实数据折成 snapshot;唯一碰宿主事件结构的地方 | `web/src/lib/contextvis/adapter.ts` |
 | **核心**(形态无关) | 数据契约 + 一种渲染;只吃 snapshot | `web/src/lib/contextvis/{types,treemap}.ts`、`web/src/components/ContextVisPanel.tsx` |
-| **挂载壳**(宿主专属) | 定位 + 折叠 + 联动 | `web/src/components/ContextVisOverlay.tsx`、挂载于 `web/src/pages/ChatPage.tsx` |
-| **后端分块**(服务端) | segment→chunk 流水线,策略注册表 | `agent/contextvis/chunking.py` |
+| **挂载壳**(宿主专属) | 浮层定位/折叠 + 右侧栏原文检视 + 持有 snapshot/选中态联动 | `web/src/components/{ContextVisOverlay,ChunkInspector}.tsx`、挂载于 `web/src/pages/ChatPage.tsx` |
+| **后端分块**(服务端) | segment→chunk 流水线,策略注册表,chunk 原文 | `agent/contextvis/chunking.py` |
 | **网关挂钩** | co-emit `context.snapshot` | `tui_gateway/server.py` |
 
 > 黄金法则:渲染层永不直接依赖宿主数据结构;耦合全收敛到适配器与挂载壳。
@@ -64,6 +64,14 @@ resume 重建 agent → `last_prompt_tokens=0` → 原生条与 ContextVis 都�
 两处修:后端 `_seed_context_tokens_from_history`(按已载入历史粗估播种)+ 前端
 adapter 回退(usage=0 时用 chunk 总和补出占用)。
 
+### 原文检视器（方向 C，commit `68ce781a0`）
+点浮层 treemap 某 chunk → 右侧栏 `ChunkInspector` 显示**完整原文**:system
+prompt 节、tool schema JSON、工具调用详情、文件内容、对话原文。其中
+**system/tools 在终端对话里根本看不到,检视器是唯一入口**——补全白盒的
+「可追溯」。后端每 chunk 随 `context.snapshot` 带原文(成员拼接,**32KB 截断**,
+`HERMES_CONTEXTVIS_RAW=0` 可关)。选中态上提 ChatPage,浮层(地图)↔侧栏(详情)
+master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧栏改作检视器。
+
 ---
 
 ## 4. 决策日志(辩过并定下的)
@@ -89,6 +97,12 @@ adapter 回退(usage=0 时用 chunk 总和补出占用)。
   - **比例划分**:treemap 填满,chunk 间比例真实,始终可读(默认);
   - **实际占用**:按 `used/budget` 决定填充高度,上方留 headroom + token 轴 +
     compact 阈值线(读自真实 `compressor.threshold_tokens`)。
+- **原文随快照 push(非 pull)**:浏览器够不到真实 PTY 会话(命令通道未解,见 §7.1),
+  原文只能随 `context.snapshot` 推。每 chunk **截断 32KB** + flag 可关,localhost 可接受。
+- **右侧栏改作 chunk 原文检视器**,删 MODEL/TOOLS(信息在 TUI/浮层已有)。
+  master-detail:浮层=地图、侧栏=详情;选中态上提 ChatPage 共享。
+- **检视器 v1 纯原文**(仅 tool_schema 已是 JSON);按类型的渲染优化(markdown /
+  代码高亮 / 结构化)留后续。
 
 ---
 
@@ -97,12 +111,13 @@ adapter 回退(usage=0 时用 chunk 总和补出占用)。
 ```
 ChunkType   = system | tool_schema | history | file | tool_result   // 5 渲染带
 SegmentRef  { messageIndex?, part? }                                // provenance
-ContextChunk{ id, type, tokens, turn, label,
-              sourceRefs[], group?, members?, turnSpan?, fate? }    // fate 预留给交互
+ContextChunk{ id, type, tokens, turn, label, sourceRefs[],
+              group?, members?, turnSpan?, fate?, raw? }            // raw=原文(检视器用)
 ContextSnapshot{ budget, used, percent, turn, history[],
                  compactions[], chunks[], compactAt? }
 ```
-`fate?: keep|fold|drop` 与 `sourceRefs` 是**交互式压缩的地基**,v1 留空/只读。
+`fate?: keep|fold|drop` 与 `sourceRefs` 是**交互式压缩的地基**,v1 `fate` 留空/只读。
+`raw?` 由检视器消费(后端截断推送)。
 
 ---
 
@@ -111,7 +126,8 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 - **真实数据通道**:dashboard 的 Chat 是 PTY 子进程跑的 TUI(xterm 嵌入)。真实
   `usage`/`context.snapshot` 走 PTY 子进程 gateway「mirror every emit」→ `/api/pub`
   → 服务端 `pub_ws` verbatim → `/api/events?channel=`(与 tool 事件同一条 feed)。
-  **不在** ChatSidebar 的 JSON-RPC sidecar(那是 throwaway 会话,usage≈0)。
+  **不在** dashboard 的 JSON-RPC sidecar(`/api/ws`,throwaway 会话,usage≈0;
+  原 ChatSidebar 已删,但 `gatewayClient` 仍被别处用)。
 - **测试启动**(关键坑):`hermes` 命令默认跑独立安装 `~/.hermes/hermes-agent/`,
   **不是本仓库**;且 `-m tui_gateway.entry` 会先定位包,使 `HERMES_PYTHON_SRC_ROOT`
   单独设无效。正确启动:
@@ -158,6 +174,17 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 
 ## 8. 待决方向
 
-- **A. 交互式压缩**:从纯前端的①②起步(选中标记 + 预览),并行调研③的命令通道。
-- **B. 语义分块实验**:换策略,验证主题聚类/相似合并的效果。
-- **C. 打磨现有**:treemap/浮层 的视觉与交互细节。
+观察(占用/构成/原文)已闭环。下一步候选:
+
+- **A. 交互式压缩(旗舰)**:让视图能"治理"。从纯前端的 ①选中+fate 标记 +
+  ②预览释放量 起步(零风险),并行调研 ③应用 的"浏览器→真实 PTY 会话"命令通道
+  (见 §7.1 硬骨头)。地基(`fate`/`sourceRefs`/`context.plan·apply` 命名空间)已备。
+- **B. 语义分块实验**:把 history「按轮」换主题聚类、tool_schema 换相似工具合并——
+  只改 ChunkStrategy,契约/渲染不变。效果待验。
+- **C2. 检视器类型化渲染**:assistant 文本走 Markdown、代码/JSON 语法高亮、
+  tool_result 结构化(退出码/匹配数高亮)。在方向 C 的纯原文之上做体验优化。
+- **D. 打磨与收尾**:移动端 sheet 触发按钮文案仍是 i18n 的 "model/tools"(需多语言清理);
+  treemap 视觉(配色/字号/带顺序)、浮层交互(拖动/缩放)、截断上限可配。
+
+> 建议优先级:**A**(产品定位的核心价值)> B/C2(增量) > D(收尾)。A 的 ①② 可先落地
+> 出手感,③ 的命令通道是全项目下一个真正的架构决策点。

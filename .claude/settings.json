@@ -3,8 +3,7 @@
     "allow": [
       "Bash(git push *)",
       "Edit(~/.claude/skills/sync-fork-upstream/**)",
-      "Bash(cat /etc/os-release | grep -E '^\\(ID|VERSION_ID\\)=')",
-      "Read(//usr/lib/**)"
+      "Bash(git add *)"
     ]
   }
 }
