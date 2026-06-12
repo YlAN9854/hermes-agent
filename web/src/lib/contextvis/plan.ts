@@ -22,6 +22,29 @@ export type Fate = NonNullable<ContextChunk["fate"]>;
 /** chunkId → 命运。用户意图,前端持有,不写回 snapshot。 */
 export type FateMap = Record<string, Fate>;
 
+/**
+ * 有 message 背书、可经历史压缩落地的类型。
+ * system / tool_schema 的 sourceRefs 只有 `part`、无 messageIndex,**不可 apply**
+ * （它们每轮由 agent 重建,删不掉）——阶段 3 apply 只作用于这三类。
+ */
+export const MESSAGE_BACKED_TYPES: ReadonlySet<ContextChunk["type"]> = new Set([
+  "history",
+  "file",
+  "tool_result",
+]);
+
+/** 当前标记为 drop 且可落地（message 背书）的 chunk id —— 阶段 3 apply 的输入。 */
+export function droppableChunkIds(
+  snapshot: ContextSnapshot,
+  fateMap: FateMap,
+): string[] {
+  return snapshot.chunks
+    .filter(
+      (c) => fateMap[c.id] === "drop" && MESSAGE_BACKED_TYPES.has(c.type),
+    )
+    .map((c) => c.id);
+}
+
 /** fold 后保留的比例(摘要 ≈ 原文的 20%),对齐 Hermes summary_target_ratio。 */
 const SUMMARY_RATIO = 0.2;
 

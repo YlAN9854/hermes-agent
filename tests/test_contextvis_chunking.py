@@ -9,7 +9,10 @@ import json
 import pytest
 
 from agent.contextvis import chunking
-from agent.contextvis.chunking import build_snapshot_chunks
+from agent.contextvis.chunking import (
+    build_snapshot_chunks,
+    drop_indices_for_chunks,
+)
 
 
 class _FakeCompressor:
@@ -53,6 +56,17 @@ def _build():
         {"type": "function", "function": {"name": "write_file", "parameters": {}}},
         {"type": "function", "function": {"name": "web_search", "parameters": {}}},
     ]
+    agent, session = _make()
+    return build_snapshot_chunks(agent, session)
+
+
+def _make():
+    """构造 (agent, session)，供 build_snapshot_chunks / drop_indices_for_chunks 共用。"""
+    tools = [
+        {"type": "function", "function": {"name": "read_file", "parameters": {}}},
+        {"type": "function", "function": {"name": "write_file", "parameters": {}}},
+        {"type": "function", "function": {"name": "web_search", "parameters": {}}},
+    ]
     agent = _FakeAgent(tools)
     history = [
         {"role": "user", "content": "fix the bug in auth"},
@@ -73,7 +87,7 @@ def _build():
         },
         {"role": "tool", "tool_call_id": "c2", "tool_name": "terminal", "content": '{"exit_code": 1}\n5 failed'},
     ]
-    return build_snapshot_chunks(agent, {"history": history})
+    return agent, {"history": history}
 
 
 def test_all_bands_present(patched):
@@ -134,3 +148,47 @@ def test_disabled_sources_dont_crash(patched):
     agent = _FakeAgent([])
     out = build_snapshot_chunks(agent, {"history": []})
     assert "chunks" in out and isinstance(out["chunks"], list)
+
+
+# ── 阶段 3：chunk → message 索引映射（drop_indices_for_chunks） ──────────
+
+
+def _chunk_id(out, *, type_):
+    return next(c["id"] for c in out["chunks"] if c["type"] == type_)
+
+
+def test_drop_indices_file_chunk_resolves_message(patched):
+    agent, session = _make()
+    out = build_snapshot_chunks(agent, session)
+    fid = _chunk_id(out, type_="file")  # read_file 结果 = history[2]
+    assert drop_indices_for_chunks(agent, session, [fid]) == {2}
+
+
+def test_drop_indices_history_turn_resolves_user_assistant(patched):
+    agent, session = _make()
+    out = build_snapshot_chunks(agent, session)
+    hid = _chunk_id(out, type_="history")  # 第1轮 = user(0)+assistant(1)+assistant(3)
+    assert drop_indices_for_chunks(agent, session, [hid]) == {0, 1, 3}
+
+
+def test_drop_indices_ignores_system_and_tool_schema(patched):
+    # system / tool_schema 无 messageIndex → 永远解析成空（apply 不触碰它们）
+    agent, session = _make()
+    out = build_snapshot_chunks(agent, session)
+    sys_id = _chunk_id(out, type_="system")
+    schema_id = _chunk_id(out, type_="tool_schema")
+    assert drop_indices_for_chunks(agent, session, [sys_id, schema_id]) == set()
+
+
+def test_drop_indices_unknown_or_empty(patched):
+    agent, session = _make()
+    assert drop_indices_for_chunks(agent, session, []) == set()
+    assert drop_indices_for_chunks(agent, session, ["no:such:chunk"]) == set()
+
+
+def test_drop_indices_union_across_chunks(patched):
+    agent, session = _make()
+    out = build_snapshot_chunks(agent, session)
+    fid = _chunk_id(out, type_="file")
+    rid = _chunk_id(out, type_="tool_result")  # terminal 结果 = history[4]
+    assert drop_indices_for_chunks(agent, session, [fid, rid]) == {2, 4}

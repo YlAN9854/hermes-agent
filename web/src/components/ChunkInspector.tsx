@@ -13,7 +13,11 @@
 import { RotateCcw, X } from "lucide-react";
 
 import { formatTokenCount } from "@/lib/format";
-import { freedTokens, type Fate } from "@/lib/contextvis/plan";
+import {
+  freedTokens,
+  MESSAGE_BACKED_TYPES,
+  type Fate,
+} from "@/lib/contextvis/plan";
 import type { ContextChunk } from "@/lib/contextvis/types";
 import { cn } from "@/lib/utils";
 
@@ -62,6 +66,8 @@ export function ChunkInspector({
   }
 
   const color = TYPE_COLOR[chunk.type] ?? "#888";
+  // system / tool_schema 无 message 背书,不经历史压缩移除 → 命运标记不可应用。
+  const applicable = MESSAGE_BACKED_TYPES.has(chunk.type);
 
   return (
     <aside className="flex h-full w-full min-w-0 flex-col gap-2 overflow-hidden">
@@ -101,8 +107,14 @@ export function ChunkInspector({
         {chunk.raw != null && <span>{chunk.raw.length.toLocaleString()} 字符</span>}
       </div>
 
-      {/* 命运标记（方向 A 阶段 1）:标 keep/fold/drop → 浮层预览释放量。
-          纯前端意图,不改真实上下文(应用留待阶段 3 的命令通道)。 */}
+      {/* 命运标记（方向 A）:标 keep/fold/drop → 浮层预览释放量;drop 可经
+          「应用」落地真实上下文(阶段 3)。system/tool_schema 不可应用,禁用。 */}
+      {!applicable ? (
+        <div className="rounded border border-current/10 px-2 py-1.5 text-[11px] leading-snug text-text-tertiary">
+          {chunk.type === "system" ? "系统提示" : "工具 schema"}由 agent
+          每轮重建，不经历史压缩移除——不可标记命运。
+        </div>
+      ) : (
       <div className="flex items-center gap-1 px-1">
         {FATE_ACTIONS.map(({ fate: f, label, active }) => {
           const isActive = fate === f;
@@ -141,6 +153,7 @@ export function ChunkInspector({
           <RotateCcw className="h-3.5 w-3.5" />
         </button>
       </div>
+      )}
 
       {/* 原文 */}
       <div className="min-h-0 flex-1 overflow-auto rounded border border-current/10 bg-black/20">

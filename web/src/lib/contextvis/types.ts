@@ -84,6 +84,10 @@ export interface ContextSnapshot {
   chunks: ContextChunk[];
   /** 压缩阈值（绝对 token，与 budget 同尺度）。「实际占用」模式据此画 compact 线。 */
   compactAt?: number;
+  /** 阶段 3：事件帧携带的真实会话 id，apply 按它定位真实 agent。 */
+  sessionId?: string;
+  /** 阶段 3：history 版本，apply 回传做陈旧校验（其间发生 turn → 版本变 → 拒绝）。 */
+  historyVersion?: number;
 }
 
 /** 空快照：尚未收到任何带真实窗口的 session.info 时的初始态。 */

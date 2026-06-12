@@ -3,6 +3,9 @@
 见 agent/contextvis/chunking.py 与根目录 CLAUDE.md。
 """
 
-from agent.contextvis.chunking import build_snapshot_chunks
+from agent.contextvis.chunking import (
+    build_snapshot_chunks,
+    drop_indices_for_chunks,
+)
 
-__all__ = ["build_snapshot_chunks"]
+__all__ = ["build_snapshot_chunks", "drop_indices_for_chunks"]

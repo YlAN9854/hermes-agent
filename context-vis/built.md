@@ -49,8 +49,9 @@ master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧
   (`ContextChunk.fate` 留给阶段 3 的后端确认)。chunk id 确定性,标记跨快照重发存活;
   孤儿条目惰性(消费方只按当前 chunks 查表),无需主动剪除。
 - **零副作用**:不碰 chunking.py / server.py / adapter.ts,不发命令、不改真实上下文。
-  **阶段 3(应用)**——把 fateMap 下发驱动 `compress()`——卡在"浏览器→真实 PTY 会话"
-  命令通道,见 [roadmap.md](roadmap.md)。
+  **阶段 3(应用)**——把 fateMap 下发驱动 `compress()`——其命令通道**已实测可用**
+  (原判"硬骨头"已推翻,证据链见 [phase3-channel.md](phase3-channel.md)),剩选择式 RPC +
+  `sourceRefs` 映射 + 前端 apply 路,纯工程实现。
 
 ---
 
@@ -88,7 +89,8 @@ master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧
 - **小块不显标签是刻意的**:`showLabel = w>44 && h>26`(`ContextVisPanel.tsx`)。
   面积 ∝ token,小块放不下文字会变噪音;信息不丢——悬停 `<title>` + 点击进检视器兜底。
 - **方向 A 先做阶段 1+2、不碰阶段 3**(用户敲定):标记+预览是纯前端零风险,
-  先出"治理"手感;应用(动真上下文)的命令通道是独立架构决策,留下一轮专题。
+  先出"治理"手感;应用(动真上下文)留下一轮。**[后续]** 阶段 3 命令通道经调研 +
+  浏览器只读探针**实测可用**,原判"独立架构决策/硬骨头"已推翻,见 [phase3-channel.md](phase3-channel.md)。
 - **命运标记入口在检视器按钮,不在 treemap 点击**(用户敲定):treemap 点击保持
   =选中看原文;命运靠按钮设、靠叠加渲染显,分工清晰、有空间放释放量估算。
 - **命运意图与后端真值分离**:用户标记存 `fateMap`,**不写回 `snapshot.chunks`**;

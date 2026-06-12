@@ -38,12 +38,15 @@ interface SessionUsage {
 interface ContextSnapshotPayload {
   chunks?: ContextChunk[];
   compact_at?: number;
+  history_version?: number;
 }
 
 interface EventFrame {
   method?: string;
   params?: {
     type?: string;
+    /** 真实会话 id —— 每帧都带（tui_gateway _emit），阶段 3 apply 据此定位真实 agent。 */
+    session_id?: string;
     payload?: { usage?: SessionUsage } & ContextSnapshotPayload;
   };
 }
@@ -95,6 +98,8 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
           const chunks = frame.params?.payload?.chunks;
           if (Array.isArray(chunks)) {
             const compactAt = frame.params?.payload?.compact_at;
+            const sessionId = frame.params?.session_id;
+            const historyVersion = frame.params?.payload?.history_version;
             setSnapshot((prev) => {
               // resume 场景：agent 刚重建，compressor.last_prompt_tokens 未恢复，
               // session.info 的真实 used=0；但 chunks 来自真实已载入的
@@ -107,6 +112,8 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
                 ...prev,
                 chunks,
                 compactAt,
+                ...(sessionId ? { sessionId } : {}),
+                ...(typeof historyVersion === "number" ? { historyVersion } : {}),
                 ...(useEstimate
                   ? {
                       used: chunkTotal,
@@ -158,7 +165,8 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
             { turn, used, percent },
           ].slice(-HISTORY_CAP);
 
-          // chunks / compactAt 由 context.snapshot 事件维护，这里保留上一帧不清空。
+          // chunks / compactAt / sessionId / historyVersion 由 context.snapshot
+          // 事件维护，这里保留上一帧不清空（sessionId 也可从本帧补获）。
           return {
             budget,
             used,
@@ -168,6 +176,8 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
             compactions,
             chunks: prev.chunks,
             compactAt: prev.compactAt,
+            sessionId: frame.params?.session_id ?? prev.sessionId,
+            historyVersion: prev.historyVersion,
           };
         });
       });

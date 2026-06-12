@@ -770,6 +770,8 @@ def _emit_context_snapshot(sid: str) -> None:
 
         payload = build_snapshot_chunks(agent, session)
         if payload.get("chunks"):
+            # 阶段 3 apply 回传此版本做陈旧校验（其间发生 turn → 版本变 → 拒绝）。
+            payload["history_version"] = int(session.get("history_version", 0) or 0)
             _emit("context.snapshot", sid, payload)
     except Exception as e:  # noqa: BLE001 — viz must never break a turn
         logger.debug("context.snapshot emit skipped: %s", e)
@@ -4648,6 +4650,140 @@ def _(rid, params: dict) -> dict:
             # reverts to neutral whether compaction succeeded, was a
             # no-op, or raised.
             _status_update(sid, "ready")
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
+@method("context.apply")
+def _(rid, params: dict) -> dict:
+    """ContextVis 方向 A 阶段 3:把用户标记的 drop 落地到真实上下文。
+
+    v1 只做 ``drop``(删消息),确定性、零 LLM:按 chunk 的 sourceRefs 解析出真实
+    history 下标 → 删除 → 复用 ContextCompressor._sanitize_tool_pairs 修复孤儿
+    tool 配对 → 写回 + bump 版本 + re-emit。永不触碰 system / tool_schema(无消息
+    背书)。门控 HERMES_CONTEXTVIS。证据链见 context-vis/phase3-channel.md。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    if session.get("running"):
+        return _err(
+            rid, 4009, "session busy — /interrupt the current turn before applying"
+        )
+    drop_ids = params.get("drop_chunk_ids") or []
+    if not isinstance(drop_ids, list) or not drop_ids:
+        return _err(rid, 4000, "drop_chunk_ids must be a non-empty list")
+    sid = params.get("session_id", "")
+    client_version = params.get("history_version")
+    try:
+        from agent.contextvis import drop_indices_for_chunks
+        from agent.model_metadata import estimate_request_tokens_rough
+
+        agent = session["agent"]
+        with session["history_lock"]:
+            before = list(session.get("history", []))
+            v0 = int(session.get("history_version", 0) or 0)
+        # 陈旧校验:用户看到的快照与当前历史不一致(其间发生过 turn / 压缩)→ 拒绝。
+        if client_version is not None and int(client_version) != v0:
+            return _err(
+                rid, 4409, "context snapshot is stale — refresh and retry"
+            )
+
+        drop_idx = drop_indices_for_chunks(agent, session, drop_ids)
+        if not drop_idx:
+            return _err(rid, 4004, "no droppable messages resolved from those chunks")
+
+        _sys = getattr(agent, "_cached_system_prompt", "") or ""
+        _tools = getattr(agent, "tools", None) or None
+        before_tokens = estimate_request_tokens_rough(
+            before, system_prompt=_sys, tools=_tools
+        )
+
+        new_history = [m for i, m in enumerate(before) if i not in drop_idx]
+        comp = getattr(agent, "context_compressor", None)
+        if comp is not None:
+            new_history = comp._sanitize_tool_pairs(new_history)
+
+        with session["history_lock"]:
+            if int(session.get("history_version", 0) or 0) != v0:
+                return _err(rid, 4409, "context changed during apply — retry")
+            # 一步撤销快照(其间无新 turn 时可还原)。
+            session["_contextvis_undo"] = {"history": before, "version": v0}
+            session["history"] = new_history
+            session["history_version"] = v0 + 1
+
+        after_tokens = estimate_request_tokens_rough(
+            new_history, system_prompt=_sys, tools=_tools
+        )
+        # 即时占用诚实:让占用条/usage 立刻反映回落,不等下一轮(沿用 resume 修复思路)。
+        if comp is not None:
+            try:
+                comp.last_prompt_tokens = after_tokens
+            except Exception:
+                pass
+
+        info = _session_info(agent, session)
+        _emit_session_info(sid, info)
+        return _ok(
+            rid,
+            {
+                "status": "applied",
+                "removed": len(before) - len(new_history),
+                "before_messages": len(before),
+                "after_messages": len(new_history),
+                "before_tokens": before_tokens,
+                "after_tokens": after_tokens,
+                "dropped_chunk_ids": list(drop_ids),
+                "info": info,
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
+@method("context.undo")
+def _(rid, params: dict) -> dict:
+    """撤销上一次 context.apply(一步)。其间发生新 turn(版本前进)则失效。"""
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    if session.get("running"):
+        return _err(
+            rid, 4009, "session busy — /interrupt the current turn before undo"
+        )
+    sid = params.get("session_id", "")
+    snap = session.get("_contextvis_undo")
+    if not snap:
+        return _err(rid, 4004, "nothing to undo")
+    try:
+        agent = session["agent"]
+        with session["history_lock"]:
+            # 仅当 apply 之后没有新 turn(版本恰好是 apply 写入的 v0+1)才允许还原。
+            if int(session.get("history_version", 0) or 0) != int(snap["version"]) + 1:
+                session.pop("_contextvis_undo", None)
+                return _err(rid, 4409, "history advanced since apply — cannot undo")
+            session["history"] = list(snap["history"])
+            session["history_version"] = int(snap["version"]) + 2
+            session.pop("_contextvis_undo", None)
+
+        from agent.model_metadata import estimate_request_tokens_rough
+
+        comp = getattr(agent, "context_compressor", None)
+        if comp is not None:
+            try:
+                _sys = getattr(agent, "_cached_system_prompt", "") or ""
+                _tools = getattr(agent, "tools", None) or None
+                comp.last_prompt_tokens = estimate_request_tokens_rough(
+                    session["history"], system_prompt=_sys, tools=_tools
+                )
+            except Exception:
+                pass
+
+        info = _session_info(agent, session)
+        _emit_session_info(sid, info)
+        return _ok(rid, {"status": "reverted", "messages": len(session["history"]), "info": info})
     except Exception as e:
         return _err(rid, 5005, str(e))
 

@@ -17,11 +17,14 @@ PTY 子进程 gateway「mirror every emit」
   → 浏览器 adapter.ts
 ```
 
-**不在** dashboard 的 JSON-RPC sidecar(`/api/ws`,throwaway 会话,usage≈0;
-原 ChatSidebar 已删,但 `gatewayClient` 仍被别处用)。
+**不在** dashboard 的 React JSON-RPC sidecar 自建的那个会话(usage≈0)。注意:那只是
+sidecar **自己**的空会话;同一条 `/api/ws` 的 gateway 进程里**也持有 TUI 那个真实会话**
+(attach 模式),按 sid 可达 —— 见下。
 
-> 这条通道是单向的——浏览器**发不回**命令给真实 PTY 会话。这正是方向 A 阶段 3
-> 的硬骨头(见 [roadmap.md](roadmap.md))。
+> **观测**这条 events feed 是单向 push。但"浏览器发不回命令"是早期**误判**:
+> dashboard 下 PTY 走 attach 模式,真实 agent 就在 web_server 进程的 `_sessions`,
+> 前端新开 `/api/ws` 按 sid 即可调 `session.*`(命令通道**已实测可用**)。
+> 详见 [phase3-channel.md](phase3-channel.md);方向 A 阶段 3 据此从"架构决策"降级为工程实现。
 
 ---
 

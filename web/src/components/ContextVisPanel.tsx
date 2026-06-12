@@ -18,7 +18,13 @@ import { useState } from "react";
 
 import { formatTokenCount } from "@/lib/format";
 import { squarify } from "@/lib/contextvis/treemap";
-import { projectFates, type Fate, type FateMap } from "@/lib/contextvis/plan";
+import {
+  droppableChunkIds,
+  projectFates,
+  type Fate,
+  type FateMap,
+} from "@/lib/contextvis/plan";
+import { applyDrops, undoApply } from "@/lib/contextvis/apply";
 import type {
   ChunkType,
   ContextChunk,
@@ -335,6 +341,12 @@ export function ContextVisPanel({
   onClearFates: () => void;
 }) {
   const [mode, setMode] = useState<TreemapMode>("proportional");
+  // 阶段 3「应用」本地状态:确认/进行中、上次释放量(供撤销)、错误。
+  const [applyPhase, setApplyPhase] = useState<"idle" | "confirm" | "running">(
+    "idle",
+  );
+  const [applyError, setApplyError] = useState<string | null>(null);
+  const [lastFreed, setLastFreed] = useState<number | null>(null);
   const { budget, used, percent, compactions, chunks } = snapshot;
   const ready = budget > 0;
   const tone = occupancyTone(percent);
@@ -351,6 +363,47 @@ export function ContextVisPanel({
   ]
     .filter(Boolean)
     .join(" ");
+
+  // 阶段 3:可落地的 drop（仅 message 背书的块）+ 真实会话 id 就绪才能应用。
+  const droppable = droppableChunkIds(snapshot, fateMap);
+  const canApply = droppable.length > 0 && !!snapshot.sessionId;
+
+  const humanizeApplyError = (e: unknown): string => {
+    const m = e instanceof Error ? e.message : String(e);
+    if (/busy/i.test(m)) return "对话进行中，请等当前轮结束再应用";
+    if (/stale|changed|advanced/i.test(m)) return "上下文已更新，请刷新后重试";
+    return m;
+  };
+
+  const doApply = async () => {
+    if (!snapshot.sessionId) return;
+    setApplyPhase("running");
+    setApplyError(null);
+    try {
+      const res = await applyDrops(
+        snapshot.sessionId,
+        snapshot.historyVersion,
+        droppable,
+      );
+      setLastFreed(Math.max(0, res.before_tokens - res.after_tokens));
+      onClearFates();
+    } catch (e) {
+      setApplyError(humanizeApplyError(e));
+    } finally {
+      setApplyPhase("idle");
+    }
+  };
+
+  const doUndo = async () => {
+    if (!snapshot.sessionId) return;
+    setApplyError(null);
+    try {
+      await undoApply(snapshot.sessionId);
+      setLastFreed(null);
+    } catch (e) {
+      setApplyError(humanizeApplyError(e));
+    }
+  };
 
   return (
     <Card className="flex flex-none flex-col gap-2 px-3 py-2">
@@ -438,12 +491,83 @@ export function ContextVisPanel({
                   </>
                 )}
               </span>
+              <div className="flex shrink-0 items-center gap-1">
+                {canApply && applyPhase === "idle" && (
+                  <button
+                    type="button"
+                    onClick={() => setApplyPhase("confirm")}
+                    className="rounded border border-destructive/40 px-1.5 py-0.5 text-[10px] tracking-wide text-destructive hover:bg-destructive/10"
+                  >
+                    应用 drop ({droppable.length})
+                  </button>
+                )}
+                {applyPhase === "confirm" && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={doApply}
+                      className="rounded bg-destructive/90 px-1.5 py-0.5 text-[10px] tracking-wide text-white hover:bg-destructive"
+                    >
+                      确认删除
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setApplyPhase("idle")}
+                      className="rounded px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary hover:text-text-secondary"
+                    >
+                      取消
+                    </button>
+                  </>
+                )}
+                {applyPhase === "running" && (
+                  <span className="px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary">
+                    应用中…
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={onClearFates}
+                  className="rounded px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary hover:text-text-secondary"
+                >
+                  清除标记
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 应用结果（不可逆操作透明）：成功后给一步撤销。独立于预览行——
+              成功会清空 fateMap、预览行随之消失。 */}
+          {applyPhase === "confirm" && (
+            <div className="text-[10px] leading-snug text-text-tertiary">
+              将从真实上下文删除 {droppable.length} 块 · ~
+              {formatTokenCount(projected.freed)} tok，<span className="text-destructive">不可逆</span>
+              （可一步撤销）。
+            </div>
+          )}
+          {lastFreed !== null && (
+            <div className="flex items-center justify-between gap-2 text-xs text-text-secondary">
+              <span className="tabular-nums">
+                已释放 <span className="text-success">~{formatTokenCount(lastFreed)}</span>
+              </span>
               <button
                 type="button"
-                onClick={onClearFates}
-                className="shrink-0 rounded px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary hover:text-text-secondary"
+                onClick={doUndo}
+                className="shrink-0 rounded border border-current/20 px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary hover:text-text-secondary"
               >
-                清除标记
+                撤销
+              </button>
+            </div>
+          )}
+          {applyError && (
+            <div className="flex items-center justify-between gap-2 text-[11px] text-destructive">
+              <span className="min-w-0">{applyError}</span>
+              <button
+                type="button"
+                onClick={() => setApplyError(null)}
+                aria-label="dismiss error"
+                className="shrink-0 rounded px-1 text-text-tertiary hover:text-text-secondary"
+              >
+                ✕
               </button>
             </div>
           )}

@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git push *)",
       "Edit(~/.claude/skills/sync-fork-upstream/**)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(npx tsc *)"
     ]
   }
 }
