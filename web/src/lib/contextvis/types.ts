@@ -66,6 +66,21 @@ export interface ContextSample {
   percent: number;
 }
 
+/**
+ * 压缩闸门待决态（阶段 A 对偶）：auto-compress 触发时,后端把"系统的压缩计划"
+ * push 过来,等用户确认。见 context-vis/compaction-gate.md。
+ */
+export interface PendingCompaction {
+  /** 系统计划:chunkId → 命运(fold/keep)。用 treemap fate 叠加渲染。 */
+  systemFate: Record<string, "keep" | "fold" | "drop">;
+  currentTokens: number;
+  currentPercent: number;
+  estAfterTokens: number;
+  estAfterPercent: number;
+  /** 将折叠的对话轮数（用于计划文字）。 */
+  foldTurns: number;
+}
+
 /** 容器 = 一组块，填进一个有预算上限的容器。 */
 export interface ContextSnapshot {
   /** 模型窗口大小（usage.context_max）—— 真实窗口。 */
@@ -78,8 +93,14 @@ export interface ContextSnapshot {
   turn: number;
   /** 档1：逐轮占用采样，环形截断。 */
   history: ContextSample[];
-  /** 观测到的压缩事件（靠 session.info 采样推断）。 */
+  /** 观测到的压缩事件（靠 session.info 采样推断,best-effort，用于 sparkline 标记）。 */
   compactions: CompactionEvent[];
+  /**
+   * 真实累计压缩次数（来自 usage.compressions / comp.compression_count）。
+   * 用于显示「压缩 ×N」—— 一轮内多次 mid-turn 压缩,session.info 只采样一次,
+   * 推断事件会少计,故次数以此真实值为准。
+   */
+  compressionCount?: number;
   /** 档1 留空；档3 填真值。非空时上层渲染按类型树图。 */
   chunks: ContextChunk[];
   /** 压缩阈值（绝对 token，与 budget 同尺度）。「实际占用」模式据此画 compact 线。 */
@@ -88,6 +109,8 @@ export interface ContextSnapshot {
   sessionId?: string;
   /** 阶段 3：history 版本，apply 回传做陈旧校验（其间发生 turn → 版本变 → 拒绝）。 */
   historyVersion?: number;
+  /** 压缩闸门待决：非空时面板弹闸门、treemap 画系统计划。用户应答 / 新快照后清空。 */
+  pendingCompaction?: PendingCompaction;
 }
 
 /** 空快照：尚未收到任何带真实窗口的 session.info 时的初始态。 */

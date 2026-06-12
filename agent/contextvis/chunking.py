@@ -408,10 +408,17 @@ _STRATEGIES: Dict[str, Callable[[str, List[Segment]], List[Chunk]]] = {
 
 # ── ③ 流水线入口 ─────────────────────────────────────────────────────
 
-def build_snapshot_chunks(agent: Any, session: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def build_snapshot_chunks(
+    agent: Any,
+    session: Optional[Dict[str, Any]] = None,
+    scale_to: Optional[int] = None,
+) -> Dict[str, Any]:
     """跑 segment → chunk 流水线，返回可 JSON 序列化的 context.snapshot 载荷。
 
     best-effort：任一来源失败只丢该来源，不抛出（viz 不该影响对话）。
+
+    ``scale_to``：缩放目标 token 覆盖。默认用 ``comp.last_prompt_tokens``(真实占用);
+    压缩闸门"压缩后立即补发"场景下真实计数还没回来(=-1/0),传入估算值缩放。
     """
     session = session or {}
     history = list(session.get("history") or [])
@@ -421,9 +428,13 @@ def build_snapshot_chunks(agent: Any, session: Optional[Dict[str, Any]] = None) 
     segments += _segment_tool_schemas(agent)
     segments += _segment_history(history)
 
-    # 整体缩放到真实总占用。
+    # 整体缩放到真实总占用（或调用方给的覆盖值）。
     comp = getattr(agent, "context_compressor", None)
-    target = int(getattr(comp, "last_prompt_tokens", 0) or 0) if comp else 0
+    target = (
+        int(scale_to)
+        if scale_to is not None
+        else (int(getattr(comp, "last_prompt_tokens", 0) or 0) if comp else 0)
+    )
     _scale(segments, target)
 
     # 压缩阈值（绝对 token，与 budget 同尺度，不参与上面的缩放）——

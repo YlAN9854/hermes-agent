@@ -1902,6 +1902,39 @@ The user has requested that this compaction PRIORITISE preserving all informatio
         compress_end = self._find_tail_cut_by_tokens(messages, compress_start)
         return compress_start < compress_end
 
+    def plan_compaction(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Non-destructive preview of how compress() would partition history.
+
+        Reuses the SAME boundary logic compress() uses (head/tail protection),
+        but runs neither the LLM summary nor the tool-result prune, and never
+        mutates ``messages``.  Returns the three index regions::
+
+            [0, head_end)         → keep (head: system prompt + first exchange)
+            [head_end, tail_start) → fold (middle, will become a summary)
+            [tail_start, n)       → keep (tail: recent ~token-budget window)
+
+        Powers the ContextVis compaction gate, which paints this "system plan"
+        onto the treemap with the same fate overlay direction A uses, so the
+        user can see what auto-compaction intends before it runs (zero LLM).
+        """
+        n = len(messages)
+        head_end = min(
+            self._align_boundary_forward(messages, self._protect_head_size(messages)), n
+        )
+        # _find_tail_cut_by_tokens 在极短历史上可能返回 > n(尾部保护把"最近 user"
+        # 推到末尾之外);夹到 [head_end, n] 才是真正可折叠的中段右界。
+        tail_start = min(self._find_tail_cut_by_tokens(messages, head_end), n)
+        tail_start = max(tail_start, head_end)
+        return {
+            "n": n,
+            "head_end": head_end,
+            "tail_start": tail_start,
+            # 中段为空(全被头尾保护)→ 无可折叠,闸门应跳过
+            "has_middle": tail_start > head_end,
+            "summary_target_ratio": self.summary_target_ratio,
+            "context_length": self.context_length,
+        }
+
     # ------------------------------------------------------------------
     # Main compression entry point
     # ------------------------------------------------------------------

@@ -30,10 +30,10 @@ export interface UndoResult {
   messages: number;
 }
 
-// 单例:apply / undo 共用一条按需建立的 /api/ws 连接。
+// 单例:apply / undo / 压缩闸门应答共用一条按需建立的 /api/ws 连接。
 let _client: GatewayClient | null = null;
 
-async function ensureClient(): Promise<GatewayClient> {
+export async function ensureClient(): Promise<GatewayClient> {
   if (!_client) _client = new GatewayClient();
   if (_client.state !== "open") {
     // 连接断了(close/error)就重建一个干净的。

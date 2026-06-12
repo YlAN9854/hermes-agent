@@ -37,6 +37,19 @@
 **地基已备**:`sourceRefs`(provenance,编辑能落到真实 message)、`fate` 字段、
 预留 `context.plan`(纯预览投影)/`context.apply`(落地)RPC 命名空间、建议策略注册表。
 
+### 压缩闸门(把静默 auto-compress 改成用户确认)
+ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理(上面 A 路)之外,
+**系统想动手(到阈值要压)时也必须经用户**。证据链与设计见 [compaction-gate.md](compaction-gate.md)。
+1. ✅ **第一阶段(纯预览 + 确认)** — **已建成**,见 [built.md](built.md)。拦
+   [conversation_loop.py:3812](../agent/conversation_loop.py#L3812) → treemap 画系统计划 +
+   占用投影 → 继续 / 推迟(300s 超时自动继续)。复用审批基建,opt-in
+   `HERMES_CONTEXTVIS_GATE`。实测次数/占用与 TUI 一致。
+2. ⬜ **第二阶段(闸门内编辑)**:在闸门里开放 A-v1 的 drop 编辑 + "阈值线驱动的三选择"
+   (接受系统方案 / 编辑后直接继续 / 编辑后让系统补压)。**先解两暗礁**:① running 闸冲突
+   (`context.apply` 在 running 时拒,闸门窗口需放行)② 循环本地 `messages` 与
+   `session["history"]` 对账。
+3. ⬜ **第三阶段**:A-v2(fold)就绪后编辑更丰富;横切"编辑建议"(系统预 mark 建议 fate)。
+
 ### 语义分块(实验)
 把 history 的"按轮"换成**主题聚类**(主线/支线)、tool_schema 换成**相似工具合并**。
 **只改 ChunkStrategy**,契约/渲染不变。效果待实验,架构已为它留好口。
@@ -51,6 +64,8 @@
   落地闭环打通(`context.apply`,实测 TUI/treemap 同步回落)。**剩 A-v2 = fold**:复用
   `context_compressor._generate_summary` 把 fold 块摘要化(LLM 路,需失败处理 + 多段摘要置放);
   再往后 keep-as-pin、系统建议命运、sub-agent 执行。
+- **G. 压缩闸门**:第一阶段(预览 + 确认)**已建成**。**剩第二阶段 = 闸门内编辑**(见上路线图),
+  与 A-v2 互补——A 是用户主动治理,G 是系统触发时用户把关。
 - **B. 语义分块实验**:把 history「按轮」换主题聚类、tool_schema 换相似工具合并——
   只改 ChunkStrategy,契约/渲染不变。效果待验。
 - **C2. 检视器类型化渲染**:assistant 文本走 Markdown、代码/JSON 语法高亮、
@@ -59,5 +74,6 @@
   treemap 视觉(配色/字号/带顺序)、浮层交互(拖动/缩放)、截断上限可配;
   小块标签体感(降阈值 / 选中强制显标签 / band 级兜底标签)。
 
-> 建议优先级:**A-v2 fold**(把治理能力补全,复用现成摘要轮子)> B/C2(增量) > D(收尾)。
+> 建议优先级:**A-v2 fold** 或 **G 闸门第二阶段**(两者都把治理补全,且共享 fate 渲染 +
+> `_generate_summary`)> B/C2(增量) > D(收尾)。
 > A 的 ①②③(drop)已闭环出手感;下一步是 fold —— 风险在 LLM 摘要的失败处理与多段置放。

@@ -25,6 +25,7 @@ import {
   type FateMap,
 } from "@/lib/contextvis/plan";
 import { applyDrops, undoApply } from "@/lib/contextvis/apply";
+import { respondCompaction } from "@/lib/contextvis/gate";
 import type {
   ChunkType,
   ContextChunk,
@@ -348,6 +349,8 @@ export function ContextVisPanel({
   const [applyError, setApplyError] = useState<string | null>(null);
   const [lastFreed, setLastFreed] = useState<number | null>(null);
   const { budget, used, percent, compactions, chunks } = snapshot;
+  // 「压缩 ×N」用真实累计次数(一轮多次压缩,推断的事件数组会少计)。
+  const compactCount = snapshot.compressionCount ?? compactions.length;
   const ready = budget > 0;
   const tone = occupancyTone(percent);
   const hasChunks = chunks.length > 0;
@@ -405,6 +408,28 @@ export function ContextVisPanel({
     }
   };
 
+  // ── 压缩闸门(auto-compress 拦截预览)──────────────────────────────
+  // 用"已应答的那个 pending 对象引用"判定,而非布尔 + effect(避开
+  // react-hooks/set-state-in-effect)。adapter 每来一份新待决态都是新对象引用,
+  // 故新闸门自动重新激活;应答后记下当前引用即隐藏;后端 re-emit 清空 pending。
+  const pending = snapshot.pendingCompaction;
+  const [respondedPending, setRespondedPending] =
+    useState<typeof pending>(undefined);
+  const gateActive = !!pending && pending !== respondedPending;
+  // 闸门激活时,treemap 改画"系统的压缩计划";否则画用户自己的命运标记。
+  const effectiveFateMap = gateActive ? pending!.systemFate : fateMap;
+
+  const respondGate = async (choice: "continue" | "defer") => {
+    setRespondedPending(pending); // 乐观隐藏;后端 re-emit 会清 pendingCompaction
+    if (snapshot.sessionId) {
+      try {
+        await respondCompaction(snapshot.sessionId, choice);
+      } catch {
+        /* 失败也别卡住:超时后端会按 continue 自动压 */
+      }
+    }
+  };
+
   return (
     <Card className="flex flex-none flex-col gap-2 px-3 py-2">
       <div className="flex items-center justify-between gap-2">
@@ -431,6 +456,47 @@ export function ContextVisPanel({
         <div className="py-2 text-center text-xs text-text-secondary">等待上下文…</div>
       ) : (
         <>
+          {/* 压缩闸门：auto-compress 拦截预览。treemap 已画系统计划(中段折叠/首尾保留)。 */}
+          {gateActive && (
+            <div className="flex flex-col gap-1.5 rounded border border-warning/40 bg-warning/10 px-2 py-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-warning">
+                <span className="text-display tracking-wider">上下文将压缩</span>
+                <span className="tabular-nums text-text-secondary">
+                  {pending!.currentPercent}%
+                  <span className="text-text-tertiary">→</span>
+                  ~{pending!.estAfterPercent}%
+                </span>
+              </div>
+              <div className="text-[11px] leading-snug text-text-secondary">
+                系统计划:折叠 {pending!.foldTurns} 轮为摘要、保留首轮+最近窗口
+                <span className="text-text-tertiary">
+                  （预计释放 ~
+                  {formatTokenCount(
+                    Math.max(0, pending!.currentTokens - pending!.estAfterTokens),
+                  )}
+                  ）
+                </span>
+                。下方 treemap 已画出此计划。
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => respondGate("continue")}
+                  className="rounded bg-warning/90 px-2 py-0.5 text-[11px] font-medium tracking-wide text-black hover:bg-warning"
+                >
+                  继续压缩
+                </button>
+                <button
+                  type="button"
+                  onClick={() => respondGate("defer")}
+                  className="rounded border border-current/25 px-2 py-0.5 text-[11px] tracking-wide text-text-secondary hover:text-text-primary"
+                >
+                  推迟
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* 占用对抗上限：始终可读的细条。 */}
           <div
             className="relative h-2 w-full overflow-hidden rounded-full bg-current/10"
@@ -467,9 +533,9 @@ export function ContextVisPanel({
               {formatTokenCount(used)}
               <span className="text-text-tertiary"> / {formatTokenCount(budget)}</span>
             </span>
-            {compactions.length > 0 && (
+            {compactCount > 0 && (
               <span className="text-text-tertiary">
-                压缩 ×{compactions.length}
+                压缩 ×{compactCount}
                 {lastDrop > 0 && (
                   <span className="text-destructive"> −{formatTokenCount(lastDrop)}</span>
                 )}
@@ -578,7 +644,7 @@ export function ContextVisPanel({
               mode={mode}
               selected={selected}
               onSelect={onSelect}
-              fateMap={fateMap}
+              fateMap={effectiveFateMap}
             />
           )}
 

@@ -41,6 +41,10 @@ export function ContextVisOverlay({
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
+  // 压缩闸门待决时强制展开(派生,不用 effect-setState):别折叠着错过确认时刻。
+  // 闸门清除后回到用户自己的折叠偏好。
+  const showCollapsed = collapsed && !snapshot.pendingCompaction;
+
   // 没有真实窗口（尚未开始对话）时不挂任何东西，保持终端干净。
   if (snapshot.budget <= 0) return null;
 
@@ -49,7 +53,7 @@ export function ContextVisOverlay({
 
   return (
     <div className="absolute right-2 top-2 z-10 w-[440px] max-w-[calc(100%-1rem)]">
-      {collapsed ? (
+      {showCollapsed ? (
         <button
           type="button"
           onClick={() => setCollapsed(false)}
@@ -69,14 +73,14 @@ export function ContextVisOverlay({
             />
           </span>
           <span className={cn("text-xs font-medium tabular-nums", tone.text)}>{pct}%</span>
-          {snapshot.compactions.length > 0 && (
+          {(snapshot.compressionCount ?? snapshot.compactions.length) > 0 && (
             <span className="text-xs text-text-tertiary">
-              ×{snapshot.compactions.length}
+              ×{snapshot.compressionCount ?? snapshot.compactions.length}
             </span>
           )}
         </button>
       ) : (
-        <div className="max-h-[calc(100%-0.5rem)] overflow-y-auto rounded-lg shadow-xl">
+        <div className="max-h-[calc(100%-0.5rem)] overflow-y-auto rounded-lg bg-background-base shadow-xl">
           <ContextVisPanel
             snapshot={snapshot}
             selected={selected}

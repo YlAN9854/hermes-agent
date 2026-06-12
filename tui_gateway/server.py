@@ -986,7 +986,7 @@ def _start_agent_build(sid: str, session: dict) -> None:
                 )
 
                 register_gateway_notify(
-                    key, lambda data: _emit("approval.request", sid, data)
+                    key, lambda data: _emit(data.get("_event", "approval.request") if isinstance(data, dict) else "approval.request", sid, data)
                 )
                 notify_registered = True
                 load_permanent_allowlist()
@@ -2121,7 +2121,7 @@ def _sync_session_key_after_compress(
         try:
             register_gateway_notify(
                 new_session_id,
-                lambda data: _emit("approval.request", sid, data),
+                lambda data: _emit(data.get("_event", "approval.request") if isinstance(data, dict) else "approval.request", sid, data),
             )
         except Exception:
             pass
@@ -3275,7 +3275,7 @@ def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
     try:
         from tools.approval import register_gateway_notify, load_permanent_allowlist
 
-        register_gateway_notify(key, lambda data: _emit("approval.request", sid, data))
+        register_gateway_notify(key, lambda data: _emit(data.get("_event", "approval.request") if isinstance(data, dict) else "approval.request", sid, data))
         load_permanent_allowlist()
     except Exception:
         pass
@@ -6703,6 +6703,32 @@ def _(rid, params: dict) -> dict:
                     session["session_key"],
                     params.get("choice", "deny"),
                     resolve_all=params.get("all", False),
+                )
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5004, str(e))
+
+
+@method("compaction.respond")
+def _(rid, params: dict) -> dict:
+    """ContextVis 压缩闸门应答:用户在 dashboard 点「继续/推迟」→ 解阻塞 agent 线程。
+
+    镜像 approval.respond——闸门复用同一套审批队列(见 agent/compaction_gate.py +
+    context-vis/compaction-gate.md)。choice ∈ {"continue","defer"}。
+    """
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    try:
+        from tools.approval import resolve_gateway_approval
+
+        return _ok(
+            rid,
+            {
+                "resolved": resolve_gateway_approval(
+                    session["session_key"],
+                    params.get("choice", "continue"),
                 )
             },
         )

@@ -67,6 +67,31 @@ master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧
 - **实测通过**:标多轮用户输入 → 丢弃 → TUI 占比 + treemap 同步回落、token 真减少;撤销还原;
   对话进行中应用被礼貌拒绝。**v2 = fold**(复用 `_generate_summary`),见 [roadmap.md](roadmap.md)。
 
+### 压缩闸门 · 第一阶段(把 auto-compress 从静默改成用户确认)
+ContextVis 最贴使命的一块:Hermes 到阈值就**静默**压缩,违背「干预必须透明」。闸门在
+auto-compress 触发处拦一道,把"系统的压缩计划"用 treemap 画给用户看 + 占用前后投影,
+**确认(继续)或推迟**后才压。调研证据链见 [compaction-gate.md](compaction-gate.md)。
+- **复用审批基建,不造新控制流**:`agent/compaction_gate.py` `request_compaction_decision`
+  用 [tools/approval.py] 的 `_await_gateway_decision`(阻塞 agent 线程 + 300s 超时 + 心跳)。
+  超时 / 无 dashboard(无 notify_cb)/ 未开闸 → 返回 None → 照常自动压(**无人值守天然安全**)。
+- **统一模型**:系统压缩策略 = 一份 fate 计划(保头尾=keep、中段=fold)。
+  `ContextCompressor.plan_compaction`(纯函数,零 LLM,复用 `_protect_head_size` /
+  `_find_tail_cut_by_tokens` 算边界)→ chunk 按 `sourceRefs` 落点派系统 fate →
+  **用 A 路同一套 treemap 叠加 + 占用投影**画出来,作者从"用户"换成"系统"。
+- **插桩** [conversation_loop.py:3812](../agent/conversation_loop.py#L3812)(should_compress 命中后、压缩前);
+  只拦主动阈值路,反应式溢出压缩保持自动兜底。
+- **RPC**:server.py 注册的 notify lambda 加 `_event` 路由 + 新 `compaction.respond`(镜像 approval.respond)。
+- **前端**:`gate.ts respondCompaction`(复用 apply 的 `/api/ws`);`ContextVisPanel` 闸门条
+  (`X%→~Y%` + 折叠 N 轮 + 继续/推迟)+ 闸门激活时 treemap 改画系统计划(`effectiveFateMap`);
+  `ContextVisOverlay` 待决时自动展开。门控 env `HERMES_CONTEXTVIS_GATE`(默认关,opt-in)。
+- **闸门 turn 中途触发的两个一致性修复**:① 闸门事件 + 压缩后都**主动补发新鲜快照**
+  (`emit_post_compaction_snapshot`,经 notify 桥,`build_snapshot_chunks(scale_to=)` 缩放)——
+  否则 treemap 卡在轮初/压缩前;② 「压缩 ×N」改用**真实累计计数** `compressionCount`
+  (一轮多次 mid-turn 压缩,推断事件会少计)。
+- **实测通过**:顶过阈值 → 闸门条 + treemap 画系统计划 → 继续→真压、treemap/占用/次数同步回落
+  与 TUI 一致 / 推迟→本轮不压、下轮再问;关旗标 → 回到静默自动压。**第二阶段 = 闸门内编辑**
+  (开放 drop/fold),需先解 running 闸冲突 + `messages`↔history 对账,见 [compaction-gate.md](compaction-gate.md)。
+
 ---
 
 ## 决策日志(辩过并定下的)
@@ -125,3 +150,17 @@ master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧
   session_id 轮转/DB 续写(v1 够用,留待需要持久化时再说)。
 - **陈旧校验靠 `history_version`**:快照随事件带版本,apply 回传;其间发生 turn/压缩 →
   版本变 → 后端拒(4409),前端提示刷新。避免在过时视图上误删。
+- **压缩闸门复用审批基建,不造新控制流**(调研结论):`_await_gateway_decision` 已是
+  "阻塞 agent 线程等用户决定 + 超时 + 心跳"的成熟原语;闸门只是新增一个 `kind=compaction`
+  载荷 + `compaction.respond`。证据见 [compaction-gate.md](compaction-gate.md)。
+- **闸门 opt-in、默认关**(`HERMES_CONTEXTVIS_GATE`):改的是核心 agent 行为;无 notify_cb
+  (无 dashboard)/ 超时 → 自动继续,**无人值守天然不被挂死**,是结构性保证。
+- **闸门第一阶段纯预览、不编辑**(用户敲定):绕开"闸门内编辑"的两暗礁(running 闸冲突、
+  `messages`↔`session["history"]` 对账),真低风险。编辑留第二阶段。
+- **系统计划 = 用户计划同一套渲染**:闸门激活时 treemap 喂 `pending.systemFate` 而非
+  用户 `fateMap`(`effectiveFateMap`)。fate 计划无论作者是系统还是用户,预览/落地同一条路。
+- **turn 中途变更要主动补发快照**:闸门/压缩都发生在 turn 中途,而常规 `context.snapshot`
+  只在轮末发 → 必须 `emit_post_compaction_snapshot` 经 notify 桥即时补发,否则 treemap 滞后。
+  真实 token 未回来时用 `estimate_request_tokens_rough` + `build_snapshot_chunks(scale_to=)`。
+- **「压缩 ×N」用真实累计计数,不用推断事件数**:一轮多次 mid-turn 压缩,session.info 只
+  采样一次会少计 → 改用 `usage.compressions` / `comp.compression_count`(`compressionCount`)。

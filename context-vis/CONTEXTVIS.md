@@ -7,8 +7,9 @@
 > 与渲染无关);本目录是**落地决策 + 路线图**。
 >
 > 状态:分支 `feat/contextvis-occupancy-panel`。档1 / 档3 / resume 修复 / 原文检视器 /
-> 方向 A 阶段 1+2(标记+预览)/ **阶段 3 v1(应用 drop)** 完成——观察→治理→落地闭环打通;
-> 已同步上游。下一步:方向 A **v2 = fold**(复用 `_generate_summary`),详见 [roadmap.md](roadmap.md)。
+> 方向 A 阶段 1+2(标记+预览)/ **阶段 3 v1(应用 drop)** / **压缩闸门第一阶段(预览+确认)**
+> 完成——观察→治理→落地 + 系统压缩前用户把关均闭环;已同步上游。下一步:**A-v2 fold** 或
+> **闸门第二阶段(闸门内编辑)**,详见 [roadmap.md](roadmap.md)。
 
 ---
 
@@ -64,5 +65,6 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 | 真实数据怎么流、怎么本地跑起来调试 | [dataflow.md](dataflow.md) — 数据流 + 部署坑 |
 | Hermes 现在自动怎么压缩上下文(方向 A 的基线) | [compression-baseline.md](compression-baseline.md) |
 | 阶段 3 命令通道为何可行(架构真相 + 实测证据) | [phase3-channel.md](phase3-channel.md) |
+| 压缩闸门（拦 auto-compress 改用户确认）调研 | [compaction-gate.md](compaction-gate.md) |
 | 接下来去哪、优先级 | [roadmap.md](roadmap.md) — 路线图 + 待决方向 |
 | 设计理念 / 不变量(渲染无关) | [../CLAUDE.md](../CLAUDE.md) |

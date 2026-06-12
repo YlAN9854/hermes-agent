@@ -3810,16 +3810,35 @@ def run_conversation(
                     )
 
                 if agent.compression_enabled and _compressor.should_compress(_real_tokens):
-                    agent._safe_print("  ⟳ compacting context…")
-                    messages, active_system_prompt = agent._compress_context(
-                        messages, system_message,
-                        approx_tokens=agent.context_compressor.last_prompt_tokens,
-                        task_id=effective_task_id,
-                    )
-                    # Compression created a new session — clear history so
-                    # _flush_messages_to_session_db writes compressed messages
-                    # to the new session (see preflight compression comment).
-                    conversation_history = None
+                    # ContextVis 压缩闸门(opt-in,HERMES_CONTEXTVIS_GATE):拦一道,把
+                    # 系统的压缩计划发给 dashboard 预览,用户确认 / 推迟。无人值守或未开闸
+                    # → None → 照常自动压(见 context-vis/compaction-gate.md)。
+                    try:
+                        from agent.compaction_gate import request_compaction_decision
+                        _gate_decision = request_compaction_decision(agent, messages)
+                    except Exception:
+                        _gate_decision = None
+                    if _gate_decision == "defer":
+                        agent._safe_print("  ⟳ compaction deferred (user)")
+                    else:
+                        agent._safe_print("  ⟳ compacting context…")
+                        messages, active_system_prompt = agent._compress_context(
+                            messages, system_message,
+                            approx_tokens=agent.context_compressor.last_prompt_tokens,
+                            task_id=effective_task_id,
+                        )
+                        # Compression created a new session — clear history so
+                        # _flush_messages_to_session_db writes compressed messages
+                        # to the new session (see preflight compression comment).
+                        conversation_history = None
+                        # 压缩在 turn 中途发生,而常规 context.snapshot 要等整轮结束才发——
+                        # 立即补发一份新鲜快照,让 dashboard 的 treemap/占用即时回落
+                        # (非交互会话自动 no-op;见 context-vis/compaction-gate.md)。
+                        try:
+                            from agent.compaction_gate import emit_post_compaction_snapshot
+                            emit_post_compaction_snapshot(agent, messages)
+                        except Exception:
+                            pass
                 
                 # Save session log incrementally (so progress is visible even if interrupted)
                 agent._session_messages = messages
