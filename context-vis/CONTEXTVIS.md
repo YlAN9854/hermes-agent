@@ -7,9 +7,8 @@
 > 与渲染无关);本目录是**落地决策 + 路线图**。
 >
 > 状态:分支 `feat/contextvis-occupancy-panel`。档1 / 档3 / resume 修复 / 原文检视器 /
-> 方向 A 阶段 1+2(命运标记+预览)完成;已同步上游。下一步:方向 A 阶段 3(应用)——
-> 命令通道**已实测可用**(原判"硬骨头"推翻,见 [phase3-channel.md](phase3-channel.md)),
-> 剩选择式 RPC + apply 路,详见 [roadmap.md](roadmap.md)。
+> 方向 A 阶段 1+2(标记+预览)/ **阶段 3 v1(应用 drop)** 完成——观察→治理→落地闭环打通;
+> 已同步上游。下一步:方向 A **v2 = fold**(复用 `_generate_summary`),详见 [roadmap.md](roadmap.md)。
 
 ---
 

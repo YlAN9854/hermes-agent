@@ -85,7 +85,9 @@ per-session usage:
 4. **并发闸**:`session.compress` 在 `session["running"]` 时拒(已有);apply 按钮仅空闲可点。
    irreversible → 配合 `session.undo`([server.py:4531](../tui_gateway/server.py#L4531))做安全网。
 
-**唯一残留待测**:写路径首次实跑时确认并发闸 + 跨连接写确实落到目标 sid(读已证,写极大概率)。
+**写路径已实测通过**(阶段 3 v1):浏览器 `context.apply` 跨连接按 sid 删消息,真实
+agent 的 TUI 占比条 + treemap 同步回落、token 真减少、撤销还原、对话进行中被礼貌拒绝。
+读已证、写已证,通道完全坐实。
 
 ---
 

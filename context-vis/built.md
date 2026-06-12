@@ -48,10 +48,24 @@ master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧
 - **状态**:命运存 ChatPage 的 `fateMap`(用户意图),**不写回 `snapshot.chunks`**
   (`ContextChunk.fate` 留给阶段 3 的后端确认)。chunk id 确定性,标记跨快照重发存活;
   孤儿条目惰性(消费方只按当前 chunks 查表),无需主动剪除。
-- **零副作用**:不碰 chunking.py / server.py / adapter.ts,不发命令、不改真实上下文。
-  **阶段 3(应用)**——把 fateMap 下发驱动 `compress()`——其命令通道**已实测可用**
-  (原判"硬骨头"已推翻,证据链见 [phase3-channel.md](phase3-channel.md)),剩选择式 RPC +
-  `sourceRefs` 映射 + 前端 apply 路,纯工程实现。
+- **零副作用**:阶段 1+2 不碰 server.py、不发命令、不改真实上下文(命运只是前端意图)。
+
+### 交互式压缩 · 阶段 3 v1(应用 drop,落地真实上下文)
+治理闭环最后一步:把标记的 **drop 真正从真实 agent 的上下文删除**。通道已坐实(见
+[phase3-channel.md](phase3-channel.md)),v1 **只做 drop、确定性、零 LLM**(fold 留 v2)。
+- **后端**`tui_gateway/server.py`:新 RPC `context.apply`(删消息 → 复用
+  `ContextCompressor._sanitize_tool_pairs` 缝合孤儿 tool 配对 → 写回 `session["history"]`
+  + bump `history_version` + 重置 `last_prompt_tokens` 让占用即时回落 → re-emit)与
+  `context.undo`(一步撤销快照)。`context.snapshot` 载荷补 `history_version`。
+- **映射**`agent/contextvis/chunking.py`:`drop_indices_for_chunks` 用 `sourceRefs.messageIndex`
+  把 drop 的 chunk 翻成真实 history 下标;**只认 history/file/tool_result**,system/tool_schema
+  无 messageIndex 自动忽略。
+- **前端**`web/src/lib/contextvis/apply.ts`(复用 `GatewayClient` 发 RPC,sid 从事件帧拿);
+  浮层预览行加「应用 drop」+ 两步确认 + 不可逆提示 + 成功后「撤销」+ 错误行;
+  检视器对 system/tool_schema 禁用命运按钮。
+- **守卫**:`running` 拒(4009)、`history_version` 陈旧拒(4409)、门控 `HERMES_CONTEXTVIS`。
+- **实测通过**:标多轮用户输入 → 丢弃 → TUI 占比 + treemap 同步回落、token 真减少;撤销还原;
+  对话进行中应用被礼貌拒绝。**v2 = fold**(复用 `_generate_summary`),见 [roadmap.md](roadmap.md)。
 
 ---
 
@@ -99,3 +113,15 @@ master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧
   chunks 查表,孤儿天然惰性。改"主动剪除"为"惰性无效",代码更简、行为等价。
 - **释放量估算对齐 Hermes 压缩语义**:fold≈80% / drop≈100% / keep=0
   (`summary_target_ratio=0.20`)。与逐块 token 一样:比例真实、不冒充精确值。
+- **阶段 3 v1 只做 drop**(用户敲定):确定性、零 LLM,先把"浏览器→真实 agent 写"
+  这条路用最小风险跑通;fold(复用 `_generate_summary`)留 v2。
+- **apply 不复用 `_compress_context` 的位置式逻辑**:那是按头/尾位置切;我们要**按内容
+  选**。直接在 `session["history"]` 上删指定下标(与 `session.undo` 同款内存写回),
+  只复用 `_sanitize_tool_pairs` 缝合——选择层我们写,执行层转包既有引擎。
+- **apply 只作用于 message 背书的块**(history/file/tool_result):system/tool_schema 每轮
+  由 agent 重建、无 messageIndex,删不掉 → 检视器对这两类**禁用命运按钮**(诚实)。
+- **一步内存撤销,非 DB 续写**:`session["_contextvis_undo"]` 存 apply 前快照,其间无新
+  turn 时可还原;`session.undo` 只 pop 末轮、救不了中段编辑,故自带快照。不做
+  session_id 轮转/DB 续写(v1 够用,留待需要持久化时再说)。
+- **陈旧校验靠 `history_version`**:快照随事件带版本,apply 回传;其间发生 turn/压缩 →
+  版本变 → 后端拒(4409),前端提示刷新。避免在过时视图上误删。
