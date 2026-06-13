@@ -1,7 +1,8 @@
 # 路线图 & 待决方向
 
 > 接下来去哪。seam 已埋、未动工的方向 + 优先级建议。
-> 现状基线(要接管的压缩引擎)见 [compression-baseline.md](compression-baseline.md)。
+> 每个方向**满足哪条用户需求**见 [needs.md](needs.md);现状基线(要接管的压缩引擎)
+> 见 [compression-baseline.md](compression-baseline.md)。
 
 ---
 
@@ -17,10 +18,11 @@
    检视器按钮标 `keep/fold/drop`,treemap 叠加渲染。
 2. ✅ **预览(纯函数,无副作用)** — 已建成(`plan.ts` `projectFates`)。
    占用条幽灵刻度 + 预览行"预计释放 / 占用投影"。
-3. ◑ **应用(真正动上下文)** — **v1(drop)已建成**,见 [built.md](built.md)。
-   `context.apply` 删消息 + 复用 `_sanitize_tool_pairs` 缝合;一步撤销;实测 TUI/treemap
-   同步回落、token 真减少。**剩 v2 = fold**(复用 `_generate_summary` 把 fold 块摘要化)、
-   以及 keep-as-pin / sub-agent 执行。
+3. ✅ **应用(真正动上下文)** — **v1(drop)+ v2(fold)均已建成**,见 [built.md](built.md)
+   与 [fold.md](fold.md)。`context.apply` 删消息 / `context.fold` 折成摘要(复用
+   `_generate_summary` + `focus_topic` 重心 prompt + 非连续 splice);共用
+   `_sanitize_tool_pairs` 缝合 + 一步撤销;实测 TUI/treemap 同步回落、token 真减少。
+   **剩** keep-as-pin / 系统建议命运 / sub-agent 执行。
 
 四项交互能力(用户预想):①系统建议 drop/keep/merge ②用户编辑(丢弃/固定/合并 +
 合并重心)③预览影响 ④sub-agent 应用。
@@ -60,20 +62,27 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
 
 观察(占用 / 构成 / 原文)已闭环。下一步候选:
 
-- **A. 交互式压缩(旗舰)**:①标记 + ②预览 + ③应用 **v1(drop)均已建成**——观察→治理→
-  落地闭环打通(`context.apply`,实测 TUI/treemap 同步回落)。**剩 A-v2 = fold**:复用
-  `context_compressor._generate_summary` 把 fold 块摘要化(LLM 路,需失败处理 + 多段摘要置放);
-  再往后 keep-as-pin、系统建议命运、sub-agent 执行。
+- **A. 交互式压缩(旗舰)**:①标记 + ②预览 + ③应用 **v1(drop)+ v2(fold)均已建成**——
+  观察→治理→落地闭环打通(`context.apply` 删 / `context.fold` 折,实测 TUI/treemap 同步回落)。
+  fold 复用 `_generate_summary` + 重心 prompt + 非连续 splice,失败整笔中止。**剩**
+  keep-as-pin、系统建议命运、sub-agent 执行。
 - **G. 压缩闸门**:第一阶段(预览 + 确认)**已建成**。**剩第二阶段 = 闸门内编辑**(见上路线图),
   与 A-v2 互补——A 是用户主动治理,G 是系统触发时用户把关。
-- **B. 语义分块实验**:把 history「按轮」换主题聚类、tool_schema 换相似工具合并——
-  只改 ChunkStrategy,契约/渲染不变。效果待验。
+- **B. 语义分块实验**:把 history「按轮」换主题聚类(主线/支线)、tool_schema 换相似工具
+  合并——只改 ChunkStrategy,契约/渲染不变。效果待验。服务 [needs.md](needs.md) §E
+  「主线/支线同 session」的 E3(识别支线)。
+- **E4. treemap 语义排列模式**(本文新提,源自 A-v2 讨论):新增「时间序 ⇄ 语义聚类」
+  **模式切换**,让同语义块聚拢、好框选(服务 needs §E 的 E4)。**红线:模式切换而非替换**
+  ——按语义重排会丢掉时间读法,与 CLAUDE.md 第 5 条冲突,时间序必须保底。纯渲染/排列层,
+  不碰 fold 落地路。
 - **C2. 检视器类型化渲染**:assistant 文本走 Markdown、代码/JSON 语法高亮、
   tool_result 结构化(退出码/匹配数高亮)。在方向 C 的纯原文之上做体验优化。
 - **D. 打磨与收尾**:移动端 sheet 触发按钮文案仍是 i18n 的 "model/tools"(需多语言清理);
   treemap 视觉(配色/字号/带顺序)、浮层交互(拖动/缩放)、截断上限可配;
   小块标签体感(降阈值 / 选中强制显标签 / band 级兜底标签)。
 
-> 建议优先级:**A-v2 fold** 或 **G 闸门第二阶段**(两者都把治理补全,且共享 fate 渲染 +
-> `_generate_summary`)> B/C2(增量) > D(收尾)。
-> A 的 ①②③(drop)已闭环出手感;下一步是 fold —— 风险在 LLM 摘要的失败处理与多段置放。
+> 建议优先级:**E3/E4 语义选择**(语义分块 + treemap 语义排列,让"收支线"从逐块手选
+> 升级到框选同语义,见 [needs.md](needs.md) §E)或 **G 闸门第二阶段**(闸门内编辑,复用
+> 已建成的 fold/drop)> C2(增量) > D(收尾)。
+> A 的 ①②③(drop+fold)已闭环出手感;下一步分叉:把 fold 的"选择层"做智能(E3/E4),
+> 或把 fold/drop 接进系统触发侧的闸门(G2)。

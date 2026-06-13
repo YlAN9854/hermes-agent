@@ -218,6 +218,103 @@ def _append_text_to_content(content: Any, text: str, *, prepend: bool = False) -
     return text + rendered if prepend else rendered + text
 
 
+_SUMMARY_END_MARKER = (
+    "\n\n--- END OF CONTEXT SUMMARY — "
+    "respond to the message below, not the summary above ---"
+)
+
+
+def _summary_message(
+    prev_role: str,
+    next_role: str,
+    summary: str,
+) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Decide how to place a compaction summary between two neighbours.
+
+    Picks a role for the standalone summary message that avoids consecutive
+    same-role messages with both the preceding (``prev_role``) and following
+    (``next_role``) message. When neither role works (head and tail box it in),
+    the summary is merged into the next message instead of inserted standalone.
+
+    When the summary lands as ``role="user"``, weak models read the verbatim
+    "## Active Task" quote of a past user request as fresh input (#11475,
+    #14521); the explicit END marker tells the model "summary above, not new
+    input".
+
+    Returns ``(standalone_msg, merge_prefix)`` — exactly one is non-None:
+      - ``standalone_msg``: a message dict to insert on its own, or None;
+      - ``merge_prefix``: text to *prepend* onto the next message, or None.
+
+    Shared by the default compaction path (:meth:`ContextCompressor.compress`)
+    and ContextVis fold (``tui_gateway`` ``context.fold``), so both produce
+    identical, alternation-safe summary placement.
+    """
+    if prev_role in {"assistant", "tool"}:
+        role = "user"
+    else:
+        role = "assistant"
+    if role == next_role:
+        flipped = "assistant" if role == "user" else "user"
+        if flipped != prev_role:
+            role = flipped
+        else:
+            # Both roles collide (e.g. head=assistant, tail=user) — merge the
+            # summary into the first tail message rather than break alternation.
+            return None, summary + _SUMMARY_END_MARKER + "\n\n"
+    if role == "user":
+        summary = summary + _SUMMARY_END_MARKER
+    return {"role": role, "content": summary}, None
+
+
+def splice_fold_summary(
+    messages: List[Dict[str, Any]],
+    fold_indices: Any,
+    summary: str,
+) -> List[Dict[str, Any]]:
+    """Replace the messages at ``fold_indices`` with one ``summary`` message.
+
+    Used by ContextVis fold (``tui_gateway`` ``context.fold``). Unlike default
+    compaction (which folds a contiguous middle band), fold may target a
+    **non-contiguous** set (e.g. an interleaved side-task). The single summary
+    is placed at the **earliest** folded position; the rest are removed. Role is
+    chosen via :func:`_summary_message` to keep role-alternation valid against
+    the kept neighbours. Pure (no LLM); caller should still run
+    ``_sanitize_tool_pairs`` on the result to repair any orphaned tool pairs.
+    """
+    fold_set = {i for i in fold_indices if isinstance(i, int) and 0 <= i < len(messages)}
+    if not fold_set:
+        return list(messages)
+    insert_at = min(fold_set)
+    prev_role = messages[insert_at - 1].get("role", "user") if insert_at > 0 else "user"
+    # next neighbour = first *kept* message after insert_at; none → "" (forces
+    # a standalone summary, since "" matches no real role).
+    next_role = ""
+    for j in range(insert_at + 1, len(messages)):
+        if j not in fold_set:
+            next_role = messages[j].get("role", "user")
+            break
+    standalone, merge_prefix = _summary_message(prev_role, next_role, summary)
+
+    out: List[Dict[str, Any]] = []
+    emitted = False
+    pending_merge = merge_prefix
+    for i, m in enumerate(messages):
+        if i in fold_set:
+            if not emitted:
+                emitted = True
+                if standalone is not None:
+                    out.append(standalone)
+            continue
+        if pending_merge is not None and emitted:
+            m = dict(m)
+            m["content"] = _append_text_to_content(
+                m.get("content"), pending_merge, prepend=True
+            )
+            pending_merge = None
+        out.append(m)
+    return out
+
+
 def _strip_image_parts_from_parts(parts: Any) -> Any:
     """Strip image parts from an OpenAI-style content-parts list.
 
@@ -2126,57 +2223,28 @@ The user has requested that this compaction PRIORITISE preserving all informatio
                 reason=self._last_summary_error,
             )
 
-        _merge_summary_into_tail = False
+        # Place the summary so it never creates consecutive same-role messages
+        # with its neighbours. Shared with ContextVis fold (context.fold) via
+        # the module-level _summary_message() — both paths place summaries the
+        # same alternation-safe way.
         last_head_role = messages[compress_start - 1].get("role", "user") if compress_start > 0 else "user"
         first_tail_role = messages[compress_end].get("role", "user") if compress_end < n_messages else "user"
-        # Pick a role that avoids consecutive same-role with both neighbors.
-        # Priority: avoid colliding with head (already committed), then tail.
-        if last_head_role in {"assistant", "tool"}:
-            summary_role = "user"
-        else:
-            summary_role = "assistant"
-        # If the chosen role collides with the tail AND flipping wouldn't
-        # collide with the head, flip it.
-        if summary_role == first_tail_role:
-            flipped = "assistant" if summary_role == "user" else "user"
-            if flipped != last_head_role:
-                summary_role = flipped
-            else:
-                # Both roles would create consecutive same-role messages
-                # (e.g. head=assistant, tail=user — neither role works).
-                # Merge the summary into the first tail message instead
-                # of inserting a standalone message that breaks alternation.
-                _merge_summary_into_tail = True
+        _summary_standalone, _summary_merge_prefix = _summary_message(
+            last_head_role, first_tail_role, summary
+        )
 
-        # When the summary lands as a standalone role="user" message,
-        # weak models read the verbatim "## Active Task" quote of a past
-        # user request as fresh input (#11475, #14521). Append the explicit
-        # end marker — the same one used in the merge-into-tail path — so
-        # the model has a clear "summary above, not new input" signal.
-        if not _merge_summary_into_tail and summary_role == "user":
-            summary = (
-                summary
-                + "\n\n--- END OF CONTEXT SUMMARY — "
-                "respond to the message below, not the summary above ---"
-            )
-
-        if not _merge_summary_into_tail:
-            compressed.append({"role": summary_role, "content": summary})
+        if _summary_standalone is not None:
+            compressed.append(_summary_standalone)
 
         for i in range(compress_end, n_messages):
             msg = messages[i].copy()
-            if _merge_summary_into_tail and i == compress_end:
-                merged_prefix = (
-                    summary
-                    + "\n\n--- END OF CONTEXT SUMMARY — "
-                    "respond to the message below, not the summary above ---\n\n"
-                )
+            if _summary_merge_prefix is not None and i == compress_end:
                 msg["content"] = _append_text_to_content(
                     msg.get("content"),
-                    merged_prefix,
+                    _summary_merge_prefix,
                     prepend=True,
                 )
-                _merge_summary_into_tail = False
+                _summary_merge_prefix = None
             compressed.append(msg)
 
         self.compression_count += 1

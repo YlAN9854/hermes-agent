@@ -45,6 +45,21 @@ export function droppableChunkIds(
     .map((c) => c.id);
 }
 
+/**
+ * 当前标记为 fold 且可落地（message 背书）的 chunk id —— A-v2 `context.fold` 的输入。
+ * 单隐式组:这些块背后的消息一起折成一条摘要。system/tool_schema 无消息背书,排除。
+ */
+export function foldableChunkIds(
+  snapshot: ContextSnapshot,
+  fateMap: FateMap,
+): string[] {
+  return snapshot.chunks
+    .filter(
+      (c) => fateMap[c.id] === "fold" && MESSAGE_BACKED_TYPES.has(c.type),
+    )
+    .map((c) => c.id);
+}
+
 /** fold 后保留的比例(摘要 ≈ 原文的 20%),对齐 Hermes summary_target_ratio。 */
 const SUMMARY_RATIO = 0.2;
 

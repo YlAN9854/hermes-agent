@@ -10,7 +10,7 @@
  * - 复用 {@link GatewayClient}(connect 一次、单例复用),与 dashboard 自身 sidecar
  *   各开各的连接,互不干扰——我们只按 sid 定位 TUI 那个真实会话。
  *
- * v1 只做 drop(确定性、零 LLM);fold/keep 见 roadmap。
+ * drop（确定性、零 LLM）与 fold（A-v2,跑辅助模型摘要）共用这条命令路。
  */
 
 import { GatewayClient } from "@/lib/gatewayClient";
@@ -23,6 +23,16 @@ export interface ApplyResult {
   before_tokens: number;
   after_tokens: number;
   dropped_chunk_ids: string[];
+}
+
+export interface FoldResult {
+  status: string;
+  folded: number;
+  before_messages: number;
+  after_messages: number;
+  before_tokens: number;
+  after_tokens: number;
+  folded_chunk_ids: string[];
 }
 
 export interface UndoResult {
@@ -56,6 +66,26 @@ export async function applyDrops(
     session_id: sessionId,
     history_version: historyVersion,
     drop_chunk_ids: dropChunkIds,
+  });
+}
+
+/**
+ * 落地 fold（A-v2）:把这些 chunk 背后的消息折成一条摘要（单隐式组）。
+ * `focusPrompt` 可空,告诉摘要重心。后端跑辅助模型,可能耗时数秒;失败整笔中止。
+ * 成功后后端会 re-emit，UI 自动刷新;复用同一条 `context.undo` 撤销路。
+ */
+export async function applyFold(
+  sessionId: string,
+  historyVersion: number | undefined,
+  foldChunkIds: string[],
+  focusPrompt: string,
+): Promise<FoldResult> {
+  const gw = await ensureClient();
+  return gw.request<FoldResult>("context.fold", {
+    session_id: sessionId,
+    history_version: historyVersion,
+    fold_chunk_ids: foldChunkIds,
+    focus_prompt: focusPrompt,
   });
 }
 

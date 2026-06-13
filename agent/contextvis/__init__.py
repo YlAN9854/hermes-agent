@@ -6,6 +6,11 @@
 from agent.contextvis.chunking import (
     build_snapshot_chunks,
     drop_indices_for_chunks,
+    message_indices_for_chunks,
 )
 
-__all__ = ["build_snapshot_chunks", "drop_indices_for_chunks"]
+__all__ = [
+    "build_snapshot_chunks",
+    "drop_indices_for_chunks",
+    "message_indices_for_chunks",
+]

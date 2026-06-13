@@ -20,11 +20,12 @@ import { formatTokenCount } from "@/lib/format";
 import { squarify } from "@/lib/contextvis/treemap";
 import {
   droppableChunkIds,
+  foldableChunkIds,
   projectFates,
   type Fate,
   type FateMap,
 } from "@/lib/contextvis/plan";
-import { applyDrops, undoApply } from "@/lib/contextvis/apply";
+import { applyDrops, applyFold, undoApply } from "@/lib/contextvis/apply";
 import { respondCompaction } from "@/lib/contextvis/gate";
 import type {
   ChunkType,
@@ -343,9 +344,12 @@ export function ContextVisPanel({
 }) {
   const [mode, setMode] = useState<TreemapMode>("proportional");
   // 阶段 3「应用」本地状态:确认/进行中、上次释放量(供撤销)、错误。
+  // action 原子化:一次只 drop 或只 fold,applyKind 记当前确认/进行中的动作。
   const [applyPhase, setApplyPhase] = useState<"idle" | "confirm" | "running">(
     "idle",
   );
+  const [applyKind, setApplyKind] = useState<"drop" | "fold">("drop");
+  const [foldPrompt, setFoldPrompt] = useState("");
   const [applyError, setApplyError] = useState<string | null>(null);
   const [lastFreed, setLastFreed] = useState<number | null>(null);
   const { budget, used, percent, compactions, chunks } = snapshot;
@@ -367,15 +371,25 @@ export function ContextVisPanel({
     .filter(Boolean)
     .join(" ");
 
-  // 阶段 3:可落地的 drop（仅 message 背书的块）+ 真实会话 id 就绪才能应用。
+  // 阶段 3 / A-v2:可落地的 drop / fold（仅 message 背书的块）+ 真实会话 id 就绪才能应用。
   const droppable = droppableChunkIds(snapshot, fateMap);
+  const foldable = foldableChunkIds(snapshot, fateMap);
   const canApply = droppable.length > 0 && !!snapshot.sessionId;
+  const canFold = foldable.length > 0 && !!snapshot.sessionId;
 
   const humanizeApplyError = (e: unknown): string => {
     const m = e instanceof Error ? e.message : String(e);
     if (/busy/i.test(m)) return "对话进行中，请等当前轮结束再应用";
     if (/stale|changed|advanced/i.test(m)) return "上下文已更新，请刷新后重试";
+    if (/summary unavailable/i.test(m)) return "摘要生成失败，请稍后重试";
     return m;
+  };
+
+  // 进入确认态:记下动作种类(drop/fold),action 原子化。
+  const startConfirm = (kind: "drop" | "fold") => {
+    setApplyKind(kind);
+    setApplyError(null);
+    setApplyPhase("confirm");
   };
 
   const doApply = async () => {
@@ -389,6 +403,27 @@ export function ContextVisPanel({
         droppable,
       );
       setLastFreed(Math.max(0, res.before_tokens - res.after_tokens));
+      onClearFates();
+    } catch (e) {
+      setApplyError(humanizeApplyError(e));
+    } finally {
+      setApplyPhase("idle");
+    }
+  };
+
+  const doFold = async () => {
+    if (!snapshot.sessionId) return;
+    setApplyPhase("running");
+    setApplyError(null);
+    try {
+      const res = await applyFold(
+        snapshot.sessionId,
+        snapshot.historyVersion,
+        foldable,
+        foldPrompt.trim(),
+      );
+      setLastFreed(Math.max(0, res.before_tokens - res.after_tokens));
+      setFoldPrompt("");
       onClearFates();
     } catch (e) {
       setApplyError(humanizeApplyError(e));
@@ -558,10 +593,19 @@ export function ContextVisPanel({
                 )}
               </span>
               <div className="flex shrink-0 items-center gap-1">
-                {canApply && applyPhase === "idle" && (
+                {applyPhase === "idle" && canFold && (
                   <button
                     type="button"
-                    onClick={() => setApplyPhase("confirm")}
+                    onClick={() => startConfirm("fold")}
+                    className="rounded border border-warning/40 px-1.5 py-0.5 text-[10px] tracking-wide text-warning hover:bg-warning/10"
+                  >
+                    应用 fold ({foldable.length})
+                  </button>
+                )}
+                {applyPhase === "idle" && canApply && (
+                  <button
+                    type="button"
+                    onClick={() => startConfirm("drop")}
                     className="rounded border border-destructive/40 px-1.5 py-0.5 text-[10px] tracking-wide text-destructive hover:bg-destructive/10"
                   >
                     应用 drop ({droppable.length})
@@ -571,10 +615,15 @@ export function ContextVisPanel({
                   <>
                     <button
                       type="button"
-                      onClick={doApply}
-                      className="rounded bg-destructive/90 px-1.5 py-0.5 text-[10px] tracking-wide text-white hover:bg-destructive"
+                      onClick={applyKind === "fold" ? doFold : doApply}
+                      className={cn(
+                        "rounded px-1.5 py-0.5 text-[10px] tracking-wide text-white",
+                        applyKind === "fold"
+                          ? "bg-warning/90 hover:bg-warning"
+                          : "bg-destructive/90 hover:bg-destructive",
+                      )}
                     >
-                      确认删除
+                      {applyKind === "fold" ? "确认折叠" : "确认删除"}
                     </button>
                     <button
                       type="button"
@@ -587,7 +636,7 @@ export function ContextVisPanel({
                 )}
                 {applyPhase === "running" && (
                   <span className="px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary">
-                    应用中…
+                    {applyKind === "fold" ? "折叠中…" : "应用中…"}
                   </span>
                 )}
                 <button
@@ -601,13 +650,27 @@ export function ContextVisPanel({
             </div>
           )}
 
-          {/* 应用结果（不可逆操作透明）：成功后给一步撤销。独立于预览行——
-              成功会清空 fateMap、预览行随之消失。 */}
-          {applyPhase === "confirm" && (
+          {/* 确认态明细（不可逆操作透明）。fold 多一个"重心 prompt"输入框。 */}
+          {applyPhase === "confirm" && applyKind === "drop" && (
             <div className="text-[10px] leading-snug text-text-tertiary">
               将从真实上下文删除 {droppable.length} 块 · ~
               {formatTokenCount(projected.freed)} tok，<span className="text-destructive">不可逆</span>
               （可一步撤销）。
+            </div>
+          )}
+          {applyPhase === "confirm" && applyKind === "fold" && (
+            <div className="flex flex-col gap-1">
+              <input
+                type="text"
+                value={foldPrompt}
+                onChange={(e) => setFoldPrompt(e.target.value)}
+                placeholder="可选：摘要重心，如『只留与 X 函数相关的结论』"
+                className="w-full rounded border border-current/15 bg-current/5 px-1.5 py-1 text-[11px] text-text-secondary placeholder:text-text-tertiary focus:border-warning/50 focus:outline-none"
+              />
+              <div className="text-[10px] leading-snug text-text-tertiary">
+                将把 {foldable.length} 块折成一条摘要 · 跑辅助模型，约数秒 ·{" "}
+                <span className="text-warning">不可逆</span>（可一步撤销）。
+              </div>
             </div>
           )}
           {lastFreed !== null && (

@@ -4654,6 +4654,43 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5005, str(e))
 
 
+def _commit_history_mutation(session, agent, before, new_history, v0, sid):
+    """原子地换 session 历史(drop/fold apply 共用)。
+
+    在 ``history_lock`` 下校验版本未变 → 写一步撤销快照 + 换历史 + bump 版本;
+    随后重算占用(让占用条即时回落)+ emit ``session.info``。
+
+    成功返回 ``(after_tokens, info)``;若期间版本前进(并发 turn/压缩)返回
+    ``None``——调用方应回 4409 陈旧错误。方向 A 阶段 3 drop 与 A-v2 fold 共享此路。
+    """
+    from agent.model_metadata import estimate_request_tokens_rough
+
+    with session["history_lock"]:
+        if int(session.get("history_version", 0) or 0) != v0:
+            return None
+        # 一步撤销快照(其间无新 turn 时可还原)。
+        session["_contextvis_undo"] = {"history": before, "version": v0}
+        session["history"] = new_history
+        session["history_version"] = v0 + 1
+
+    _sys = getattr(agent, "_cached_system_prompt", "") or ""
+    _tools = getattr(agent, "tools", None) or None
+    after_tokens = estimate_request_tokens_rough(
+        new_history, system_prompt=_sys, tools=_tools
+    )
+    # 即时占用诚实:让占用条/usage 立刻反映回落,不等下一轮(沿用 resume 修复思路)。
+    comp = getattr(agent, "context_compressor", None)
+    if comp is not None:
+        try:
+            comp.last_prompt_tokens = after_tokens
+        except Exception:
+            pass
+
+    info = _session_info(agent, session)
+    _emit_session_info(sid, info)
+    return after_tokens, info
+
+
 @method("context.apply")
 def _(rid, params: dict) -> dict:
     """ContextVis 方向 A 阶段 3:把用户标记的 drop 落地到真实上下文。
@@ -4706,26 +4743,12 @@ def _(rid, params: dict) -> dict:
         if comp is not None:
             new_history = comp._sanitize_tool_pairs(new_history)
 
-        with session["history_lock"]:
-            if int(session.get("history_version", 0) or 0) != v0:
-                return _err(rid, 4409, "context changed during apply — retry")
-            # 一步撤销快照(其间无新 turn 时可还原)。
-            session["_contextvis_undo"] = {"history": before, "version": v0}
-            session["history"] = new_history
-            session["history_version"] = v0 + 1
-
-        after_tokens = estimate_request_tokens_rough(
-            new_history, system_prompt=_sys, tools=_tools
+        committed = _commit_history_mutation(
+            session, agent, before, new_history, v0, sid
         )
-        # 即时占用诚实:让占用条/usage 立刻反映回落,不等下一轮(沿用 resume 修复思路)。
-        if comp is not None:
-            try:
-                comp.last_prompt_tokens = after_tokens
-            except Exception:
-                pass
-
-        info = _session_info(agent, session)
-        _emit_session_info(sid, info)
+        if committed is None:
+            return _err(rid, 4409, "context changed during apply — retry")
+        after_tokens, info = committed
         return _ok(
             rid,
             {
@@ -4736,6 +4759,108 @@ def _(rid, params: dict) -> dict:
                 "before_tokens": before_tokens,
                 "after_tokens": after_tokens,
                 "dropped_chunk_ids": list(drop_ids),
+                "info": info,
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
+@method("context.fold")
+def _(rid, params: dict) -> dict:
+    """ContextVis 方向 A-v2:把用户标记的 fold 块折成一条摘要,落地真实上下文。
+
+    单隐式组:所有 ``fold_chunk_ids`` 背后的消息 → 一条摘要(复用
+    ``ContextCompressor._generate_summary``,``focus_prompt`` 装用户重心)。
+    **非连续 splice**:摘要落在最早 fold 索引位,其余 fold 消息移除,
+    ``_sanitize_tool_pairs`` 缝合孤儿工具对。摘要失败 → **整笔中止**(history 不动,
+    绝不半落地/静默删)。仅非对话态(running 拒)。门控 HERMES_CONTEXTVIS。
+    见 context-vis/fold.md。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    if session.get("running"):
+        return _err(
+            rid, 4009, "session busy — /interrupt the current turn before folding"
+        )
+    fold_ids = params.get("fold_chunk_ids") or []
+    if not isinstance(fold_ids, list) or not fold_ids:
+        return _err(rid, 4000, "fold_chunk_ids must be a non-empty list")
+    focus_prompt = str(params.get("focus_prompt", "") or "").strip()
+    sid = params.get("session_id", "")
+    client_version = params.get("history_version")
+    try:
+        from agent.context_compressor import splice_fold_summary
+        from agent.contextvis import message_indices_for_chunks
+        from agent.model_metadata import estimate_request_tokens_rough
+
+        agent = session["agent"]
+        comp = getattr(agent, "context_compressor", None)
+        if comp is None:
+            return _err(rid, 4031, "no context compressor on this session")
+
+        with session["history_lock"]:
+            before = list(session.get("history", []))
+            v0 = int(session.get("history_version", 0) or 0)
+        # 陈旧校验:用户看到的快照与当前历史不一致 → 拒绝。
+        if client_version is not None and int(client_version) != v0:
+            return _err(rid, 4409, "context snapshot is stale — refresh and retry")
+
+        fold_idx = message_indices_for_chunks(agent, session, fold_ids)
+        ordered = sorted(i for i in fold_idx if 0 <= i < len(before))
+        if not ordered:
+            return _err(rid, 4004, "no foldable messages resolved from those chunks")
+        turns = [before[i] for i in ordered]
+
+        _sys = getattr(agent, "_cached_system_prompt", "") or ""
+        _tools = getattr(agent, "tools", None) or None
+        before_tokens = estimate_request_tokens_rough(
+            before, system_prompt=_sys, tools=_tools
+        )
+
+        # 摘要(LLM 路,可能耗时数秒)。进度提示,finally 复位(抄 session.compress)。
+        # 单位说清:用户选 N 块(chunk),展开成 len(turns) 条真实消息(一块=一轮往往
+        # 捆多条),避免与 treemap 的「折叠×N(块)」对不上而误判。
+        _n_chunks = len(fold_ids)
+        _status_update(
+            sid,
+            "compressing",
+            f"⠋ 折叠 {_n_chunks} 块（{len(turns)} 条消息）为摘要…",
+        )
+        try:
+            summary = comp._generate_summary(turns, focus_topic=focus_prompt or None)
+        finally:
+            _status_update(sid, "ready")
+        if not summary:
+            return _err(rid, 5006, "summary unavailable — retry later")
+
+        # LLM 期间可能有新 turn 开起来 → 落地前再确认空闲(版本校验是最终防线)。
+        if session.get("running"):
+            return _err(rid, 4009, "session became busy — retry after the turn")
+
+        # 非连续 splice(纯函数,见 context_compressor.splice_fold_summary)→ 缝合孤儿工具对。
+        new_history = splice_fold_summary(before, ordered, summary)
+        new_history = comp._sanitize_tool_pairs(new_history)
+
+        committed = _commit_history_mutation(
+            session, agent, before, new_history, v0, sid
+        )
+        if committed is None:
+            return _err(rid, 4409, "context changed during fold — retry")
+        after_tokens, info = committed
+        return _ok(
+            rid,
+            {
+                "status": "folded",
+                "folded": len(turns),
+                "before_messages": len(before),
+                "after_messages": len(new_history),
+                "before_tokens": before_tokens,
+                "after_tokens": after_tokens,
+                "folded_chunk_ids": list(fold_ids),
                 "info": info,
             },
         )

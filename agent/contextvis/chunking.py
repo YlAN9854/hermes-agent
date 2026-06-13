@@ -466,16 +466,16 @@ def build_snapshot_chunks(
     }
 
 
-def drop_indices_for_chunks(
+def message_indices_for_chunks(
     agent: Any,
     session: Optional[Dict[str, Any]],
     chunk_ids: Any,
 ) -> set:
-    """把要 drop 的 chunk id 解析成真实 history 的 message 下标集合（阶段 3 apply）。
+    """把一组 chunk id 解析成真实 history 的 message 下标集合（apply/fold 共用）。
 
     与 provenance 同源:重新跑一遍分块拿确定性 id → sourceRefs，只收带
     ``messageIndex`` 的引用。system / tool_schema 的 sourceRefs 只有 ``part``、
-    无消息可删，**自动被忽略**——apply 永不触碰这两类。
+    无消息背书，**自动被忽略**——drop/fold 永不触碰这两类。
     """
     wanted = {str(x) for x in (chunk_ids or [])}
     if not wanted:
@@ -490,6 +490,10 @@ def drop_indices_for_chunks(
             if isinstance(mi, int):
                 indices.add(mi)
     return indices
+
+
+# 旧名保留:方向 A 阶段 3(drop)沿用。fold 复用同一解析,故泛化为上面的名字。
+drop_indices_for_chunks = message_indices_for_chunks
 
 
 def _chunk_dict(c: Chunk) -> Dict[str, Any]:

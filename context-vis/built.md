@@ -92,6 +92,26 @@ auto-compress 触发处拦一道,把"系统的压缩计划"用 treemap 画给用
   与 TUI 一致 / 推迟→本轮不压、下轮再问;关旗标 → 回到静默自动压。**第二阶段 = 闸门内编辑**
   (开放 drop/fold),需先解 running 闸冲突 + `messages`↔history 对账,见 [compaction-gate.md](compaction-gate.md)。
 
+### 交互式压缩 · A-v2 fold(折成摘要而非整删)
+方向 A「应用」从 drop(整删)补齐到 **fold(折成摘要)**:用户跨轮、跨类型、可非连续地
+选几块 → 一条摘要替换它们,**收纳支线**(needs §E E1)。设计与复用边界见 [fold.md](fold.md)。
+- **增量极小**:fold 的标记/预览/treemap 叠加在阶段 1+2 早已建好;只缺落地路。
+- **复用摘要轮子**:`ContextCompressor._generate_summary(turns, focus_topic)` 直接吃任意
+  message 列表 + 用户重心 prompt(`focus_topic` 本就是 `/compact` 的灵感)——一行不改。
+- **两个纯函数抽取(fold 与默认压缩共用)**:`_summary_message(prev,next,summary)`(摘要
+  role 选择 + 两头堵则合并进尾,默认压缩 `compress()` 改用它、行为不变)、`splice_fold_summary`
+  (**非连续** splice:一条摘要落最早 fold 位、其余移除,`_sanitize_tool_pairs` 缝合孤儿工具对)。
+- **后端**:`message_indices_for_chunks`(泛化自 `drop_indices_for_chunks`,drop/fold 共用)、
+  `_commit_history_mutation`(抽自 `context.apply`,drop/fold 共享落地)、新 RPC
+  [`context.fold`](../tui_gateway/server.py)(摘要失败 → **整笔中止** 5006、绝不半落地;
+  running 拒 4009 含 LLM 期间二次确认;陈旧拒 4409;`context.undo` 零改动复用)。
+- **前端**:`foldableChunkIds`、`applyFold(…, focusPrompt)`、`ContextVisPanel` 加「应用 fold」
+  (action 原子化,与 drop 并列)+ 确认态展开**重心 prompt 输入框** + 「折叠中…」态。
+- **单测 10/10**:role 选择全组合、非连续/乱序/越界 splice、索引别名(`tests/test_contextvis_fold.py`,自定位 sys.path 绕开 `~/.hermes` 安装副本)。
+- **实测通过**:跨轮非连续标 fold → treemap/TUI 占用回落、token 真减、原位现摘要、可撤销。
+  **单位文案修正**:TUI 进度从「折叠 N 块」改「折叠 N 块(M 条消息)」——treemap 数 chunk、
+  消息数是其展开(一轮捆多条),两者本就不同,讲清单位免误判。
+
 ---
 
 ## 决策日志(辩过并定下的)
@@ -164,3 +184,17 @@ auto-compress 触发处拦一道,把"系统的压缩计划"用 treemap 画给用
   真实 token 未回来时用 `estimate_request_tokens_rough` + `build_snapshot_chunks(scale_to=)`。
 - **「压缩 ×N」用真实累计计数,不用推断事件数**:一轮多次 mid-turn 压缩,session.info 只
   采样一次会少计 → 改用 `usage.compressions` / `comp.compression_count`(`compressionCount`)。
+- **A-v2 fold 仅非对话态(用户敲定)**:主动避开"闸门内编辑"两暗礁——空闲无 running 锁冲突、
+  `session["history"]` 是唯一真相(无 messages↔history 对账)。fold 因此**与 drop 共用** apply
+  落地路 + 撤销 + 陈旧校验。对话中触发的 fold 留压缩闸门第二阶段。
+- **fold 单隐式组 + action 原子化(用户敲定)**:所有 fold 标记→一条摘要(多命名组=多次单组,
+  后做);一次 apply 只 fold 或只 drop(混用索引数学绕,留 v1 测过后)。
+- **fold 支持非连续(用户敲定)**:用户核心诉求(收支线)本质非连续。一条摘要落最早 fold 位、
+  其余移除,`_sanitize_tool_pairs` 缝合孤儿工具对、`_summary_message` 保 role 合法——
+  只允许连续等于砍掉主要价值。
+- **摘要放置抽成纯函数,fold 与默认压缩共用**:`_summary_message` / `splice_fold_summary`
+  从 `compress()` 抽出,默认压缩改用前者**行为不变**。一处逻辑、两处复用,role/工具对的护栏只写一遍。
+- **fold 失败整笔中止,不半落地**:`_generate_summary` 返回 None(失败/冷却)→ history 不动 +
+  报 5006。绝不静默删——透明优先(CLAUDE.md 第 6 条)。
+- **chunk 计数 ≠ message 计数**:treemap「折叠×N」数 chunk(用户选的块),TUI 进度数其展开的
+  真实消息(一轮 chunk 捆 user+assistant+tool 多条)。二者本就不同 → 文案写「N 块(M 条消息)」讲清,免误判。
