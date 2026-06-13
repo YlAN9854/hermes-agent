@@ -66,6 +66,7 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 | 真实数据怎么流、怎么本地跑起来调试 | [dataflow.md](dataflow.md) — 数据流 + 部署坑 |
 | Hermes 现在自动怎么压缩上下文(方向 A 的基线) | [compression-baseline.md](compression-baseline.md) |
 | 方向 A-v2 fold（折成摘要而非整删）设计 | [fold.md](fold.md) |
+| 任务态识别（ContextVis 何时该醒 + 压什么）设计 | [regime.md](regime.md) — 自适应总开关 |
 | 阶段 3 命令通道为何可行(架构真相 + 实测证据) | [phase3-channel.md](phase3-channel.md) |
 | 压缩闸门（拦 auto-compress 改用户确认）调研 | [compaction-gate.md](compaction-gate.md) |
 | 接下来去哪、优先级 | [roadmap.md](roadmap.md) — 路线图 + 待决方向 |
