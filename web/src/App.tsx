@@ -340,6 +340,11 @@ function buildRoutes(
 
 const SIDEBAR_COLLAPSED_KEY = "hermes-sidebar-collapsed";
 
+// ContextVis 实验布局:这个 fork 被改作 ContextVis 可视化系统,不需要 Hermes 的
+// 全局导航/配置侧栏 —— 隐藏它,把整条横向空间让给 TUI + context inspector。
+// 翻成 false 即恢复原 dashboard 的左侧导航。其它页面仍可经 URL 直达。
+const CONTEXTVIS_FOCUS_LAYOUT = true;
+
 export default function App() {
   const { t } = useI18n();
   const { pathname } = useLocation();
@@ -531,6 +536,7 @@ export default function App() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pt-14 lg:pt-0">
         <div className="flex min-h-0 min-w-0 flex-1">
+          {!CONTEXTVIS_FOCUS_LAYOUT && (
           <aside
             id="app-sidebar"
             aria-label={t.app.navigation}
@@ -705,6 +711,7 @@ export default function App() {
               <SidebarFooter status={sidebarStatus} />
             </div>
           </aside>
+          )}
 
           <PageHeaderProvider pluginTabs={pluginTabMeta}>
             <div
