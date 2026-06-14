@@ -4792,6 +4792,63 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5005, str(e))
 
 
+@method("context.regime_colors")
+def _(rid, params: dict) -> dict:
+    """ContextVis turn 带**主题着色**(只读,按需调用):跑任务态检测器拿逐轮 topic +
+    主线,join 到当前 snapshot 的 chunk → 返回 `{chunkId: {topic, mainline}}`。
+
+    映射走 **messageIndex**(规避 regime 0-indexed vs chunking 1-indexed 的编号不一致)。
+    前端缓存、historyVersion 变才重取,故不会每帧调 aux 模型。见 context-vis/turn-band.md §5。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    try:
+        from agent.contextvis.regime import get_regime_detector, _segment_turns
+        from agent.contextvis.chunking import build_snapshot_chunks
+
+        agent = session["agent"]
+        with session["history_lock"]:
+            history = list(session.get("history", []))
+        a = get_regime_detector(agent).assess(history, agent)
+        turn_of, _n, _b, _r = _segment_turns(history)
+        topics = getattr(a, "turn_topics", {}) or {}
+        on = a.on_thread_indices
+
+        payload = build_snapshot_chunks(agent, {"history": history})
+        chunk_topics: Dict[str, Any] = {}
+        for c in payload.get("chunks", []):
+            cid = c.get("id")
+            idxs = [
+                r.get("messageIndex") for r in (c.get("sourceRefs") or [])
+                if isinstance(r, dict) and isinstance(r.get("messageIndex"), int)
+            ]
+            if not idxs:
+                continue  # system/tool_schema：无消息背书，不着色
+            topic = ""
+            for mi in idxs:
+                t = turn_of[mi] if 0 <= mi < len(turn_of) else None
+                if t is not None and topics.get(t, {}).get("topic"):
+                    topic = topics[t]["topic"]
+                    break
+            chunk_topics[cid] = {
+                "topic": topic,
+                "mainline": any(mi in on for mi in idxs),
+            }
+
+        return _ok(rid, {
+            "regime": a.regime,
+            "focus": getattr(a, "focus", ""),
+            "engine": "llm" if a.reason.startswith("llm") else "heuristic",
+            "reason": a.reason,
+            "chunk_topics": chunk_topics,
+        })
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
 @method("context.fold")
 def _(rid, params: dict) -> dict:
     """ContextVis 方向 A-v2:把用户标记的 fold 块折成一条摘要,落地真实上下文。

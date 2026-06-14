@@ -221,9 +221,15 @@ Turn-by-turn skeleton (user intent + what the agent did each turn):
 
 Respond with ONLY a JSON object, no prose:
 {{"regime": "task" | "forest",
-  "mainline_turns": [turn numbers of the current task; [] if forest],
-  "focus": "<=8 word label of the current task, or empty",
-  "reason": "<=20 word justification"}}"""
+  "focus": "<=8 word label of the current task, or empty if forest",
+  "turns": [{{"turn": <number>, "topic": "<=4 word subject of THIS turn", \
+"mainline": true|false}}, ... EXACTLY ONE entry per turn shown above],
+  "reason": "<=20 word justification"}}
+
+For EACH turn give a SHORT topic = its own subject (e.g. "valorant prediction", \
+"read opencode source", "tarot reading"). Set mainline=true ONLY for turns that \
+belong to the current ongoing task; earlier unrelated one-offs get mainline=false. \
+If regime is "forest", every turn is mainline=false."""
 
 
 def _parse_json_object(text: str) -> Dict[str, Any]:
@@ -247,11 +253,18 @@ def _llm_enabled() -> bool:
 
 @dataclass
 class RegimeAssessment:
-    """一次任务态评估。``on_thread_indices`` 是 messages 列表里的下标。"""
+    """一次任务态评估。``on_thread_indices`` 是 messages 列表里的下标。
+
+    ``focus`` / ``turn_topics`` 仅 LLM 路填充(turn 带主题着色用,按 **regime turn** 编号);
+    启发式回退留空。门控只读 ``regime`` / ``on_thread_indices``,不依赖这两者。
+    """
 
     regime: str  # "forest" | "task"
     on_thread_indices: Set[int] = field(default_factory=set)
     reason: str = ""
+    focus: str = ""
+    # regime turn → {"topic": str, "mainline": bool}
+    turn_topics: Dict[int, Dict[str, Any]] = field(default_factory=dict)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -375,7 +388,8 @@ class RegimeDetector:
                 "api_mode": getattr(comp, "api_mode", None),
             },
             "messages": [{"role": "user", "content": _REGIME_PROMPT.format(skeleton=skeleton)}],
-            "max_tokens": 300,
+            # 长会话每轮一条 topic,留足输出免截断。
+            "max_tokens": 800,
         }
         if getattr(comp, "summary_model", ""):
             call_kwargs["model"] = comp.summary_model
@@ -386,17 +400,35 @@ class RegimeDetector:
         data = _parse_json_object(content)
 
         regime = "task" if str(data.get("regime", "")).strip().lower() == "task" else "forest"
-        mainline = {
-            int(t) for t in (data.get("mainline_turns") or [])
-            if isinstance(t, (int, float))
-        }
+
+        # 逐轮 topic + mainline(turn 带着色用),按 regime turn 编号。
+        turn_topics: Dict[int, Dict[str, Any]] = {}
+        for item in (data.get("turns") or []):
+            if not isinstance(item, dict):
+                continue
+            tn = item.get("turn")
+            if not isinstance(tn, (int, float)):
+                continue
+            turn_topics[int(tn)] = {
+                "topic": str(item.get("topic", "")).strip()[:40],
+                "mainline": bool(item.get("mainline", False)),
+            }
+
+        # 主线轮:优先逐轮 mainline 标记,回退旧 mainline_turns 字段(向后兼容)。
+        if turn_topics:
+            mainline = {t for t, v in turn_topics.items() if v["mainline"]}
+        else:
+            mainline = {
+                int(t) for t in (data.get("mainline_turns") or [])
+                if isinstance(t, (int, float))
+            }
         on_thread = (
             {i for i in range(len(messages)) if turn_of[i] in mainline}
             if regime == "task" else set()
         )
         focus = str(data.get("focus", ""))[:80]
         reason = f"llm:{regime} focus={focus!r} :: {str(data.get('reason', ''))[:80]}"
-        result = RegimeAssessment(regime, on_thread, reason)
+        result = RegimeAssessment(regime, on_thread, reason, focus, turn_topics)
         self._llm_cache = (key, result)
         return result
 

@@ -26,7 +26,14 @@ import {
   type Fate,
   type FateMap,
 } from "@/lib/contextvis/plan";
-import { applyDrops, applyFold, debugRegime, undoApply } from "@/lib/contextvis/apply";
+import {
+  applyDrops,
+  applyFold,
+  debugRegime,
+  fetchRegimeColors,
+  undoApply,
+  type RegimeColors,
+} from "@/lib/contextvis/apply";
 import { respondCompaction } from "@/lib/contextvis/gate";
 import type {
   ChunkType,
@@ -43,6 +50,24 @@ type ViewKind = "type" | "turn";
 const TURN_BASE_COLOR = "#8b7fd4"; // 系统底座 = system 紫
 const TURN_CELL_COLOR = "#7d8aa3"; // 对话轮 = history 灰蓝
 const TURN_FOLD_COLOR = "#565d6b"; // 已折叠摘要 = 压暗灰(虚线边区分)
+
+/** 主题着色色板(第二刀):逐轮 topic 各分一色;mainline 饱和、offthread 靠透明度压暗。 */
+const TOPIC_PALETTE = [
+  "#d98c5f", "#5fa8a0", "#8b7fd4", "#6fae7a",
+  "#c97b9c", "#7d9cc4", "#c0a85f", "#9c7bc9",
+];
+
+type ChunkTopicMap = RegimeColors["chunk_topics"];
+
+/** 出现过的 topic 串稳定分配到色板(排序定序,避免重渲染跳色)。 */
+function buildTopicColorMap(ct: ChunkTopicMap): Map<string, string> {
+  const topics = [
+    ...new Set(Object.values(ct).map((v) => v.topic).filter(Boolean)),
+  ].sort();
+  const m = new Map<string, string>();
+  topics.forEach((t, i) => m.set(t, TOPIC_PALETTE[i % TOPIC_PALETTE.length]));
+  return m;
+}
 /** turn 格最小高度(保证极小轮仍可点;轻微破「高∝token」严格比例,见 doc §10)。 */
 const TURN_MIN_H = 12;
 
@@ -289,14 +314,18 @@ function TurnBand({
   mode,
   selected,
   onSelect,
+  chunkTopics,
 }: {
   snapshot: ContextSnapshot;
   mode: TreemapMode;
   selected: string | null;
   onSelect: (id: string | null) => void;
+  /** 第二刀主题着色:chunkId → {topic, mainline};null=未着色(中性结构)。 */
+  chunkTopics: ChunkTopicMap | null;
 }) {
   const { percent, budget, compactAt } = snapshot;
   const cells = buildTurnCells(snapshot);
+  const topicColors = chunkTopics ? buildTopicColorMap(chunkTopics) : null;
   const total = cells.reduce((s, c) => s + c.tokens, 0);
   if (total <= 0) return null;
 
@@ -386,18 +415,34 @@ function TurnBand({
       {laid.map(({ cell, y, h }) => {
         const isSel = selected !== null && cell.chunkIds.includes(selected);
         const showLabel = h > 18;
+        // 主题着色:对话轮(非底座/折叠)按 topic 取色;mainline 饱和、offthread 压暗。
+        const ct =
+          chunkTopics && !cell.isBase && !cell.isFolded
+            ? chunkTopics[cell.repId]
+            : undefined;
+        const topicColor = ct && ct.topic ? topicColors?.get(ct.topic) : undefined;
+        const offthread = ct ? !ct.mainline : false;
         const fill = cell.isFolded
           ? TURN_FOLD_COLOR
           : cell.isBase
             ? TURN_BASE_COLOR
-            : TURN_CELL_COLOR;
+            : topicColor ?? TURN_CELL_COLOR;
+        const baseOpacity = cell.isFolded
+          ? 0.55
+          : offthread
+            ? 0.4
+            : ct
+              ? 0.9
+              : 0.8;
         const label = fitText(
           cell.isFolded ? `⊟ ${cell.label}` : cell.label,
           VB_W - 56,
         );
         const tip = cell.isFolded
           ? `${cell.label}（压缩折叠产物）· ${formatTokenCount(cell.tokens)}`
-          : `${cell.label} · ${formatTokenCount(cell.tokens)}${cell.isBase ? "" : ` · 第${cell.turn}轮`}`;
+          : `${cell.label} · ${formatTokenCount(cell.tokens)}${cell.isBase ? "" : ` · 第${cell.turn}轮`}${
+              ct && ct.topic ? ` · ${ct.topic}${ct.mainline ? "（主线）" : "（支线）"}` : ""
+            }`;
         return (
           <g
             key={cell.isFolded ? cell.repId : `turn-${cell.turn}`}
@@ -411,7 +456,7 @@ function TurnBand({
               width={VB_W}
               height={Math.max(0, h)}
               fill={fill}
-              fillOpacity={isSel ? 0.95 : cell.isFolded ? 0.55 : 0.8}
+              fillOpacity={isSel ? 0.95 : baseOpacity}
               className="stroke-background-base"
               strokeWidth={isSel ? 2 : cell.isFolded ? 1.25 : 0.75}
               strokeDasharray={cell.isFolded ? "4 3" : undefined}
@@ -553,6 +598,17 @@ export function ContextVisPanel({
   const [mode, setMode] = useState<TreemapMode>("proportional");
   // 主视图主轴:默认「轮次」(turn 优先,见 turn-band.md);「类型」一键回旧树图。
   const [view, setView] = useState<ViewKind>("turn");
+  // 第二刀主题着色:按需拉取 regime 逐轮 topic。着色数据带上拉取时的 historyVersion,
+  // 渲染时比对当前值判**新鲜度**(snapshot 推进则失效)——纯派生,无失效 effect。
+  const [colorOn, setColorOn] = useState(false);
+  const [colorBusy, setColorBusy] = useState(false);
+  const [colorData, setColorData] = useState<{
+    hv: number | undefined;
+    topics: ChunkTopicMap;
+    regime: string;
+    focus: string;
+    engine: string;
+  } | null>(null);
   // 阶段 3「应用」本地状态:确认/进行中、上次释放量(供撤销)、错误。
   // action 原子化:一次只 drop 或只 fold,applyKind 记当前确认/进行中的动作。
   const [applyPhase, setApplyPhase] = useState<"idle" | "confirm" | "running">(
@@ -691,12 +747,90 @@ export function ContextVisPanel({
     };
   }, [sid]);
 
+  // 着色新鲜度:数据的 hv 与当前一致才有效(snapshot 推进 → 自动失效,band 回中性)。
+  // 闸门激活时**强制着色**(无须手点):压缩前的脑(assess)就是着色的脑,把关时
+  // 直接带上"主线/支线"语义画面,理解"为什么问我"。见 regime.md / turn-band.md §4。
+  const colorsFresh = !!colorData && colorData.hv === snapshot.historyVersion;
+  const wantColor = colorOn || gateActive;
+  const activeTopics = wantColor && colorsFresh ? colorData!.topics : null;
+  const activeMeta = wantColor && colorsFresh ? colorData : null;
+
+  const loadColors = async () => {
+    if (!sid) return;
+    setColorBusy(true);
+    try {
+      const r = await fetchRegimeColors(sid);
+      setColorData({
+        hv: snapshot.historyVersion,
+        topics: r.chunk_topics,
+        regime: r.regime,
+        focus: r.focus,
+        engine: r.engine,
+      });
+    } catch {
+      setColorData(null);
+    } finally {
+      setColorBusy(false);
+    }
+  };
+
+  // 闸门一弹 → 自动拉取着色(此刻 assess 已在缓存,命中即免费;闸门与着色同一个脑)。
+  // 异步 fetch、在 .then 里 setState(非 effect 体内同步置态),lint 安全。
+  useEffect(() => {
+    if (!gateActive || !sid) return;
+    let cancelled = false;
+    fetchRegimeColors(sid)
+      .then((r) => {
+        if (cancelled) return;
+        setColorData({
+          hv: snapshot.historyVersion,
+          topics: r.chunk_topics,
+          regime: r.regime,
+          focus: r.focus,
+          engine: r.engine,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [gateActive, sid, snapshot.historyVersion]);
+
+  const toggleColor = () => {
+    if (colorOn && colorsFresh) {
+      setColorOn(false); // 已新鲜着色 → 关
+    } else {
+      setColorOn(true); // 未着色 / 已失效 → 开并(按需)重取
+      if (!colorsFresh) loadColors();
+    }
+  };
+
   return (
     <Card className="flex flex-none flex-col gap-2 px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="text-display text-xs tracking-wider text-text-tertiary">context</div>
         <div className="flex items-center gap-2">
           {hasChunks && <ViewToggle view={view} onChange={setView} />}
+          {hasChunks && view === "turn" && (
+            <button
+              type="button"
+              onClick={toggleColor}
+              disabled={colorBusy}
+              className={cn(
+                "rounded border border-current/15 px-1.5 py-0.5 text-[10px] tracking-wide transition-colors",
+                wantColor && colorsFresh
+                  ? "bg-current/15 text-text-secondary"
+                  : "text-text-tertiary hover:text-text-secondary",
+              )}
+              title="按 regime 逐轮主题着色（按需，调用辅助模型；闸门触发时自动着色；新一轮对话后失效）"
+            >
+              {colorBusy
+                ? "分析中…"
+                : colorOn && !colorsFresh
+                  ? "重新着色"
+                  : "主题着色"}
+            </button>
+          )}
           {hasChunks && <ModeToggle mode={mode} onChange={setMode} />}
           {ready && (
             <span className={cn("text-sm font-medium tabular-nums", tone.text)}>{percent}%</span>
@@ -933,6 +1067,15 @@ export function ContextVisPanel({
             </div>
           )}
 
+          {view === "turn" && activeMeta && (
+            <div className="text-[10px] text-text-tertiary">
+              {activeMeta.regime === "task"
+                ? `主线: ${activeMeta.focus || "—"}`
+                : "森林（无主线）"}
+              {" · "}
+              {activeMeta.engine === "llm" ? "语义" : "启发式"}
+            </div>
+          )}
           {hasChunks &&
             (view === "turn" ? (
               <TurnBand
@@ -940,6 +1083,7 @@ export function ContextVisPanel({
                 mode={mode}
                 selected={selected}
                 onSelect={onSelect}
+                chunkTopics={activeTopics}
               />
             ) : (
               <Treemap

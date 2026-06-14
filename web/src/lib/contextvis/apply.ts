@@ -97,6 +97,26 @@ export async function debugRegime(sessionId: string): Promise<Record<string, unk
   });
 }
 
+/** turn 带主题着色:chunkId → 该块的逐轮 topic + 是否主线。 */
+export interface RegimeColors {
+  regime: string;
+  focus: string;
+  engine: string;
+  reason: string;
+  chunk_topics: Record<string, { topic: string; mainline: boolean }>;
+}
+
+/**
+ * 拉取 turn 带主题着色数据(按需、只读)。后端跑任务态检测器(可能调 aux 模型,
+ * 已缓存)并 join 到 chunk。前端缓存结果,historyVersion 变才重取——故非每帧调用。
+ */
+export async function fetchRegimeColors(sessionId: string): Promise<RegimeColors> {
+  const gw = await ensureClient();
+  return gw.request<RegimeColors>("context.regime_colors", {
+    session_id: sessionId,
+  });
+}
+
 /** 一步撤销上一次 apply(其间未发生新 turn 时有效)。 */
 export async function undoApply(sessionId: string): Promise<UndoResult> {
   const gw = await ensureClient();
