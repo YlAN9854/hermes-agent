@@ -47,7 +47,7 @@ def _should_gate_for_regime(
     try:
         from agent.contextvis.regime import get_regime_detector
 
-        a = get_regime_detector(agent).assess(messages)
+        a = get_regime_detector(agent).assess(messages, agent)
     except Exception as e:  # noqa: BLE001 — 检测失败绝不能挡住压缩流程
         logger.debug("regime detect failed: %s", e)
         return True, "regime-detect-error"

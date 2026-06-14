@@ -4785,7 +4785,7 @@ def _(rid, params: dict) -> dict:
         agent = session["agent"]
         with session["history_lock"]:
             history = list(session.get("history", []))
-        detail = get_regime_detector(agent).debug(history)
+        detail = get_regime_detector(agent).debug(history, agent)
         detail["messages"] = len(history)
         return _ok(rid, detail)
     except Exception as e:

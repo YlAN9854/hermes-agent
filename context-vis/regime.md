@@ -1,9 +1,9 @@
 # 任务态识别 —— ContextVis 的自适应总开关
 
-> **状态:设计中**(本文 = 多轮需求讨论的结论固化,未动工)。
-> 这是 ContextVis 的**中枢新件**:一个常驻后端检测器,决定 ContextVis 何时该醒、
-> 醒来压什么。动作原语(fold/drop/闸门)已建成,缺的是这个**脑**和它的**门控逻辑**。
-> 相关:[needs.md](needs.md) §E、[compaction-gate.md](compaction-gate.md)、[fold.md](fold.md)。
+> **状态:已建成并实测通过**(廉价启发式第一刀 + LLM 语义第二刀;闸门两级门控接通;
+> 森林静默压、任务才弹,实测一致)。这是 ContextVis 的**中枢**:一个常驻后端检测器,
+> 决定 ContextVis 何时该醒。动作原语(fold/drop/闸门)已建成,本件是它们的**脑 + 门控**。
+> 相关:[needs.md](needs.md) §E、[compaction-gate.md](compaction-gate.md)、[fold.md](fold.md)、[built.md](built.md)。
 
 ---
 
@@ -38,6 +38,52 @@ ContextVis 不该常驻打扰。它应当**在"位置式压缩将要背叛你的
 > **ContextVis = 一个"位置式压缩将要背叛你的任务"时才启动的纠偏器。**
 > 触发条件因此可测:**存在会被位置式压缩搞错的长程相关性**(信号:turns 间回指密度、
 > 共享产物、早期目标仍被后续引用)。
+
+---
+
+## 原理与判定依据(一图读懂)
+
+整条链:**检测器判森林/任务 → 两级门控决定闸门弹不弹 → 弹则用户把关、不弹则静默自动压。**
+
+### 两级门控(判出 task ≠ 一定弹)
+
+[`compaction_gate._should_gate_for_regime`](../agent/compaction_gate.py):
+
+1. **A 级(regime)**:有没有正在进行的主线任务?没有 → 森林 → 静默压。
+2. **B 级(collision)**:这次压缩**要折叠的消息区间** `[head_end, tail_start)` 是否**触及主线 turn**?
+   只压到森林噪音 → 也静默;真碰到主线 → 才弹。
+3. **A ∧ B 才弹窗。**
+
+### 检测的依据 —— 两个引擎([`RegimeDetector.assess`](../agent/contextvis/regime.py))
+
+我们先做廉价启发式,撞墙后换 LLM;LLM 为权威,启发式作回退/对照。
+
+**引擎一 · 廉价启发式(第一刀)—— 依据"跨 turn 复现的具体产物"**
+- 直觉:真任务反复碰同样的具体东西(同几个文件/代码符号);森林不会。
+- salient = 每条消息抽**文件路径段 + 代码标识符 + 反引号词**,再减去**工具名 / 基础设施段 / 压缩样板**(样板消息整条隐形)。
+- 纽带 = 出现在 **≥2 个不同 turn** 的 salient;纽带覆盖 ≥2 turn、占 token 比 ≥50%、跨度 ≥3 turn → task。
+- **天花板**:`web_search`/`browser_snapshot` 等**共享工具/搜索词**把无关话题硬串成纽带——**分不清"都用了网页搜索"和"在做同一件事"**。
+
+**引擎二 · LLM 语义(第二刀,当前权威)—— 依据"目标/主题是否一致"**
+- 不喂全文,喂 **turn 骨架**([`_build_skeleton`](../agent/contextvis/regime.py)):每轮 = `用户意图(180字) + 用了哪些工具 + 碰了哪些文件`(1M 下"为省 token 通读 1M"反讽的缓解)。
+- prompt 命门:问"**当前有没有正在进行的多轮任务?哪些 turn 属于它?**"(不是"整段是不是一个任务"——否则一个无关早先 turn 会把整体拖成森林),并钉死"**用同样的工具 ≠ 同一个任务,按 GOAL/SUBJECT 判**"。
+- 回 `{regime, mainline_turns, focus, reason}`;`mainline_turns` 映射回消息下标 → 喂 B 级 collision。
+
+| 引擎 | 判定依据 | 抓得住 / 抓不住 |
+|---|---|---|
+| 启发式 | 跨 turn **复现的具体 token** | ✅同文件/同符号的代码任务 · ❌被共享工具骗 |
+| LLM | 最近几轮**目标/主题是否一致** | ✅"都用网页搜索但话题无关=森林"、"读代码→钻 treemap=同一任务" |
+
+### 安全与回退
+
+- 只在**交互会话 + 即将弹闸门**时才调 LLM;无人值守更早返回、根本不调(不花钱不挂)。
+- **LLM 失败/超时/无 provider → 回退启发式 → 再不行保守判森林**;绝不挡压缩。
+- 偏保守:漏弹 = 退回今天的静默自动压(无损),滥弹才烦——故拿不准倾向不扰。
+
+### 调试入口
+
+`await __cvRegime()` / RPC `context.regime`:顶层 `regime`/`engine`/`reason` = **LLM 权威裁决 + 理由**;
+`linking_tokens`/`turns` = **启发式拆解**(对照,看它被什么 token 骗)。
 
 ---
 
@@ -129,11 +175,13 @@ Hermes 的 `_generate_summary(turns, focus_topic)` 语义就是"保住与该主�
 
 ## 分期
 
-- **第一刀(先做):廉价嗅探 + 两级门控。** 主线检测先用**粗信号**(回指 / 目标延续),
-  先让闸门"**在森林里闭嘴、在任务里才出声**"——立刻验证"自适应"这个产品命题。复刻 drop→fold
-  打法:先把门控骨架跑通,再灌智能。
-- **第二刀:深析死重清单。** aux 模型产出焦点 + 排序清单,喂闸门与主动清理。
-- **后续**:②→① 完成检测触发清理、轮内拆分、交错支线归并、森林期被动可观测(散点/森林视图,低优)。
+- ✅ **第一刀:廉价嗅探 + 两级门控** — 已建成。跨 turn 复现产物的启发式 + A∧B 门控,
+  先把门控骨架跑通。撞墙(共享工具/基础设施假纽带)后转 LLM。
+- ✅ **第二刀:LLM 语义判定** — 已建成并实测。turn 骨架喂 aux 模型,按目标/主题判 +
+  产出 mainline_turns/focus;失败回退启发式。实测森林静默、任务才弹。
+- ⬜ **后续(未做)**:把 `focus` 喂压缩 `focus_topic`(焦点压缩)、深析**死重清单**(喂闸门 +
+  方向 A 主动清理)、②→① 完成检测触发清理、滚动增量(压缩前快照任务结构,根治"跑在压缩后历史")、
+  产品门槛(纯浏览式读代码是否算任务——当前"多轮连贯本地工作即任务",可抬高到需编辑/明确目标)。
 
 ---
 
@@ -165,6 +213,31 @@ if not _should_gate_for_regime(agent, messages, plan): return None   # 静默自
 **E2E**(GATE=1):① 互不相关问答顶阈值 → 不弹、静默压;② 项目里反复改同几文件顶阈值 → 弹、标"检测到主线";REGIME=0 → 回到逢阈值必弹。
 
 **复用**:fold/drop/闸门/`plan_compaction` 全复用;新增仅一个检测器模块 + 一段两级判断 + 一个 env 逃生阀 + 一行前端小字。
+
+---
+
+## 第二刀实现(方向 B:LLM 语义判定)—— 已建成
+
+> 廉价启发式连撞天花板:**"共享 token" 把"共享工具/基础设施"误当"共享任务"**——压缩残骸、
+> 网页搜索词(duckduckgo/html/blog)、记忆/任务样板(memory/context/state)、工具名,
+> 每个都让无关话题假性结网。打地鼠到头,改用 aux 模型按**语义**判。
+
+**核心**:`RegimeDetector.assess(messages, agent)` 现在**优先走 LLM**,失败回退启发式:
+- **只喂 turn 骨架,不喂全文**(`_build_skeleton`:每轮 = 用户意图 180 字 + 用了哪些工具 / 碰了哪些文件)——1M 下"为省 token 通读 1M"反讽的关键缓解。
+- **复用压缩的 aux runtime**:`agent.auxiliary_client.call_llm(task="compression", main_runtime=…, model=summary_model)`——同一个便宜模型 / 超时配置,**不造新调用栈**。
+- **prompt 命门**(`_REGIME_PROMPT`)明确钉死启发式踩的坑:**"用同样的工具 ≠ 同一个任务;两个都用网页搜索的无关问题仍是 forest;按 GOAL/SUBJECT 判,别按工具判。"**
+- 回 JSON `{regime, mainline_turns, focus, reason}`;`mainline_turns` 经 `_segment_turns`(与 heuristic 同一套 turn 编号)映射回 message 下标 → 喂 B 级 collision。
+- **缓存**:同骨架不重复调 aux(`_llm_cache`)。**失败/超时/无 provider → 回退启发式**,绝不挡压缩。
+
+**门控**:`HERMES_CONTEXTVIS_REGIME_LLM`(默认 1;0 = 只用启发式)。仅交互会话 + 即将弹闸门时才调 aux(无人值守路径在更早就返回 None,不花钱)。
+
+**调试**:`context.regime` / `await __cvRegime()` 现在顶层 `regime` 是**权威判定**(LLM 优先),
+带 `engine`(llm/heuristic)+ `reason`(含 focus + 理由),另附启发式 `linking_tokens`/`turns` 做对照。
+
+**复用**:闸门两级门控、collision、fold/drop、前端小字全不变——只把 `assess` 的脑从启发式换成 LLM。
+
+**风险**:prompt 质量、aux 成本(每次弹闸门一调,已缓存 + 仅交互)、骨架可能丢掉判定所需细节
+(第一版只给意图 + 工具/文件名,不给正文)。
 
 ---
 

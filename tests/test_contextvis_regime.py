@@ -229,6 +229,82 @@ def test_detector_cached_on_agent():
     assert d1 is d2
 
 
+# ── 方向 B:LLM 语义判定(mock aux 调用) ────────────────────────────────
+
+class _FakeComp:
+    model = "main"; provider = "p"; base_url = ""; api_key = ""; api_mode = ""
+    summary_model = ""
+
+
+class _LLMAgent:
+    def __init__(self):
+        self.context_compressor = _FakeComp()
+
+
+def _fake_call_llm_returning(content):
+    class _Msg:
+        def __init__(self, c): self.content = c
+    class _Choice:
+        def __init__(self, c): self.message = _Msg(c)
+    class _Resp:
+        def __init__(self, c): self.choices = [_Choice(c)]
+    def _call(**kwargs):
+        return _Resp(content)
+    return _call
+
+
+def _patch_call_llm(fn):
+    import agent.auxiliary_client as ac
+    ac.call_llm = fn
+
+
+def test_llm_task_verdict_maps_mainline_turns():
+    os.environ.pop("HERMES_CONTEXTVIS_REGIME_LLM", None)
+    _patch_call_llm(_fake_call_llm_returning(
+        '{"regime":"task","mainline_turns":[0,1],"focus":"refactor","reason":"same files"}'
+    ))
+    msgs = [_u("改 a"), _a("ok"), _u("继续改 a"), _a("done")]
+    det = RegimeDetector()
+    det._llm_cache = None
+    a = det.assess(msgs, _LLMAgent())
+    assert a.regime == "task" and a.reason.startswith("llm:")
+    # mainline turns 0,1 → 全部 4 条消息 on_thread。
+    assert a.on_thread_indices == {0, 1, 2, 3}
+
+
+def test_llm_forest_verdict_empty_on_thread():
+    os.environ.pop("HERMES_CONTEXTVIS_REGIME_LLM", None)
+    _patch_call_llm(_fake_call_llm_returning(
+        '```json\n{"regime":"forest","mainline_turns":[],"focus":"","reason":"unrelated"}\n```'
+    ))
+    msgs = [_u("星座"), _a("…"), _u("电竞"), _a("…")]
+    det = RegimeDetector(); det._llm_cache = None
+    a = det.assess(msgs, _LLMAgent())
+    assert a.regime == "forest" and a.on_thread_indices == set()
+
+
+def test_llm_failure_falls_back_to_heuristic():
+    os.environ.pop("HERMES_CONTEXTVIS_REGIME_LLM", None)
+    def _boom(**kwargs):
+        raise RuntimeError("aux down")
+    _patch_call_llm(_boom)
+    # 共享文件路径的任务 → 启发式应判 task(回退路生效)。
+    det = RegimeDetector(); det._llm_cache = None
+    a = det.assess(_task_msgs(), _LLMAgent())
+    assert a.reason.startswith("heuristic:")
+
+
+def test_llm_disabled_uses_heuristic():
+    os.environ["HERMES_CONTEXTVIS_REGIME_LLM"] = "0"
+    try:
+        _patch_call_llm(_fake_call_llm_returning('{"regime":"task","mainline_turns":[0]}'))
+        det = RegimeDetector(); det._llm_cache = None
+        a = det.assess(_task_msgs(), _LLMAgent())
+        assert a.reason.startswith("heuristic:")  # 没走 LLM
+    finally:
+        os.environ.pop("HERMES_CONTEXTVIS_REGIME_LLM", None)
+
+
 if __name__ == "__main__":
     import traceback
 

@@ -112,6 +112,32 @@ auto-compress 触发处拦一道,把"系统的压缩计划"用 treemap 画给用
   **单位文案修正**:TUI 进度从「折叠 N 块」改「折叠 N 块(M 条消息)」——treemap 数 chunk、
   消息数是其展开(一轮捆多条),两者本就不同,讲清单位免误判。
 
+### 任务态识别 · 自适应总开关(让闸门"森林闭嘴、任务才出声")
+ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**——只在"位置式压缩将要背叛
+你的任务"时才打断。设计与判定依据见 [regime.md](regime.md)。
+- **两级门控**(`compaction_gate._should_gate_for_regime`):**A 级** regime(有没有主线)∧
+  **B 级** collision(这次压缩的折叠区是否触及主线 turn)才弹;否则静默自动压。复用
+  `plan_compaction` 的折叠区间,接进已建成的 `request_compaction_decision`。
+- **检测器** [`agent/contextvis/regime.py`](../agent/contextvis/regime.py)`RegimeDetector.assess(messages, agent)`,
+  常驻挂 agent。**两个引擎**:
+  - **第一刀 · 廉价启发式**:依据**跨 turn 复现的具体产物**(文件路径段 + 代码标识符,减去
+    工具名/基础设施段/压缩样板)→ 纽带覆盖 turn 数 + 占比 + 跨度判 task。turn 切分**剔除压缩样板**
+    (否则摘要残骸制造假 turn)。
+  - **第二刀 · LLM 语义(权威)**:依据**目标/主题是否一致**。喂 **turn 骨架**(`_build_skeleton`:
+    意图 + 工具/文件,**不喂全文**),复用压缩 aux runtime(`auxiliary_client.call_llm`),
+    prompt 钉死"**用同样的工具 ≠ 同一任务,按 GOAL/SUBJECT 判**"+"**判当前多轮任务、非整段二选一**"。
+    回 `{regime, mainline_turns, focus, reason}`,`mainline_turns` 映射回消息下标喂 collision。
+- **为何要第二刀**:启发式被**共享工具/基础设施**骗(`web_search`/`browser_snapshot`/记忆样板
+  把无关话题硬串成纽带)——这是确定性信号的天花板,实测连撞四个泄漏源(压缩残骸、网页搜索词、
+  记忆/任务样板、工具名)。LLM 按语义一举分清。
+- **安全**:只交互会话 + 即将弹时才调 LLM;失败/超时/无 provider → 回退启发式 → 保守森林;绝不挡压缩。
+  opt-in `HERMES_CONTEXTVIS_GATE`,`HERMES_CONTEXTVIS_REGIME`(两级门控)/`_REGIME_LLM`(LLM)默认开、可关。
+- **调试**:只读 RPC `context.regime` + 前端 `window.__cvRegime()`(挂当前 sid)→ 顶层 LLM 权威裁决 +
+  理由,附启发式 `linking_tokens`/`turns` 对照(直接看它被什么 token 骗)。
+- **单测 22/22**:salient 抽取/过滤、森林 vs 任务、压缩残骸不冒充任务、两级门控四态、逃生阀、
+  LLM 路(mock aux)task/forest/失败回退/禁用。**实测**:森林(电竞/塔罗/Rust 混问)静默自动压、
+  `engine:llm reason` 正确;多轮读代码任务弹闸门 + 标 focus。
+
 ---
 
 ## 决策日志(辩过并定下的)
@@ -198,3 +224,17 @@ auto-compress 触发处拦一道,把"系统的压缩计划"用 treemap 画给用
   报 5006。绝不静默删——透明优先(CLAUDE.md 第 6 条)。
 - **chunk 计数 ≠ message 计数**:treemap「折叠×N」数 chunk(用户选的块),TUI 进度数其展开的
   真实消息(一轮 chunk 捆 user+assistant+tool 多条)。二者本就不同 → 文案写「N 块(M 条消息)」讲清,免误判。
+- **闸门加"任务态"前置,而非每次都弹(用户驱动)**:违背"森林里别打扰";改成两级门控
+  (regime ∧ collision)。判出 task 还不够,得这次压缩**真碰到主线**才弹。
+- **检测纽带按 turn 而非消息**:工具密集的单 turn 内部反复引用同一文件会"自我结网"冒充主线 →
+  纽带须跨 ≥2 个**真实** user turn(压缩样板的 role=user 块不算 turn)。
+- **廉价启发式有天花板,转 LLM(连撞四次后定)**:"共享 token"分不清"共享工具"与"共享任务"——
+  压缩残骸、网页搜索词、记忆/任务样板、工具名逐个泄漏成假纽带,打地鼠到头。LLM 按**目标/主题**语义判,
+  一举分清"都用网页搜索但话题无关 = 森林"。启发式降为回退/对照。
+- **LLM 只喂 turn 骨架不喂全文**:1M 下"为省 token 通读 1M"是反讽 → 每轮只给意图 + 工具/文件名。
+- **prompt 问"当前多轮任务",不是"整段二选一"**:否则一个无关早先 turn 会把混合 session 拖成森林。
+  改后稳定输出 `mainline_turns`(护当前任务)+ 把早先无关 turn 当可压噪音(off-thread)。
+- **LLM 失败必回退、绝不挡压缩**:无 provider / 超时 / 解析失败 → 启发式 → 保守森林。误判代价不对称
+  (漏弹=退回静默自动压无损,滥弹才烦)→ 拿不准倾向不扰。
+- **检测器跑在压缩后历史是已知硬限(留滚动增量根治)**:压缩重写历史(摘要残骸),当前靠"样板隐形"
+  缓解——不再被残骸骗;彻底根治需压缩前快照任务结构(后续)。

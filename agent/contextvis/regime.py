@@ -19,10 +19,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Set
+
+logger = logging.getLogger(__name__)
 
 # ── salient token 抽取 ──────────────────────────────────────────────────
 
@@ -129,6 +132,117 @@ def _salient_tokens(text: str) -> Set[str]:
     return out
 
 
+# ── turn 切分 + LLM 骨架(方向 B 复用) ──────────────────────────────────
+
+def _segment_turns(messages: List[Dict[str, Any]]):
+    """按 **真实** user 发言切 turns;压缩样板的 role=user 块不算新 turn。
+
+    返回 (turn_of, n_turns, boiler, raw)——heuristic _compute 与 LLM 骨架共用,
+    确保两条路的 turn 编号一致(LLM 回的 mainline_turns 能映射回 message 下标)。
+    """
+    raw = [_raw_text(m) for m in messages]
+    boiler = [_is_boilerplate(raw[i]) for i in range(len(messages))]
+    turn_of: List[int] = []
+    cur = -1
+    for i, m in enumerate(messages):
+        if m.get("role") == "user" and not boiler[i]:
+            cur += 1
+        turn_of.append(max(cur, 0))
+    n_turns = (max(turn_of) + 1) if turn_of else 0
+    return turn_of, n_turns, boiler, raw
+
+
+def _path_basename(p: str) -> str:
+    return re.split(r"[/\\]", p.strip("/\\"))[-1][:48]
+
+
+def _build_skeleton(messages: List[Dict[str, Any]]):
+    """把对话压成 turn-by-turn 骨架:每轮 = 用户意图 + 用了哪些工具 / 碰了哪些文件。
+
+    只喂骨架、不喂全文——这是 1M 下"为省 token 而通读 1M"反讽的关键缓解。
+    返回 (skeleton_text, turn_of, n_turns)。
+    """
+    turn_of, n_turns, boiler, raw = _segment_turns(messages)
+    intents = [""] * n_turns
+    tools: List[Set[str]] = [set() for _ in range(n_turns)]
+    files: List[Set[str]] = [set() for _ in range(n_turns)]
+    for i, m in enumerate(messages):
+        if boiler[i]:
+            continue
+        t = turn_of[i]
+        if m.get("role") == "user" and not intents[t] and isinstance(m.get("content"), str):
+            intents[t] = m["content"][:180].replace("\n", " ").strip()
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function") if isinstance(tc, dict) else None
+            if isinstance(fn, dict):
+                if isinstance(fn.get("name"), str):
+                    tools[t].add(fn["name"])
+                if isinstance(fn.get("arguments"), str):
+                    for pm in _PATH_RE.findall(fn["arguments"])[:8]:
+                        files[t].add(_path_basename(pm))
+    lines: List[str] = []
+    for t in range(n_turns):
+        line = f"Turn {t}: {intents[t] or '(no user text)'}"
+        meta = []
+        if tools[t]:
+            meta.append("tools=" + ",".join(sorted(tools[t])[:6]))
+        if files[t]:
+            meta.append("files=" + ",".join(sorted(files[t])[:6]))
+        if meta:
+            line += "\n  " + " | ".join(meta)
+        lines.append(line)
+    return "\n".join(lines), turn_of, n_turns
+
+
+_REGIME_PROMPT = """You analyze a conversation between a user and an AI agent. A \
+session OFTEN MIXES a current, ongoing task with earlier, unrelated one-off \
+exchanges. Your job is NOT to label the whole session — it is to decide whether \
+there is a CURRENT multi-turn task in progress, and which turns belong to it.
+
+- CURRENT TASK = two or more RECENT turns building toward ONE goal (same \
+codebase/files, one investigation, iterating on one piece of work). Later turns \
+depend on earlier ones.
+- mainline_turns = the turns that belong to that current task (the load-bearing \
+ones to protect). Earlier turns about a DIFFERENT subject are NOT part of it — \
+they are disposable noise; leave them OUT of mainline_turns.
+- regime = "task" if such a current multi-turn task exists, EVEN IF some earlier \
+turns are unrelated. regime = "forest" ONLY if there is no current task at all — \
+the recent turns are themselves disconnected one-offs.
+
+CRITICAL:
+- The mere presence of an unrelated EARLIER turn does NOT make it a forest. Judge \
+by whether the RECENT activity is a coherent multi-turn task.
+- Using the SAME TOOLS is NOT the same task. Two unrelated questions that both use \
+web search are still unrelated. Judge by GOAL/SUBJECT, not tools.
+
+Turn-by-turn skeleton (user intent + what the agent did each turn):
+
+{skeleton}
+
+Respond with ONLY a JSON object, no prose:
+{{"regime": "task" | "forest",
+  "mainline_turns": [turn numbers of the current task; [] if forest],
+  "focus": "<=8 word label of the current task, or empty",
+  "reason": "<=20 word justification"}}"""
+
+
+def _parse_json_object(text: str) -> Dict[str, Any]:
+    """从 LLM 回复里抠出第一个 JSON 对象(容忍 ```json 围栏 / 前后赘述)。"""
+    import json
+
+    s = (text or "").strip()
+    a, b = s.find("{"), s.rfind("}")
+    if a == -1 or b == -1 or b <= a:
+        raise ValueError("no json object in response")
+    return json.loads(s[a : b + 1])
+
+
+def _llm_enabled() -> bool:
+    return os.environ.get("HERMES_CONTEXTVIS_REGIME_LLM", "1").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
 # ── 检测结果 ────────────────────────────────────────────────────────────
 
 @dataclass
@@ -166,6 +280,7 @@ class RegimeDetector:
         self.min_turns = _env_int("HERMES_CONTEXTVIS_REGIME_MIN_TURNS", 2)
         self.min_ratio = _env_float("HERMES_CONTEXTVIS_REGIME_RATIO", 0.5)
         self.min_span = _env_int("HERMES_CONTEXTVIS_REGIME_SPAN", 3)
+        self._llm_cache = None  # (skeleton_hash, RegimeAssessment) — 同历史不重复调 aux
 
     def _compute(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         """跑一遍 turn 粒度的判定,返回全部中间量(assess / debug 共用)。"""
@@ -176,18 +291,8 @@ class RegimeDetector:
                     "token_turns": {}, "turn_salient": [], "turn_weight": [],
                     "turn_of": [], "turn_preview": []}
 
-        # 预扫:每条消息的原文 + 是否压缩样板(样板对检测器完全隐形)。
-        raw = [_raw_text(m) for m in messages]
-        boiler = [_is_boilerplate(raw[i]) for i in range(n)]
-
-        # 按 **真实** user 发言切 turns(样板的 role=user 摘要块不算新 turn → 不制造假 turn)。
-        turn_of: List[int] = []
-        cur = -1
-        for i, m in enumerate(messages):
-            if m.get("role") == "user" and not boiler[i]:
-                cur += 1
-            turn_of.append(max(cur, 0))
-        n_turns = max(turn_of) + 1
+        # turn 切分 + 样板标记(与 LLM 骨架共用 _segment_turns,turn 编号一致)。
+        turn_of, n_turns, boiler, raw = _segment_turns(messages)
 
         # 每条消息 salient + 权重(字符数代理 token);聚合到 turn。样板消息整条跳过。
         turn_salient: List[Set[str]] = [set() for _ in range(n_turns)]
@@ -229,11 +334,13 @@ class RegimeDetector:
                 "token_turns": token_turns, "turn_salient": turn_salient,
                 "turn_weight": turn_weight, "turn_of": turn_of, "turn_preview": turn_preview}
 
-    def assess(self, messages: List[Dict[str, Any]]) -> RegimeAssessment:
+    def _assess_heuristic(self, messages: List[Dict[str, Any]]) -> RegimeAssessment:
+        """廉价、确定性的嗅探(第一刀 / LLM 不可用时的回退)。"""
         c = self._compute(messages)
         if c["n"] == 0:
             return RegimeAssessment("forest", set(), "empty")
         reason = (
+            f"heuristic:{'task' if c['is_task'] else 'forest'} "
             f"on_turns={len(c['on_turns'])}/{c['n_turns']} ratio={c['ratio']:.2f} "
             f"span={c['span']} links={len(c['linking'])}"
         )
@@ -241,25 +348,94 @@ class RegimeDetector:
             "task" if c["is_task"] else "forest", c["on_thread_indices"], reason
         )
 
-    def debug(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """完整拆解,供 context.regime 调试 RPC——一眼看出谁把哪些 turn 串成了主线。"""
+    def _assess_llm(self, messages: List[Dict[str, Any]], agent: Any) -> RegimeAssessment:
+        """方向 B:辅助模型按"语义"判任务/森林。复用压缩的 aux runtime(便宜模型)。
+
+        只喂 turn 骨架(意图 + 工具/文件),不喂全文。失败时由 ``assess`` 回退启发式。
+        """
+        comp = getattr(agent, "context_compressor", None)
+        if comp is None:
+            raise RuntimeError("no context_compressor for aux runtime")
+        skeleton, turn_of, n_turns = _build_skeleton(messages)
+        if n_turns < 2:
+            return RegimeAssessment("forest", set(), "llm:too-short")
+        key = hash(skeleton)
+        if self._llm_cache is not None and self._llm_cache[0] == key:
+            return self._llm_cache[1]
+
+        from agent.auxiliary_client import call_llm
+
+        call_kwargs: Dict[str, Any] = {
+            "task": "compression",  # 复用 auxiliary.compression 的模型/超时配置
+            "main_runtime": {
+                "model": getattr(comp, "model", None),
+                "provider": getattr(comp, "provider", None),
+                "base_url": getattr(comp, "base_url", None),
+                "api_key": getattr(comp, "api_key", None),
+                "api_mode": getattr(comp, "api_mode", None),
+            },
+            "messages": [{"role": "user", "content": _REGIME_PROMPT.format(skeleton=skeleton)}],
+            "max_tokens": 300,
+        }
+        if getattr(comp, "summary_model", ""):
+            call_kwargs["model"] = comp.summary_model
+        response = call_llm(**call_kwargs)
+        content = response.choices[0].message.content
+        if not isinstance(content, str):
+            content = str(content) if content else ""
+        data = _parse_json_object(content)
+
+        regime = "task" if str(data.get("regime", "")).strip().lower() == "task" else "forest"
+        mainline = {
+            int(t) for t in (data.get("mainline_turns") or [])
+            if isinstance(t, (int, float))
+        }
+        on_thread = (
+            {i for i in range(len(messages)) if turn_of[i] in mainline}
+            if regime == "task" else set()
+        )
+        focus = str(data.get("focus", ""))[:80]
+        reason = f"llm:{regime} focus={focus!r} :: {str(data.get('reason', ''))[:80]}"
+        result = RegimeAssessment(regime, on_thread, reason)
+        self._llm_cache = (key, result)
+        return result
+
+    def assess(
+        self, messages: List[Dict[str, Any]], agent: Any = None
+    ) -> RegimeAssessment:
+        """权威判定:有 agent 且开启 LLM → aux 语义判定,失败回退启发式;否则启发式。"""
+        if agent is not None and _llm_enabled():
+            try:
+                return self._assess_llm(messages, agent)
+            except Exception as e:  # noqa: BLE001 — 检测绝不能挡住压缩流程
+                logger.debug("regime LLM failed → heuristic fallback: %s", e)
+        return self._assess_heuristic(messages)
+
+    def debug(
+        self, messages: List[Dict[str, Any]], agent: Any = None
+    ) -> Dict[str, Any]:
+        """完整拆解,供 context.regime 调试 RPC。顶层 regime 是**权威**判定(LLM 优先),
+        另附启发式拆解(linking_tokens / turns)做对照。"""
         c = self._compute(messages)
-        # linking token 按"出现 turn 数"降序——太普遍的(基础设施/样板)浮到顶,最可疑。
         linking_tokens = sorted(
             ({"token": tok, "turns": sorted(c["token_turns"][tok]),
               "n_turns": len(c["token_turns"][tok])} for tok in c["linking"]),
             key=lambda d: (-d["n_turns"], d["token"]),
         )
-        on_turns = c["on_turns"]
         turns = [
-            {"turn": t, "on_thread": t in on_turns, "salient": len(c["turn_salient"][t]),
+            {"turn": t, "on_thread": t in c["on_turns"], "salient": len(c["turn_salient"][t]),
              "weight": c["turn_weight"][t], "preview": c["turn_preview"][t]}
             for t in range(c["n_turns"])
         ]
+        auth = self.assess(messages, agent)
         return {
-            "regime": "task" if c["is_task"] else "forest",
+            "regime": auth.regime,
+            "engine": "llm" if auth.reason.startswith("llm") else "heuristic",
+            "reason": auth.reason,
+            "on_thread_count": len(auth.on_thread_indices),
+            "heuristic_regime": "task" if c["is_task"] else "forest",
             "n_turns": c["n_turns"],
-            "on_turns": sorted(on_turns),
+            "on_turns": sorted(c["on_turns"]),
             "ratio": round(c["ratio"], 3),
             "span": c["span"],
             "thresholds": {"min_turns": self.min_turns, "ratio": self.min_ratio,
