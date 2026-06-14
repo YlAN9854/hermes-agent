@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 
 import { formatTokenCount } from "@/lib/format";
 import { squarify } from "@/lib/contextvis/treemap";
+import { buildTurnCells, type TurnCell } from "@/lib/contextvis/turns";
 import {
   droppableChunkIds,
   foldableChunkIds,
@@ -35,6 +36,15 @@ import type {
 import { cn } from "@/lib/utils";
 
 type TreemapMode = "proportional" | "actual";
+/** 主视图主轴:类型带(旧树图)⇄ 轮次带(纵向时间序)。见 context-vis/turn-band.md。 */
+type ViewKind = "type" | "turn";
+
+/** turn 带配色(本刀不按主题着色;仅区分系统底座 / 对话轮 / 折叠产物)。 */
+const TURN_BASE_COLOR = "#8b7fd4"; // 系统底座 = system 紫
+const TURN_CELL_COLOR = "#7d8aa3"; // 对话轮 = history 灰蓝
+const TURN_FOLD_COLOR = "#565d6b"; // 已折叠摘要 = 压暗灰(虚线边区分)
+/** turn 格最小高度(保证极小轮仍可点;轻微破「高∝token」严格比例,见 doc §10)。 */
+const TURN_MIN_H = 12;
 
 /** 命运 → treemap 描边色（Tailwind 语义 token,与检视器按钮呼应）。 */
 const FATE_STROKE: Record<Fate, string> = {
@@ -267,6 +277,174 @@ function Treemap({
   );
 }
 
+/**
+ * 轮次带（turn band）—— 纵向、与 TUI 同向的时间序视图。
+ *
+ * 主轴从「类型」翻成「turn」:按 chunk.turn 聚合,顶=系统底座→往下逐轮(顶老底新,
+ * 与 TUI 滚动同向),格高 ∝ 该轮 token。占用模式下纵轴同时是占用轴(顶=0、底=budget,
+ * 底部留余量 + compact 线)。本刀不按主题着色,只区分底座/对话轮。见 turn-band.md。
+ */
+function TurnBand({
+  snapshot,
+  mode,
+  selected,
+  onSelect,
+}: {
+  snapshot: ContextSnapshot;
+  mode: TreemapMode;
+  selected: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  const { percent, budget, compactAt } = snapshot;
+  const cells = buildTurnCells(snapshot);
+  const total = cells.reduce((s, c) => s + c.tokens, 0);
+  if (total <= 0) return null;
+
+  const usedFrac =
+    mode === "actual" ? Math.min(1, Math.max(0, percent / 100)) : 1;
+  const fillH = VB_H * usedFrac;
+
+  // 顶=最老(底座)→ 往下逐轮累积;格高 ∝ token,设最小高保证可点。
+  // for-of 而非 .map:避免在渲染期闭包里改累加量(react-hooks/immutability)。
+  const laid: { cell: TurnCell; y: number; h: number }[] = [];
+  let yCursor = 0;
+  for (const cell of cells) {
+    const h = Math.max(TURN_MIN_H, (cell.tokens / total) * fillH);
+    laid.push({ cell, y: yCursor, h });
+    yCursor += h;
+  }
+
+  // 占用模式:底部余量(headroom)+ 仅在余量区画 token 轴刻度 + compact 阈值线
+  // (顶=0 token、底=budget;不让刻度线穿过上方的 turn 格)。
+  const axis: { y: number; label: string }[] = [];
+  let compactLineY: number | null = null;
+  if (mode === "actual" && budget > 0) {
+    for (const frac of [0.25, 0.5, 0.75, 1]) {
+      const y = frac * VB_H;
+      if (y >= fillH) axis.push({ y, label: formatTokenCount(budget * frac) });
+    }
+    if (compactAt && compactAt > 0 && compactAt <= budget) {
+      compactLineY = (compactAt / budget) * VB_H;
+    }
+  }
+
+  return (
+    <svg
+      viewBox={`0 0 ${VB_W} ${VB_H}`}
+      preserveAspectRatio="none"
+      className="h-[300px] w-full"
+      role="img"
+      aria-label="context turn band"
+    >
+      {mode === "actual" && fillH < VB_H && (
+        <rect x={0} y={fillH} width={VB_W} height={VB_H - fillH} className="fill-current/5" />
+      )}
+      {axis.map((a, i) => (
+        <g key={`ax-${i}`}>
+          <line
+            x1={0}
+            y1={a.y}
+            x2={VB_W}
+            y2={a.y}
+            className="stroke-current/15"
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <text
+            x={VB_W - 3}
+            y={a.y - 2}
+            fontSize={TOKEN_FS}
+            textAnchor="end"
+            className="pointer-events-none fill-current/40"
+          >
+            {a.label}
+          </text>
+        </g>
+      ))}
+      {compactLineY !== null && (
+        <g>
+          <line
+            x1={0}
+            y1={compactLineY}
+            x2={VB_W}
+            y2={compactLineY}
+            className="stroke-warning"
+            strokeDasharray="4 3"
+            strokeWidth={1.25}
+            vectorEffect="non-scaling-stroke"
+          />
+          <text
+            x={3}
+            y={compactLineY - 3}
+            fontSize={TOKEN_FS}
+            className="pointer-events-none fill-warning"
+          >
+            compact
+          </text>
+        </g>
+      )}
+      {laid.map(({ cell, y, h }) => {
+        const isSel = selected !== null && cell.chunkIds.includes(selected);
+        const showLabel = h > 18;
+        const fill = cell.isFolded
+          ? TURN_FOLD_COLOR
+          : cell.isBase
+            ? TURN_BASE_COLOR
+            : TURN_CELL_COLOR;
+        const label = fitText(
+          cell.isFolded ? `⊟ ${cell.label}` : cell.label,
+          VB_W - 56,
+        );
+        const tip = cell.isFolded
+          ? `${cell.label}（压缩折叠产物）· ${formatTokenCount(cell.tokens)}`
+          : `${cell.label} · ${formatTokenCount(cell.tokens)}${cell.isBase ? "" : ` · 第${cell.turn}轮`}`;
+        return (
+          <g
+            key={cell.isFolded ? cell.repId : `turn-${cell.turn}`}
+            onClick={() => onSelect(isSel ? null : cell.repId)}
+            className="cursor-pointer"
+          >
+            <title>{tip}</title>
+            <rect
+              x={0}
+              y={y}
+              width={VB_W}
+              height={Math.max(0, h)}
+              fill={fill}
+              fillOpacity={isSel ? 0.95 : cell.isFolded ? 0.55 : 0.8}
+              className="stroke-background-base"
+              strokeWidth={isSel ? 2 : cell.isFolded ? 1.25 : 0.75}
+              strokeDasharray={cell.isFolded ? "4 3" : undefined}
+              vectorEffect="non-scaling-stroke"
+            />
+            {showLabel && (
+              <>
+                <text
+                  x={4}
+                  y={y + LABEL_FS + 1}
+                  fontSize={LABEL_FS}
+                  className="pointer-events-none fill-black/85"
+                >
+                  {label}
+                </text>
+                <text
+                  x={VB_W - 3}
+                  y={y + LABEL_FS + 1}
+                  fontSize={TOKEN_FS}
+                  textAnchor="end"
+                  className="pointer-events-none fill-black/55"
+                >
+                  {formatTokenCount(cell.tokens)}
+                </text>
+              </>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 /** 占用率 sparkline（占用率随轮次；压缩点描红）。 */
 function Sparkline({ snapshot }: { snapshot: ContextSnapshot }) {
   const { history, compactions } = snapshot;
@@ -323,6 +501,36 @@ function ModeToggle({
   );
 }
 
+/** 主视图开关:类型带 ⇄ 轮次带（默认轮次,见 turn-band.md §8）。 */
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: ViewKind;
+  onChange: (v: ViewKind) => void;
+}) {
+  const opt = (v: ViewKind, label: string) => (
+    <button
+      type="button"
+      onClick={() => onChange(v)}
+      className={cn(
+        "rounded px-1.5 py-0.5 text-[10px] tracking-wide transition-colors",
+        view === v
+          ? "bg-current/15 text-text-secondary"
+          : "text-text-tertiary hover:text-text-secondary",
+      )}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="flex items-center gap-0.5 rounded border border-current/15 p-0.5">
+      {opt("turn", "轮次")}
+      {opt("type", "类型")}
+    </div>
+  );
+}
+
 export function ContextVisPanel({
   snapshot,
   selected,
@@ -343,6 +551,8 @@ export function ContextVisPanel({
   onClearFates: () => void;
 }) {
   const [mode, setMode] = useState<TreemapMode>("proportional");
+  // 主视图主轴:默认「轮次」(turn 优先,见 turn-band.md);「类型」一键回旧树图。
+  const [view, setView] = useState<ViewKind>("turn");
   // 阶段 3「应用」本地状态:确认/进行中、上次释放量(供撤销)、错误。
   // action 原子化:一次只 drop 或只 fold,applyKind 记当前确认/进行中的动作。
   const [applyPhase, setApplyPhase] = useState<"idle" | "confirm" | "running">(
@@ -486,6 +696,7 @@ export function ContextVisPanel({
       <div className="flex items-center justify-between gap-2">
         <div className="text-display text-xs tracking-wider text-text-tertiary">context</div>
         <div className="flex items-center gap-2">
+          {hasChunks && <ViewToggle view={view} onChange={setView} />}
           {hasChunks && <ModeToggle mode={mode} onChange={setMode} />}
           {ready && (
             <span className={cn("text-sm font-medium tabular-nums", tone.text)}>{percent}%</span>
@@ -722,15 +933,23 @@ export function ContextVisPanel({
             </div>
           )}
 
-          {hasChunks && (
-            <Treemap
-              snapshot={snapshot}
-              mode={mode}
-              selected={selected}
-              onSelect={onSelect}
-              fateMap={effectiveFateMap}
-            />
-          )}
+          {hasChunks &&
+            (view === "turn" ? (
+              <TurnBand
+                snapshot={snapshot}
+                mode={mode}
+                selected={selected}
+                onSelect={onSelect}
+              />
+            ) : (
+              <Treemap
+                snapshot={snapshot}
+                mode={mode}
+                selected={selected}
+                onSelect={onSelect}
+                fateMap={effectiveFateMap}
+              />
+            ))}
 
           <Sparkline snapshot={snapshot} />
         </>

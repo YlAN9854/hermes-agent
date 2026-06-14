@@ -99,6 +99,7 @@ class Segment:
     ref: Dict[str, Any]
     group: Optional[str] = None  # tool_schema 的 toolset 名等
     raw: str = ""  # 原文，供右侧栏检视器显示
+    folded: bool = False  # 压缩折叠产物（摘要消息），非对话轮
 
 
 @dataclass
@@ -116,6 +117,7 @@ class Chunk:
     turnSpan: Optional[List[int]] = None
     fate: Optional[str] = None  # 预留：未来交互式压缩用，v1 恒空
     raw: Optional[str] = None  # 成员原文拼接（截断），供检视器
+    folded: bool = False  # 压缩折叠产物（摘要）：turn 带画成「已折叠」块
 
 
 # ── token 估算（复用 Hermes 既有 chars//4 口径） ──────────────────────
@@ -244,17 +246,28 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
     """会话历史 → 每消息 1 段；role=tool 按来源工具分流 file / tool_result。"""
     out: List[Segment] = []
     call_index = _tool_call_index(history)
+    marker = _summary_end_marker()
     turn = 0
     for i, msg in enumerate(history):
         role = msg.get("role")
         if role == "system":
             continue  # system prompt 由 _segment_system 负责，避免重复
-        if role == "user":
+        # 压缩摘要(user 角色、content 以 END marker 结尾)是**折叠产物**，不是对话轮：
+        # 不计入轮号(免得顶掉后续真实轮的编号)，单独成「已折叠」块。merge-prefix
+        # 情形 marker 在正文中段、不在末尾，故不会误伤真实消息。
+        is_summary = (
+            role in ("user", "assistant")
+            and _content_text(msg).rstrip().endswith(marker)
+        )
+        if role == "user" and not is_summary:
             turn += 1
         tokens = _est_msg(msg)
         ref = {"messageIndex": i}
         raw = _msg_raw(msg)
-        if role == "user":
+        if is_summary:
+            out.append(Segment(f"msg:{i}", SEG_ASSISTANT, turn, tokens,
+                               "已折叠摘要", ref, raw=raw, folded=True))
+        elif role == "user":
             text = _content_text(msg)
             out.append(Segment(f"msg:{i}", SEG_USER, turn, tokens,
                                _snippet(text) or "user", ref, raw=raw))
@@ -313,6 +326,22 @@ def _snippet(text: str, n: int = 48) -> str:
     return (text[: n - 1] + "…") if len(text) > n else text
 
 
+def _summary_end_marker() -> str:
+    """压缩摘要(user 角色)末尾的 END marker —— 用来把折叠产物从对话轮里认出来。
+
+    懒导入避免与 context_compressor 形成模块级导入环;失败回退硬编码常量。
+    """
+    try:
+        from agent.context_compressor import _SUMMARY_END_MARKER
+
+        return _SUMMARY_END_MARKER
+    except Exception:  # pragma: no cover - 导入形态变更时的兜底
+        return (
+            "\n\n--- END OF CONTEXT SUMMARY — "
+            "respond to the message below, not the summary above ---"
+        )
+
+
 # ── token 缩放：整体校准到真实总占用 ──────────────────────────────────
 
 def _scale(segments: List[Segment], target: int) -> None:
@@ -347,11 +376,32 @@ def _strat_identity(band: str, segs: List[Segment]) -> List[Chunk]:
 
 
 def _strat_group_by_turn(band: str, segs: List[Segment]) -> List[Chunk]:
-    """history 带：同一轮的 user/assistant/tool_call 合并成一块。"""
+    """history 带：同一轮的 user/assistant/tool_call 合并成一块；
+    压缩折叠产物(folded)**单独成块**，不并入任何对话轮。"""
+    chunks: List[Chunk] = []
+    # 折叠摘要：每条单独成「已折叠」块（id 用 msg 序号，区别于 turnN）。
+    for s in segs:
+        if not s.folded:
+            continue
+        chunks.append(
+            Chunk(
+                id=f"{band}:{s.id}",
+                type=band,
+                tokens=s.tokens,
+                turn=s.turn,
+                label=s.label,
+                sourceRefs=[s.ref],
+                members=1,
+                turnSpan=[s.turn, s.turn],
+                folded=True,
+                raw=_cap_raw(s.raw, s.tokens),
+            )
+        )
     by_turn: Dict[int, List[Segment]] = {}
     for s in segs:
+        if s.folded:
+            continue
         by_turn.setdefault(s.turn, []).append(s)
-    chunks: List[Chunk] = []
     for turn in sorted(by_turn):
         group = by_turn[turn]
         # 标签优先取该轮 user 段的首句（主线视角）。
@@ -512,6 +562,8 @@ def _chunk_dict(c: Chunk) -> Dict[str, Any]:
         d["turnSpan"] = c.turnSpan
     if c.fate is not None:
         d["fate"] = c.fate
+    if c.folded:
+        d["folded"] = True
     if _raw_enabled() and c.raw:
         d["raw"] = c.raw
     return d

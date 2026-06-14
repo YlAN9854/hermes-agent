@@ -48,6 +48,8 @@ export interface ContextChunk {
   /** 预留：未来交互式压缩的命运标记，v1 恒空。 */
   fate?: "keep" | "fold" | "drop";
   raw?: string;
+  /** 压缩折叠产物（摘要消息）：turn 带画成「已折叠」块，不计为对话轮。 */
+  folded?: boolean;
 }
 
 /** 压缩事件：给历史块分配命运后，容器占用的一次骤降。 */

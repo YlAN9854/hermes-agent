@@ -83,6 +83,11 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
   **剩**:focus 喂焦点压缩、深析死重清单(喂闸门 + 方向 A 主动清理)、滚动增量、产品门槛。
 - **G. 压缩闸门**:第一阶段(预览 + 确认)**已建成**;已与 R 合流——闸门现"**regime ∧ collision
   才弹**"。**剩**:闸门内确认/纠正压缩焦点、闸门内编辑(drop/fold,需先解 running/对账两暗礁)。
+- **M. 结构突变账本(修法②,设计定稿)**:让轮次拓扑扛过压缩/折叠/删除,见
+  [mutation-ledger.md](mutation-ledger.md)。**钩"结构突变"非"压缩"**(统摄手动 drop/fold + 自动压缩
+  三场景),突变前算折叠出处挂回折叠块,band 画"已折叠 第1–5轮〔主题〕→ 摘要"。两咽喉
+  (`_commit_history_mutation` / `_compress_context`)一原语一本账。第 0 步先 boilerplate 对齐
+  (复用 `regime._is_boilerplate` 全集)。**turn 带二刀主题着色的地基**——不解它,着色也画在压坏历史上。
 - **T. turn 带(主视图主轴翻转,设计定稿)**:turn 优先 + 纵向时间序 + 逐轮主题着色,见
   [turn-band.md](turn-band.md)。**取代原 E4**(语义排列)、**吸收 E3**(语义化 chunk):同 topic
   的轮天然聚拢,不造新分块器;时间序保底(踩 E4 红线安全侧)。大窗口下闸门罕触发→**turn 带是
