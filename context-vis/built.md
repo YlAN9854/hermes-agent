@@ -140,6 +140,29 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
 
 ---
 
+### turn 带 · 主视图主轴翻转(第一刀+第二刀,设计见 [turn-band.md](turn-band.md))
+主视图从"类型优先"翻成"**turn 优先**":纵向、与 TUI 同向、按 token 排——兑现 CLAUDE.md 第 5 条
+(时间轴),并成为大窗口下的**语义 minimap / 主操作台**。
+- **第一刀 · 时间序 turn 带(零 LLM)**:`web/src/lib/contextvis/turns.ts` `buildTurnCells`(按
+  `chunk.turn` 聚合,折叠产物各自成格)+ `ContextVisPanel` 的 `TurnBand`(纵向、顶老底新、占用轴、
+  比例/占用双模式)+ 视图开关「轮次/类型」(**默认轮次**,旧类型树图一键可回)。点轮 → inspector 显该轮原文。
+- **压缩块诚实显示(取代废弃的"结构突变账本",决策痕迹见 [mutation-ledger.md](mutation-ledger.md))**:
+  `chunking._is_compression_artifact` 对齐 `regime._is_boilerplate` 全 5 marker → 压缩产物标 `folded`、
+  **不计轮号**、画成「压缩 context」斜纹块、摆在正确位置。**不重建**被销毁的拓扑(folded 后已是单一可操作单元)。
+  实测:多次压缩合并为一坨、真实轮号不乱。
+- **第二刀 · 逐轮主题着色**:`regime.py` prompt 扩产 `turns:[{turn,topic,mainline}]`(`RegimeAssessment`
+  加 `focus`/`turn_topics`,`assess` 签名/门控不变);新轻量 RPC `context.regime_colors`(server.py,
+  **按 messageIndex** join chunk→`{topic,mainline}`,规避 regime 0-indexed vs chunking 1-indexed);
+  前端「主题着色」**按需** toggle + `fetchRegimeColors` + `TurnBand` 按 topic 上色(主线饱和、支线压暗)。
+  数据带 `historyVersion` 判新鲜度(snapshot 推进即失效),**非每帧调 aux**。
+- **闸门自动着色(闸门与着色同一个脑)**:闸门 `assess` 与着色 `assess` 同实例同 `_llm_cache` → 闸门一弹,
+  前端 `gateActive` 即自动 `fetchRegimeColors`(命中缓存即免费)+ 强制着色(`wantColor = colorOn || gateActive`),
+  把关压缩时直接看到主线/支线。
+- **验证**:web build + lint 干净;后端 mock-LLM 测森林(三话题三色全支线)+ 任务(主线轮同色高亮、
+  工具结果归对轮)+ join off-by-one 正确吸收。
+
+---
+
 ## 决策日志(辩过并定下的)
 
 - **token 保真度分档**:
