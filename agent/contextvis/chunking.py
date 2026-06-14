@@ -246,27 +246,27 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
     """会话历史 → 每消息 1 段；role=tool 按来源工具分流 file / tool_result。"""
     out: List[Segment] = []
     call_index = _tool_call_index(history)
-    marker = _summary_end_marker()
     turn = 0
     for i, msg in enumerate(history):
         role = msg.get("role")
         if role == "system":
             continue  # system prompt 由 _segment_system 负责，避免重复
-        # 压缩摘要(user 角色、content 以 END marker 结尾)是**折叠产物**，不是对话轮：
-        # 不计入轮号(免得顶掉后续真实轮的编号)，单独成「已折叠」块。merge-prefix
-        # 情形 marker 在正文中段、不在末尾，故不会误伤真实消息。
-        is_summary = (
+        # 压缩注入的样板(摘要 / 活动任务表注记 / 压缩注脚)是**折叠产物**，不是对话轮：
+        # 不计入轮号(免得顶掉后续真实轮编号)，单独成「压缩 context」块——**诚实显示在原位、
+        # 但不冒充对话轮**(不重建被销毁的原始轮：那已不可知，见 turn-band.md §4)。
+        # 与 regime 同一套 marker，两层一致。
+        is_artifact = (
             role in ("user", "assistant")
-            and _content_text(msg).rstrip().endswith(marker)
+            and _is_compression_artifact(_content_text(msg))
         )
-        if role == "user" and not is_summary:
+        if role == "user" and not is_artifact:
             turn += 1
         tokens = _est_msg(msg)
         ref = {"messageIndex": i}
         raw = _msg_raw(msg)
-        if is_summary:
+        if is_artifact:
             out.append(Segment(f"msg:{i}", SEG_ASSISTANT, turn, tokens,
-                               "已折叠摘要", ref, raw=raw, folded=True))
+                               "压缩 context", ref, raw=raw, folded=True))
         elif role == "user":
             text = _content_text(msg)
             out.append(Segment(f"msg:{i}", SEG_USER, turn, tokens,
@@ -327,7 +327,7 @@ def _snippet(text: str, n: int = 48) -> str:
 
 
 def _summary_end_marker() -> str:
-    """压缩摘要(user 角色)末尾的 END marker —— 用来把折叠产物从对话轮里认出来。
+    """压缩摘要(user 角色)末尾的 END marker —— 回退识别用。
 
     懒导入避免与 context_compressor 形成模块级导入环;失败回退硬编码常量。
     """
@@ -340,6 +340,21 @@ def _summary_end_marker() -> str:
             "\n\n--- END OF CONTEXT SUMMARY — "
             "respond to the message below, not the summary above ---"
         )
+
+
+def _is_compression_artifact(text: str) -> bool:
+    """是否压缩注入的样板(摘要 / 活动任务表注记 / 压缩注脚)。
+
+    **与 regime 检测器同一套 marker**(复用 `regime._is_boilerplate`),保证"分块层 vs
+    检测层"对'什么是压缩产物'的判断一致——避免再出现某种产物在一层算轮、另一层不算。
+    懒导入避免导入环;失败回退仅认摘要 END marker。
+    """
+    try:
+        from agent.contextvis.regime import _is_boilerplate
+
+        return _is_boilerplate(text)
+    except Exception:  # pragma: no cover - 导入形态变更时的兜底
+        return text.rstrip().endswith(_summary_end_marker())
 
 
 # ── token 缩放：整体校准到真实总占用 ──────────────────────────────────

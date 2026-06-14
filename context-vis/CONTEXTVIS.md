@@ -68,7 +68,7 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 | Hermes 现在自动怎么压缩上下文(方向 A 的基线) | [compression-baseline.md](compression-baseline.md) |
 | 方向 A-v2 fold（折成摘要而非整删）设计 | [fold.md](fold.md) |
 | 主视图主轴翻转：turn 优先 + 逐轮主题（吸收 E3/E4，大窗口主操作台） | [turn-band.md](turn-band.md) — 纵向语义 minimap（设计定稿） |
-| 让轮次拓扑扛过压缩/折叠/删除（结构突变前留痕 + 折叠出处） | [mutation-ledger.md](mutation-ledger.md) — 结构突变账本（设计定稿，修法②） |
+| 压缩块怎么在轮次视图里诚实显示（不重建拓扑，反转决策痕迹） | [turn-band.md](turn-band.md) §4 ＋ [mutation-ledger.md](mutation-ledger.md)（⚠️ 已废弃存档） |
 | 任务态识别原理 + 判定依据（ContextVis 何时该醒 + 压什么） | [regime.md](regime.md) — 自适应总开关(已建成) |
 | 阶段 3 命令通道为何可行(架构真相 + 实测证据) | [phase3-channel.md](phase3-channel.md) |
 | 压缩闸门（拦 auto-compress 改用户确认）调研 | [compaction-gate.md](compaction-gate.md) |
