@@ -25,6 +25,41 @@ def _gate_enabled() -> bool:
     return os.environ.get("HERMES_CONTEXTVIS_GATE", "0").strip().lower() in _TRUTHY
 
 
+def _regime_gating_enabled() -> bool:
+    """两级门控开关(默认开)。设 0 → 回退老的"逢 has_middle 必弹"一级门控。"""
+    return os.environ.get("HERMES_CONTEXTVIS_REGIME", "1").strip().lower() in _TRUTHY
+
+
+def _should_gate_for_regime(
+    agent: Any, messages: List[Dict[str, Any]], plan: Dict[str, Any]
+) -> tuple[bool, str]:
+    """两级门控判定:这次压缩到底要不要打断用户?
+
+    A 级(regime):有没有值得护的主线?没有 → 森林,静默自动压。
+    B 级(collision):这次压缩的折叠区 [head_end, tail_start) 是否触及主线消息?
+                     不触及(只压死重)→ 即使在任务态也静默压。
+    A ∧ B 才打断。返回 (是否打断, 原因串)。任何异常 → 保守放行打断(退回一级行为)。
+
+    误判代价不对称:漏弹只是退化成今天的静默自动压(无回归),故拿不准时倾向不扰。
+    """
+    if not _regime_gating_enabled():
+        return True, "regime-gating-off"
+    try:
+        from agent.contextvis.regime import get_regime_detector
+
+        a = get_regime_detector(agent).assess(messages)
+    except Exception as e:  # noqa: BLE001 — 检测失败绝不能挡住压缩流程
+        logger.debug("regime detect failed: %s", e)
+        return True, "regime-detect-error"
+    if a.regime != "task":
+        return False, f"forest ({a.reason})"
+    head_end, tail_start = plan.get("head_end", 0), plan.get("tail_start", 0)
+    collision = any(head_end <= i < tail_start for i in a.on_thread_indices)
+    if not collision:
+        return False, f"task-no-collision ({a.reason})"
+    return True, f"task-collision ({a.reason})"
+
+
 def _resolve_session_key() -> str:
     try:
         from gateway.session_context import get_session_env
@@ -155,6 +190,12 @@ def request_compaction_decision(
     if notify_cb is None:
         return None
 
+    # 两级门控(R 第一刀):森林 → 闸门闭嘴;任务但这次只压死重 → 也别扰。静默自动压。
+    should_gate, gate_reason = _should_gate_for_regime(agent, messages, plan)
+    if not should_gate:
+        logger.debug("compaction gate suppressed by regime — %s", gate_reason)
+        return None
+
     # 系统计划 + 占用投影(用 scaled chunk tokens,与 treemap / 真实占用同尺度)。
     try:
         from agent.contextvis import build_snapshot_chunks
@@ -194,6 +235,9 @@ def request_compaction_decision(
         "est_after_tokens": est_after,
         "est_after_percent": pct(est_after),
         "fold_turns": fold_turns,
+        # 两级门控放行原因(任务态 + 本次压缩触及主线),供闸门条标"检测到主线任务"。
+        "regime": "task",
+        "collision_reason": gate_reason,
         # 闸门 turn 中途触发,带上这一刻的新鲜 chunks + 占用,让前端 treemap 立刻
         # 刷成"即将被压的真实状态"——否则 treemap/占用还停在轮初的旧值,与 banner
         # 和 system_fate(按新消息算的 chunk id)对不上。

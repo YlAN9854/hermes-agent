@@ -79,6 +79,8 @@ export interface PendingCompaction {
   estAfterPercent: number;
   /** 将折叠的对话轮数（用于计划文字）。 */
   foldTurns: number;
+  /** 两级门控:检测到的任务态（"task"）。森林态不会弹闸门,故有值即 task。 */
+  regime?: string;
 }
 
 /** 容器 = 一组块，填进一个有预算上限的容器。 */

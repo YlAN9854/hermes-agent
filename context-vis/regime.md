@@ -137,6 +137,37 @@ Hermes 的 `_generate_summary(turns, focus_topic)` 语义就是"保住与该主�
 
 ---
 
+## 第一刀实现计划(廉价嗅探 + 两级门控)
+
+> 零 LLM、确定性。只证明"自适应门控"命题:森林闭嘴、任务出声。深析死重留第二刀。
+
+**新件 1 · `agent/contextvis/regime.py`(检测器)**
+- `get_regime_detector(agent)` 懒创建并缓存到 `agent._contextvis_regime`(呼应 `context_compressor` 常驻姿态)。
+- `assess(messages) -> RegimeAssessment{regime, on_thread_indices, reason}`,第一刀**无状态**(每次重算),滚动状态留第二刀、接口不变。
+- **信号(由强到弱,确定性)**:① 共享产物连续性——抽文件路径 + 代码标识符(tool_call args 的 path 最干净;正文 `` `backtick` ``/camelCase/snake_case/含扩展名路径,正则取),**跨 turn 复现**的产物 = 主线纽带;② salient ascii token 跨 turn 重叠(中文不强切分,避免脆弱分词)。
+- **判定(turn 粒度)**:先按 user 发言切 turns;`linking token` = 出现在 **≥2 个不同 turn** 的 salient → `on_turns` = salient 与 linking 相交的 turn → `regime="task"` 当 `len(on_turns)≥MIN_TURNS ∧ on_turns token 占比≥THR ∧ turn 跨度≥MIN_SPAN`,否则 `forest`。`on_thread_indices` 由 on_turns 展开成消息下标供 B 级 collision。
+- **纽带必须跨 turn,不是跨消息**:否则一个工具密集 turn 内部反复引用同一文件会自我结网、冒充主线(实测踩过此坑)。任务本质 = 跨 turn 延续。
+- 阈值 `MIN_TURNS=2 / THR=0.5 / MIN_SPAN=3`(turn),env `HERMES_CONTEXTVIS_REGIME_MIN_TURNS / _RATIO / _SPAN` 可调,默认偏保守(拿不准 → forest → 不扰)。
+
+**新件 2 · 两级门控嵌进 `request_compaction_decision`**(确认交互 + notify 之后、构建预览之前):
+```
+if not _should_gate_for_regime(agent, messages, plan): return None   # 静默自动压
+```
+`_should_gate_for_regime`:env `HERMES_CONTEXTVIS_REGIME=0` → 恒 True(逃生阀,回退一级门控);否则
+`a = assess(messages)`;**A 级** `a.regime!="task" → False`;**B 级** `collision = 任一 on_thread 落在 plan 的折叠区 [head_end,tail_start) → 返回 collision`。两级共用一份廉价信号。
+
+**门控开关**:`HERMES_CONTEXTVIS_GATE`(已有 opt-in,不变)+ `HERMES_CONTEXTVIS_REGIME`(新,默认 1;0=回退逢阈值弹)。**本刀不改默认**——两级门控是未来 GATE 敢默认开的前提,但仍 opt-in。
+
+**前端(最小)**:闸门 payload 加 `regime` + `collision_reason`;闸门条加一行"检测到主线任务 · 本次压缩将触及主线"。森林态不弹、无事件,无需改。
+
+**测试**:detector(森林→forest / 任务共享路径→task 且 on_thread 覆盖 / salient 抽取)+ 两级门控(森林→False / 任务但折叠区全 off-thread→False / 含 on-thread→True / REGIME=0→恒 True)+ 保守性(空输入→forest)。
+
+**E2E**(GATE=1):① 互不相关问答顶阈值 → 不弹、静默压;② 项目里反复改同几文件顶阈值 → 弹、标"检测到主线";REGIME=0 → 回到逢阈值必弹。
+
+**复用**:fold/drop/闸门/`plan_compaction` 全复用;新增仅一个检测器模块 + 一段两级判断 + 一个 env 逃生阀 + 一行前端小字。
+
+---
+
 ## 开放问题 / 风险
 
 - **嗅探信号选型**:回指密度 / 共享产物 / 目标延续——哪几个最省且最准?需实测。

@@ -14,7 +14,7 @@
 
 import { Card } from "@nous-research/ui/ui/components/card";
 import { ChevronUp } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { formatTokenCount } from "@/lib/format";
 import { squarify } from "@/lib/contextvis/treemap";
@@ -25,7 +25,7 @@ import {
   type Fate,
   type FateMap,
 } from "@/lib/contextvis/plan";
-import { applyDrops, applyFold, undoApply } from "@/lib/contextvis/apply";
+import { applyDrops, applyFold, debugRegime, undoApply } from "@/lib/contextvis/apply";
 import { respondCompaction } from "@/lib/contextvis/gate";
 import type {
   ChunkType,
@@ -465,6 +465,22 @@ export function ContextVisPanel({
     }
   };
 
+  // 调试钩子:console 里敲 __cvRegime() 即对当前 session 跑任务态检测器,
+  // 打印完整拆解 + linking_tokens 表(看谁把无关 turn 串成了假主线)。
+  const sid = snapshot.sessionId;
+  useEffect(() => {
+    if (!sid) return;
+    (window as unknown as Record<string, unknown>).__cvRegime = async () => {
+      const r = await debugRegime(sid);
+      console.log("[regime]", r);
+      const lt = (r as { linking_tokens?: unknown }).linking_tokens;
+      if (Array.isArray(lt)) console.table(lt);
+      const turns = (r as { turns?: unknown }).turns;
+      if (Array.isArray(turns)) console.table(turns);
+      return r;
+    };
+  }, [sid]);
+
   return (
     <Card className="flex flex-none flex-col gap-2 px-3 py-2">
       <div className="flex items-center justify-between gap-2">
@@ -502,6 +518,11 @@ export function ContextVisPanel({
                   ~{pending!.estAfterPercent}%
                 </span>
               </div>
+              {pending!.regime === "task" && (
+                <div className="text-[10px] leading-snug text-text-tertiary">
+                  检测到主线任务 · 本次压缩将触及主线,故请你把关(森林态会静默自动压)。
+                </div>
+              )}
               <div className="text-[11px] leading-snug text-text-secondary">
                 系统计划:折叠 {pending!.foldTurns} 轮为摘要、保留首轮+最近窗口
                 <span className="text-text-tertiary">

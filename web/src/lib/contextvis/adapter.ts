@@ -55,6 +55,9 @@ interface CompactionRequestPayload {
   est_after_tokens?: number;
   est_after_percent?: number;
   fold_turns?: number;
+  /** 两级门控放行的任务态标记("task")+ 原因(供闸门条标"检测到主线任务")。 */
+  regime?: string;
+  collision_reason?: string;
   /** 闸门时刻(turn 中途)的新鲜 chunks + 窗口,用来把 treemap/占用刷成与 banner 一致。 */
   chunks?: ContextChunk[];
   budget?: number;
@@ -134,6 +137,7 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
                 estAfterTokens: p.est_after_tokens ?? 0,
                 estAfterPercent: p.est_after_percent ?? 0,
                 foldTurns: p.fold_turns ?? 0,
+                regime: p.regime,
               },
             }));
           }

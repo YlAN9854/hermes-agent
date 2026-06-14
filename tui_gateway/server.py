@@ -4766,6 +4766,32 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5005, str(e))
 
 
+@method("context.regime")
+def _(rid, params: dict) -> dict:
+    """ContextVis 调试(只读):对当前 session 跑任务态检测器,返回完整拆解。
+
+    用于诊断"为什么判森林/主线"——尤其看 linking_tokens 里哪些 token 跨多个 turn
+    把无关话题串成了假主线(按出现 turn 数降序,太普遍的浮顶最可疑)。见
+    context-vis/regime.md。门控 HERMES_CONTEXTVIS。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    try:
+        from agent.contextvis.regime import get_regime_detector
+
+        agent = session["agent"]
+        with session["history_lock"]:
+            history = list(session.get("history", []))
+        detail = get_regime_detector(agent).debug(history)
+        detail["messages"] = len(history)
+        return _ok(rid, detail)
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
 @method("context.fold")
 def _(rid, params: dict) -> dict:
     """ContextVis 方向 A-v2:把用户标记的 fold 块折成一条摘要,落地真实上下文。

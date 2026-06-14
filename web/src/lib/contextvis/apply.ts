@@ -89,6 +89,14 @@ export async function applyFold(
   });
 }
 
+/** 调试:对当前 session 跑任务态检测器,返回完整拆解(只读)。console 用。 */
+export async function debugRegime(sessionId: string): Promise<Record<string, unknown>> {
+  const gw = await ensureClient();
+  return gw.request<Record<string, unknown>>("context.regime", {
+    session_id: sessionId,
+  });
+}
+
 /** 一步撤销上一次 apply(其间未发生新 turn 时有效)。 */
 export async function undoApply(sessionId: string): Promise<UndoResult> {
   const gw = await ensureClient();
