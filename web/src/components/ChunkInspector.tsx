@@ -17,6 +17,7 @@ import {
   freedTokens,
   MESSAGE_BACKED_TYPES,
   type Fate,
+  type FateMap,
 } from "@/lib/contextvis/plan";
 import type { ContextChunk } from "@/lib/contextvis/types";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,13 @@ const FATE_ACTIONS: { fate: Fate; label: string; active: string }[] = [
   { fate: "drop", label: "丢弃", active: "border-destructive bg-destructive/15 text-destructive" },
 ];
 
+/** 命运圆点配色（成员 chip 上标当前命运,呼应 treemap/按钮）。 */
+const FATE_DOT: Record<Fate, string> = {
+  keep: "bg-success",
+  fold: "bg-warning",
+  drop: "bg-destructive",
+};
+
 /**
  * 本轮构成（第三刀细节层）—— 选中的是对话轮时,显示该轮的类型细分 + 成员块。
  *
@@ -47,15 +55,34 @@ function TurnComposition({
   chunks,
   selectedId,
   onSelectChunk,
+  fateMap,
+  onSetFates,
 }: {
   chunks: ContextChunk[];
   selectedId: string;
   onSelectChunk?: (id: string) => void;
+  /** 第四刀:读各成员命运 → chip 标点 + 整轮聚合态。 */
+  fateMap?: FateMap;
+  /** 第四刀:整轮命运 → 批量给全部 message-backed 成员预填 fateMap。 */
+  onSetFates?: (ids: string[], fate: Fate | null) => void;
 }) {
   const total = chunks.reduce((s, c) => s + c.tokens, 0) || 1;
   const byType = new Map<string, number>();
   for (const c of chunks) byType.set(c.type, (byType.get(c.type) ?? 0) + c.tokens);
   const turn = chunks[0]?.turn;
+
+  // 第四刀:可落地(message 背书)的成员才能整轮 fold/drop;底座(system/tool_schema)无。
+  const applicable = chunks.filter((c) => MESSAGE_BACKED_TYPES.has(c.type));
+  const applicableIds = applicable.map((c) => c.id);
+  const fates = applicable.map((c) => fateMap?.[c.id]);
+  // 整轮聚合态:全部成员同命运才算"整轮已标该命运",否则 null(含混合/部分)。
+  const turnFate: Fate | null =
+    applicable.length > 0 && fates.every((f) => f && f === fates[0])
+      ? (fates[0] as Fate)
+      : null;
+  const anyMarked = fates.some(Boolean);
+  const showTurnFate = !!onSetFates && applicable.length > 0;
+
   return (
     <div className="flex flex-col gap-1.5 rounded border border-current/10 px-2 py-1.5">
       <div className="flex items-center justify-between text-[11px] text-text-tertiary">
@@ -74,10 +101,11 @@ function TurnComposition({
           />
         ))}
       </div>
-      {/* 成员块 chips:点击钻进该块原文 */}
+      {/* 成员块 chips:点击钻进该块原文;右侧小点标该块当前命运。 */}
       <div className="flex flex-wrap gap-1">
         {chunks.map((c) => {
           const isSel = c.id === selectedId;
+          const cFate = fateMap?.[c.id];
           return (
             <button
               key={c.id}
@@ -99,10 +127,58 @@ function TurnComposition({
               <span className="shrink-0 tabular-nums opacity-70">
                 {formatTokenCount(c.tokens)}
               </span>
+              {cFate && (
+                <span
+                  className={cn("inline-block h-1.5 w-1.5 shrink-0 rounded-full", FATE_DOT[cFate])}
+                />
+              )}
             </button>
           );
         })}
       </div>
+      {/* 整轮命运（第四刀）:一键给该轮全部 message-backed 成员预填命运 →
+          复用浮层既有「应用 fold/drop」落地。单块细修仍走下方按钮。 */}
+      {showTurnFate && (
+        <div className="flex items-center gap-1">
+          <span className="shrink-0 text-[10px] tracking-wide text-text-tertiary">整轮</span>
+          {FATE_ACTIONS.map(({ fate: f, label, active }) => {
+            const isActive = turnFate === f;
+            const freed = applicable.reduce((s, c) => s + freedTokens(c, f), 0);
+            return (
+              <button
+                key={f}
+                type="button"
+                onClick={() => onSetFates!(applicableIds, isActive ? null : f)}
+                aria-pressed={isActive}
+                className={cn(
+                  "flex flex-1 flex-col items-center rounded border px-1.5 py-0.5 text-[10px] transition-colors",
+                  isActive
+                    ? active
+                    : "border-current/15 text-text-tertiary hover:text-text-secondary",
+                )}
+              >
+                <span className="font-medium">{label}</span>
+                <span className="tabular-nums opacity-70">
+                  {freed > 0 ? `~${formatTokenCount(Math.floor(freed))}` : "保护"}
+                </span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => onSetFates!(applicableIds, null)}
+            disabled={!anyMarked}
+            aria-label="清除整轮标记"
+            title="清除整轮标记"
+            className={cn(
+              "shrink-0 rounded border border-current/15 p-1 text-text-tertiary transition-colors",
+              anyMarked ? "hover:text-text-secondary" : "cursor-default opacity-40",
+            )}
+          >
+            <RotateCcw className="h-3 w-3" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -114,6 +190,8 @@ export function ChunkInspector({
   onClose,
   turnChunks,
   onSelectChunk,
+  fateMap,
+  onSetFates,
 }: {
   chunk: ContextChunk | null;
   /** 该块当前标记的命运（用户意图,来自 ChatPage fateMap）。 */
@@ -125,6 +203,10 @@ export function ChunkInspector({
   turnChunks?: ContextChunk[];
   /** 点本轮构成里的成员块 → 钻进它。 */
   onSelectChunk?: (id: string) => void;
+  /** 第四刀:全量命运图（本轮构成据此标 chip 命运点 + 整轮聚合态）。 */
+  fateMap?: FateMap;
+  /** 第四刀:整轮命运批量预填。 */
+  onSetFates?: (ids: string[], fate: Fate | null) => void;
 }) {
   if (!chunk) {
     return (
@@ -190,6 +272,8 @@ export function ChunkInspector({
           chunks={turnChunks}
           selectedId={chunk.id}
           onSelectChunk={onSelectChunk}
+          fateMap={fateMap}
+          onSetFates={onSetFates}
         />
       )}
 

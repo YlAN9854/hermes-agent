@@ -9,10 +9,12 @@
 > 状态:分支 `feat/contextvis-occupancy-panel`。档1 / 档3 / resume 修复 / 原文检视器 /
 > 方向 A 阶段 1+2(标记+预览)/ **阶段 3 应用 drop + A-v2 fold** / **压缩闸门第一阶段** /
 > **任务态识别(自适应总开关:启发式 + LLM)** / **turn 带主轴翻转(第一刀时间序 + 第二刀逐轮主题着色
-> + 压缩块诚实显示 + 闸门自动着色 + 第三刀联动导航/细节层:点轮跳 TUI + inspector 本轮构成)** 完成——
-> 观察→治理(删/折)→落地 + 系统压缩前用户把关 + 自适应介入 + **按 turn 看时间/主题、点轮跳对话的语义 minimap** 均闭环。
-> **下一步:turn 带第四刀(格级 fate 主动梳理 / 闸门折叠区 collision 高亮);视口高亮框延后**,详见
-> [turn-band.md](turn-band.md) §9 / [roadmap.md](roadmap.md)。
+> + 压缩块诚实显示 + 闸门自动着色 + 第三刀联动导航/细节层:点轮跳 TUI + inspector 本轮构成
+> + 第四刀主动梳理:整轮 fold/drop 预填 fateMap 复用落地 + 闸门折叠碰撞高亮)** 完成——
+> 观察→治理(删/折)→落地 + 系统压缩前用户把关 + 自适应介入 + **按 turn 看时间/主题、点轮跳对话、
+> 整轮主动 fold/drop 的语义 minimap / 主操作台(band 概览 + inspector 类型细节)** 均闭环。
+> **下一步:把检测出的 `focus` 接进压缩(焦点压缩)/ 死重清单接进闸门(roadmap R 后续);
+> 视口高亮框、闸门内编辑延后**,详见 [turn-band.md](turn-band.md) §9 / [roadmap.md](roadmap.md)。
 
 ---
 
@@ -69,7 +71,7 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 ### 🟢 活跃 — 当前在动 / 常查
 | 文档 | 是什么 | 状态 |
 |---|---|---|
-| [turn-band.md](turn-band.md) | **当前工作线**:主视图主轴翻转(turn 优先 + 逐轮主题,语义 minimap) | 第一刀+第二刀✅,**第三刀下一步**(§9) |
+| [turn-band.md](turn-band.md) | 主视图主轴翻转(turn 优先 + 逐轮主题 + 主动梳理,语义 minimap / 主操作台) | **第一~第四刀✅**(§9),视口高亮框延后 |
 | [roadmap.md](roadmap.md) | 接下来去哪、优先级、待决方向 | 活跃 |
 | [built.md](built.md) | 做了什么 + 每个取舍为什么(里程碑日志) | 持续追加 |
 | [needs.md](needs.md) | 用户需求 → 解决方案地图(每条需求挂方案 + 状态) | 活跃 |

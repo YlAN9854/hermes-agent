@@ -185,9 +185,15 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   const selectedChunk =
     contextSnapshot.chunks.find((c) => c.id === selectedChunkId) ?? null;
   // 第三刀:选中块所属轮的全部 chunk(同 turn)；inspector 在 >1 时显「本轮构成」。
-  const turnChunks = selectedChunk
-    ? contextSnapshot.chunks.filter((c) => c.turn === selectedChunk.turn)
-    : undefined;
+  // 压缩折叠块是独立产物(原始轮已被销毁,见 turn-band.md §4)——与 band 的 buildTurnCells
+  // 对齐:① 选中折叠块 = 终点叶子(turnChunks=undefined,只看摘要原文、不显本轮构成);
+  // ② 某轮的构成也排除恰好落在同一 turn 号上的折叠块,免得压缩产物冒充该轮成员。
+  const turnChunks =
+    selectedChunk && !selectedChunk.folded
+      ? contextSnapshot.chunks.filter(
+          (c) => c.turn === selectedChunk.turn && !c.folded,
+        )
+      : undefined;
 
   // 第三刀:点对话轮 → 启发式把 TUI 滚到那一轮(按该轮用户原话搜 xterm 滚动缓冲 +
   // scrollToLine)。TUI 耦合**收敛在挂载壳**;band/inspector 不碰 xterm(守三层隔离)。
@@ -233,6 +239,27 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       }
       if (prev[id] === fate) return prev;
       return { ...prev, [id]: fate };
+    });
+  }, []);
+  // 第四刀:整轮命运——一次给一组 chunk 批量标/清命运(band 选支线 → 预填 fateMap →
+  // 复用既有 apply fold/drop 落地)。一个 setState 处理整组,同 setFate 的孤儿惰性策略。
+  const setFates = useCallback((ids: string[], fate: Fate | null) => {
+    if (ids.length === 0) return;
+    setFateMap((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const id of ids) {
+        if (fate) {
+          if (next[id] !== fate) {
+            next[id] = fate;
+            changed = true;
+          }
+        } else if (id in next) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
     });
   }, []);
 
@@ -919,6 +946,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
               onClose={() => setSelectedChunkId(null)}
               turnChunks={turnChunks}
               onSelectChunk={setSelectedChunkId}
+              fateMap={fateMap}
+              onSetFates={setFates}
             />
           </div>
         </div>
@@ -1006,6 +1035,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                 onClose={() => setSelectedChunkId(null)}
                 turnChunks={turnChunks}
                 onSelectChunk={setSelectedChunkId}
+                fateMap={fateMap}
+                onSetFates={setFates}
               />
             </div>
           </div>

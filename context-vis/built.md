@@ -140,7 +140,7 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
 
 ---
 
-### turn 带 · 主视图主轴翻转(第一刀+第二刀,设计见 [turn-band.md](turn-band.md))
+### turn 带 · 主视图主轴翻转(第一~第四刀,设计见 [turn-band.md](turn-band.md))
 主视图从"类型优先"翻成"**turn 优先**":纵向、与 TUI 同向、按 token 排——兑现 CLAUDE.md 第 5 条
 (时间轴),并成为大窗口下的**语义 minimap / 主操作台**。
 - **第一刀 · 时间序 turn 带(零 LLM)**:`web/src/lib/contextvis/turns.ts` `buildTurnCells`(按
@@ -164,8 +164,19 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
   ② 点对话轮 → `ChatPage.jumpToTurn` 按该轮用户首句搜 xterm `buffer.active` + `scrollToLine`(启发式、尽力而为);
   `onActivateTurn` 穿 Overlay→Panel→TurnBand,**仅对话轮触发**(底座/折叠块无锚点不跳)。**TUI 耦合全收敛在挂载壳**
   (renderer 不碰 xterm,守三层隔离)。视口高亮框延后。
+- **第四刀 · 主动梳理闭环 + 闸门折叠碰撞高亮(纯前端,无后端改动)**:把 band 从"看/导航"升级到"治理"。
+  ① **band 命运叠加**:`TurnBand` 接 `fateMap`,纯函数 `aggregateCellFate` 逐格聚合 message-backed 成员命运 →
+  整轮同命运=强叠加(drop 压暗+红斜划、fold 虚线 warning 边、keep success 边,与 Treemap 一致)、部分/混合=左缘
+  竖条弱提示(诚实区分"还没标全")。② **闸门碰撞高亮**:喂的是 `effectiveFateMap`(闸门时=systemFate)→ 待折叠
+  的轮自动亮 fold 叠加 = turn-band.md §4 末的碰撞高亮,**零额外代码**。③ **inspector 整轮命运**:`TurnComposition`
+  加「整轮 保留/折叠/丢弃 + 清除」一行,批量预填该轮全部 message-backed 成员;成员 chip 加命运色点。
+  `ChatPage.setFates` 批量增删 fateMap。**铁律兑现**:band/inspector 只**预填 fateMap**,落地复用既有
+  `applyFold`/`applyDrops` + "应用 fold/drop (N)" 按钮,一行未改;多条支线逐轮标后一次应用即并折(非连续 splice)。
+  ④ **折叠块=终点叶子(修)**:`ChatPage.turnChunks` 对齐 `buildTurnCells`——选中压缩块不显本轮构成(只读摘要原文)、
+  某轮构成排除同 turn 号的折叠块,免压缩产物冒充该轮成员。
 - **验证**:web build + lint 干净;后端 mock-LLM 测森林(三话题三色全支线)+ 任务(主线轮同色高亮、
   工具结果归对轮)+ join off-by-one 正确吸收。第三刀实测:点轮 inspector 显本轮构成 + TUI 同步滚动。
+  第四刀实测:整轮 fold/drop → band 叠加 → 应用落地 token 真减;闸门弹起待折叠轮自动碰撞高亮;压缩块点击只读摘要不混入轮。
 
 ---
 

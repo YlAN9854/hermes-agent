@@ -22,6 +22,7 @@ import { buildTurnCells, type TurnCell } from "@/lib/contextvis/turns";
 import {
   droppableChunkIds,
   foldableChunkIds,
+  MESSAGE_BACKED_TYPES,
   projectFates,
   type Fate,
   type FateMap,
@@ -71,11 +72,44 @@ function buildTopicColorMap(ct: ChunkTopicMap): Map<string, string> {
 /** turn 格最小高度(保证极小轮仍可点;轻微破「高∝token」严格比例,见 doc §10)。 */
 const TURN_MIN_H = 12;
 
+/**
+ * 第四刀:逐格聚合成员 chunk 的命运（纯函数,免在 .map 里改累加量触发 immutability 规则）。
+ *   · full    = 该轮全部 message-backed 成员同一命运（整轮已标）→ 强叠加。
+ *   · partial = 单一命运但未标全 → 弱提示（还没标全,诚实区分）。
+ *   · mixed   = 成员标了不同命运 → 弱提示（中性）。
+ * 底座/折叠块不参与（无可落地成员 / 已是压缩产物）。
+ */
+function aggregateCellFate(
+  cell: TurnCell,
+  typeById: Map<string, ChunkType>,
+  fateMap: FateMap,
+): { full: Fate | null; partial: Fate | null; mixed: boolean } {
+  const none = { full: null, partial: null, mixed: false };
+  if (cell.isBase || cell.isFolded) return none;
+  const msgIds = cell.chunkIds.filter((id) => {
+    const t = typeById.get(id);
+    return t !== undefined && MESSAGE_BACKED_TYPES.has(t);
+  });
+  const marked = msgIds.map((id) => fateMap[id]).filter((f): f is Fate => !!f);
+  if (marked.length === 0) return none;
+  if (new Set(marked).size > 1) return { full: null, partial: null, mixed: true };
+  const f = marked[0];
+  return marked.length === msgIds.length
+    ? { full: f, partial: null, mixed: false }
+    : { full: null, partial: f, mixed: false };
+}
+
 /** 命运 → treemap 描边色（Tailwind 语义 token,与检视器按钮呼应）。 */
 const FATE_STROKE: Record<Fate, string> = {
   keep: "stroke-success",
   fold: "stroke-warning",
   drop: "stroke-destructive",
+};
+/** 命运填充色（turn 带部分标记的左缘竖条）。 */
+const FATE_FILL: Record<Fate, string> = {
+  keep: "fill-success",
+  fold: "fill-warning",
+  drop: "fill-destructive",
 };
 const FATE_LABEL: Record<Fate, string> = {
   keep: "保留",
@@ -316,6 +350,7 @@ function TurnBand({
   onSelect,
   chunkTopics,
   onActivateTurn,
+  fateMap,
 }: {
   snapshot: ContextSnapshot;
   mode: TreemapMode;
@@ -325,10 +360,15 @@ function TurnBand({
   chunkTopics: ChunkTopicMap | null;
   /** 第三刀:点对话轮 → 把 TUI 滚到该轮(底座/折叠块无锚点,不触发)。 */
   onActivateTurn?: (turn: number) => void;
+  /** 第四刀:命运叠加(平时=用户标记;闸门时=systemFate 碰撞高亮)。逐格聚合成员命运。 */
+  fateMap: FateMap;
 }) {
   const { percent, budget, compactAt } = snapshot;
   const cells = buildTurnCells(snapshot);
   const topicColors = chunkTopics ? buildTopicColorMap(chunkTopics) : null;
+  // 第四刀:chunkId → 类型,用于逐格筛出 message-backed 成员(只有它们能被 fold/drop)。
+  const typeById = new Map<string, ChunkType>();
+  for (const c of snapshot.chunks) typeById.set(c.id, c.type);
   const total = cells.reduce((s, c) => s + c.tokens, 0);
   if (total <= 0) return null;
 
@@ -441,11 +481,27 @@ function TurnBand({
           cell.isFolded ? `⊟ ${cell.label}` : cell.label,
           VB_W - 56,
         );
+        // 命运叠加(第四刀):整轮强叠加 / 部分·混合弱提示。闸门时 fateMap=systemFate → 碰撞高亮。
+        const { full: fullFate, partial: partialFate, mixed: mixedMark } =
+          aggregateCellFate(cell, typeById, fateMap);
+        const hasPartial = partialFate !== null || mixedMark;
+        const fateText = fullFate
+          ? ` · 整轮标记:${FATE_LABEL[fullFate]}`
+          : mixedMark
+            ? " · 部分标记（混合）"
+            : partialFate
+              ? ` · 部分标记:${FATE_LABEL[partialFate]}`
+              : "";
+        const strokeClass = isSel
+          ? "stroke-background-base"
+          : fullFate
+            ? FATE_STROKE[fullFate]
+            : "stroke-background-base";
         const tip = cell.isFolded
           ? `${cell.label}（压缩折叠产物）· ${formatTokenCount(cell.tokens)}`
           : `${cell.label} · ${formatTokenCount(cell.tokens)}${cell.isBase ? "" : ` · 第${cell.turn}轮`}${
               ct && ct.topic ? ` · ${ct.topic}${ct.mainline ? "（主线）" : "（支线）"}` : ""
-            }`;
+            }${fateText}`;
         return (
           <g
             key={cell.isFolded ? cell.repId : `turn-${cell.turn}`}
@@ -463,12 +519,47 @@ function TurnBand({
               width={VB_W}
               height={Math.max(0, h)}
               fill={fill}
-              fillOpacity={isSel ? 0.95 : baseOpacity}
-              className="stroke-background-base"
-              strokeWidth={isSel ? 2 : cell.isFolded ? 1.25 : 0.75}
-              strokeDasharray={cell.isFolded ? "4 3" : undefined}
+              fillOpacity={fullFate === "drop" ? 0.3 : isSel ? 0.95 : baseOpacity}
+              className={strokeClass}
+              strokeWidth={isSel ? 2 : fullFate ? 1.5 : cell.isFolded ? 1.25 : 0.75}
+              strokeDasharray={
+                cell.isFolded ? "4 3" : fullFate === "fold" ? "3 2" : undefined
+              }
               vectorEffect="non-scaling-stroke"
             />
+            {/* 整轮 drop:红斜划(照搬 Treemap),与压暗共同表"这一轮要删"。 */}
+            {fullFate === "drop" && (
+              <>
+                <line
+                  x1={0}
+                  y1={y}
+                  x2={VB_W}
+                  y2={y + h}
+                  className="stroke-destructive"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <line
+                  x1={0}
+                  y1={y + h}
+                  x2={VB_W}
+                  y2={y}
+                  className="stroke-destructive"
+                  strokeWidth={1}
+                  vectorEffect="non-scaling-stroke"
+                />
+              </>
+            )}
+            {/* 部分/混合标记:左缘竖条弱提示(还没标全;不整格压暗,诚实区分)。 */}
+            {hasPartial && (
+              <rect
+                x={0}
+                y={y}
+                width={3}
+                height={Math.max(0, h)}
+                className={partialFate ? FATE_FILL[partialFate] : "fill-current/40"}
+              />
+            )}
             {showLabel && (
               <>
                 <text
@@ -1095,6 +1186,7 @@ export function ContextVisPanel({
                 onSelect={onSelect}
                 chunkTopics={activeTopics}
                 onActivateTurn={onActivateTurn}
+                fateMap={effectiveFateMap}
               />
             ) : (
               <Treemap
