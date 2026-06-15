@@ -89,9 +89,10 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
   废弃**(不变量归突变层、折叠后已是单一可操作单元),决策痕迹见 [mutation-ledger.md](archive/mutation-ledger.md)、
   设计见 [turn-band.md](turn-band.md) §4。
 - **T. turn 带(主视图主轴翻转)**:turn 优先 + 纵向时间序 + 逐轮主题着色,见
-  [turn-band.md](turn-band.md) §9。**第一刀(时间序带 + 压缩块诚实显示)✅、第二刀(逐轮主题着色 +
-  `context.regime_colors` + 闸门自动着色)✅ 均已建成**。**下一步 = 第三刀**:点轮跳 TUI +
-  minimap 视口高亮框 + inspector 类型细分。第四刀:格级 fate 主动梳理 + 闸门折叠区 collision 高亮。**取代原 E4**(语义排列)、**吸收 E3**(语义化 chunk):同 topic
+  [turn-band.md](turn-band.md) §9。**第一刀(时间序 + 压缩块诚实显示)✅、第二刀(逐轮主题着色 +
+  `context.regime_colors` + 闸门自动着色)✅、第三刀(inspector 本轮构成 + 点轮跳 TUI)✅ 均已建成**
+  (视口高亮框延后)。**下一步 = 第四刀**:band 格级选支线 → 预填 fateMap → fold/drop + 闸门折叠区 collision 高亮。
+  **取代原 E4**(语义排列)、**吸收 E3**(语义化 chunk):同 topic
   的轮天然聚拢,不造新分块器;时间序保底(踩 E4 红线安全侧)。大窗口下闸门罕触发→**turn 带是
   日常主操作台**。分四刀:带先行(无 LLM)→ 逐轮主题着色 → 联动导航/minimap → 主动梳理(预填
   fateMap 复用 fold)。

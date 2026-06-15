@@ -1,6 +1,6 @@
 # 轮次带（turn band）—— 纵向、与 TUI 同向的语义 minimap
 
-> **状态:第一刀 + 第二刀已建成并实测,第三刀为下一步**(分期见 §9)。这是 ContextVis 主视图的
+> **状态:第一~第三刀已建成并实测(视口高亮框延后),第四刀为下一步**(分期见 §9)。这是 ContextVis 主视图的
 > **主轴翻转**:从"类型优先"翻成"**turn 优先**"。它**吸收并取代** [needs.md](needs.md) 的 E3(语义化 chunk)
 > 与 E4(语义排列),是 [regime.md](regime.md) 检测器的**可视化出口**,落地动作复用
 > [fold.md](fold.md) 的 fold/drop。相关:[needs.md](needs.md) §A/§E、[roadmap.md](roadmap.md)。
@@ -169,9 +169,11 @@
 2. ✅ **第二刀:逐轮主题着色** — 已建成。检测器加逐轮 topic(§5)+ 新 RPC `context.regime_colors`
    (按 messageIndex join 到 chunk)→ 带按主题/regime 着色(主线饱和、支线压暗),**按需 + 缓存**;
    **闸门触发时自动着色**(§4,闸门与着色同一个脑)。
-3. ⬜ **第三刀:联动导航 + minimap** — 点轮跳 TUI + 视口高亮框 + inspector 类型细分(§3 细节层)。**下一步。**
+3. ◑ **第三刀:联动导航 + 细节层** — 已建成:inspector「本轮构成」(类型细分 + 成员块钻取,§3 细节层)
+   + 点对话轮跳 TUI(启发式搜 xterm 缓冲 + `scrollToLine`,TUI 耦合收敛在挂载壳)。**视口高亮框延后**
+   (需全 turn→行映射 + `onScroll` + 缓冲重建)。
 4. ⬜ **第四刀:主动梳理闭环** — 带上选支线 → 预填 fateMap → fold/drop(§8),把大窗口下的
-   "主操作台"价值兑现(§6)。另:闸门折叠区间画成 band collision 高亮(§4 末)。
+   "主操作台"价值兑现(§6)。另:闸门折叠区间画成 band collision 高亮(§4 末)。**下一步。**
 
 > 红线复述:**带先行不碰 LLM;着色取自检测器已有输出;落地复用 fold;旧类型带留作 toggle。**
 

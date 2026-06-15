@@ -158,8 +158,14 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
 - **闸门自动着色(闸门与着色同一个脑)**:闸门 `assess` 与着色 `assess` 同实例同 `_llm_cache` → 闸门一弹,
   前端 `gateActive` 即自动 `fetchRegimeColors`(命中缓存即免费)+ 强制着色(`wantColor = colorOn || gateActive`),
   把关压缩时直接看到主线/支线。
+- **第三刀 · 联动导航 + 细节层(纯前端,无后端改动)**:① `ChunkInspector` 新增「本轮构成」
+  (`TurnComposition`:类型堆叠条 + 成员块 chips,点 chip 钻进该块原文)——选中对话轮时显,**底座/压缩块单块不显**
+  (点压缩块=读摘要原文)。响应侧(tool_result/file)常远大于提问侧,这段让用户看清"一轮里谁在吃 context"。
+  ② 点对话轮 → `ChatPage.jumpToTurn` 按该轮用户首句搜 xterm `buffer.active` + `scrollToLine`(启发式、尽力而为);
+  `onActivateTurn` 穿 Overlay→Panel→TurnBand,**仅对话轮触发**(底座/折叠块无锚点不跳)。**TUI 耦合全收敛在挂载壳**
+  (renderer 不碰 xterm,守三层隔离)。视口高亮框延后。
 - **验证**:web build + lint 干净;后端 mock-LLM 测森林(三话题三色全支线)+ 任务(主线轮同色高亮、
-  工具结果归对轮)+ join off-by-one 正确吸收。
+  工具结果归对轮)+ join off-by-one 正确吸收。第三刀实测:点轮 inspector 显本轮构成 + TUI 同步滚动。
 
 ---
 

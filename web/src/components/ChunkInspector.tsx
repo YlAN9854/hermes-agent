@@ -37,11 +37,83 @@ const FATE_ACTIONS: { fate: Fate; label: string; active: string }[] = [
   { fate: "drop", label: "丢弃", active: "border-destructive bg-destructive/15 text-destructive" },
 ];
 
+/**
+ * 本轮构成（第三刀细节层）—— 选中的是对话轮时,显示该轮的类型细分 + 成员块。
+ *
+ * 响应侧(assistant + tool_result + file)常远大于提问侧(一句小提问能拽进 20K 工具结果),
+ * 这一段让用户看清"这一轮的 N K 里谁在吃 context",并能点成员块钻进它的原文。
+ */
+function TurnComposition({
+  chunks,
+  selectedId,
+  onSelectChunk,
+}: {
+  chunks: ContextChunk[];
+  selectedId: string;
+  onSelectChunk?: (id: string) => void;
+}) {
+  const total = chunks.reduce((s, c) => s + c.tokens, 0) || 1;
+  const byType = new Map<string, number>();
+  for (const c of chunks) byType.set(c.type, (byType.get(c.type) ?? 0) + c.tokens);
+  const turn = chunks[0]?.turn;
+  return (
+    <div className="flex flex-col gap-1.5 rounded border border-current/10 px-2 py-1.5">
+      <div className="flex items-center justify-between text-[11px] text-text-tertiary">
+        <span className="text-display tracking-wider">本轮构成</span>
+        <span className="tabular-nums">
+          第{turn}轮 · {chunks.length} 块 · ~{formatTokenCount(total)} tok
+        </span>
+      </div>
+      {/* 类型堆叠条:面积 ∝ token */}
+      <div className="flex h-1.5 w-full overflow-hidden rounded-sm bg-current/5">
+        {[...byType.entries()].map(([t, tok]) => (
+          <div
+            key={t}
+            style={{ width: `${(tok / total) * 100}%`, backgroundColor: TYPE_COLOR[t] ?? "#888" }}
+            title={`${t} · ${formatTokenCount(tok)}`}
+          />
+        ))}
+      </div>
+      {/* 成员块 chips:点击钻进该块原文 */}
+      <div className="flex flex-wrap gap-1">
+        {chunks.map((c) => {
+          const isSel = c.id === selectedId;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => onSelectChunk?.(c.id)}
+              title={`${c.label} · ${formatTokenCount(c.tokens)} tok`}
+              className={cn(
+                "flex min-w-0 max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] transition-colors",
+                isSel
+                  ? "border-current/40 bg-current/10 text-text-secondary"
+                  : "border-current/15 text-text-tertiary hover:text-text-secondary",
+              )}
+            >
+              <span
+                className="inline-block h-2 w-2 shrink-0 rounded-sm"
+                style={{ backgroundColor: TYPE_COLOR[c.type] ?? "#888" }}
+              />
+              <span className="truncate">{c.label}</span>
+              <span className="shrink-0 tabular-nums opacity-70">
+                {formatTokenCount(c.tokens)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function ChunkInspector({
   chunk,
   fate,
   onSetFate,
   onClose,
+  turnChunks,
+  onSelectChunk,
 }: {
   chunk: ContextChunk | null;
   /** 该块当前标记的命运（用户意图,来自 ChatPage fateMap）。 */
@@ -49,6 +121,10 @@ export function ChunkInspector({
   /** 标记/改命运;传 null = 恢复（取消标记,交还系统自动压缩）。 */
   onSetFate: (id: string, fate: Fate | null) => void;
   onClose: () => void;
+  /** 第三刀:选中块所属轮的全部 chunk(>1 时显「本轮构成」);单块(底座/压缩块)不传或长度 1。 */
+  turnChunks?: ContextChunk[];
+  /** 点本轮构成里的成员块 → 钻进它。 */
+  onSelectChunk?: (id: string) => void;
 }) {
   if (!chunk) {
     return (
@@ -106,6 +182,16 @@ export function ChunkInspector({
         {chunk.group && <span>{chunk.group}</span>}
         {chunk.raw != null && <span>{chunk.raw.length.toLocaleString()} 字符</span>}
       </div>
+
+      {/* 本轮构成（第三刀细节层）：选中对话轮时显示类型细分 + 成员块钻取。
+          底座 / 压缩块为单块，turnChunks 长度 1 → 不显，行为同前(只看原文)。 */}
+      {turnChunks && turnChunks.length > 1 && (
+        <TurnComposition
+          chunks={turnChunks}
+          selectedId={chunk.id}
+          onSelectChunk={onSelectChunk}
+        />
+      )}
 
       {/* 命运标记（方向 A）:标 keep/fold/drop → 浮层预览释放量;drop 可经
           「应用」落地真实上下文(阶段 3)。system/tool_schema 不可应用,禁用。 */}

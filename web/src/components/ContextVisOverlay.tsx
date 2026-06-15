@@ -32,12 +32,15 @@ export function ContextVisOverlay({
   onSelect,
   fateMap,
   onClearFates,
+  onActivateTurn,
 }: {
   snapshot: ContextSnapshot;
   selected: string | null;
   onSelect: (id: string | null) => void;
   fateMap: FateMap;
   onClearFates: () => void;
+  /** 第三刀:点对话轮 → 把 TUI 滚到该轮(挂载壳实现,band 不碰 xterm)。 */
+  onActivateTurn?: (turn: number) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -88,6 +91,7 @@ export function ContextVisOverlay({
             onCollapse={() => setCollapsed(true)}
             fateMap={fateMap}
             onClearFates={onClearFates}
+            onActivateTurn={onActivateTurn}
           />
         </div>
       )}

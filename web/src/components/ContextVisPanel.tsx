@@ -315,6 +315,7 @@ function TurnBand({
   selected,
   onSelect,
   chunkTopics,
+  onActivateTurn,
 }: {
   snapshot: ContextSnapshot;
   mode: TreemapMode;
@@ -322,6 +323,8 @@ function TurnBand({
   onSelect: (id: string | null) => void;
   /** 第二刀主题着色:chunkId → {topic, mainline};null=未着色(中性结构)。 */
   chunkTopics: ChunkTopicMap | null;
+  /** 第三刀:点对话轮 → 把 TUI 滚到该轮(底座/折叠块无锚点,不触发)。 */
+  onActivateTurn?: (turn: number) => void;
 }) {
   const { percent, budget, compactAt } = snapshot;
   const cells = buildTurnCells(snapshot);
@@ -446,7 +449,11 @@ function TurnBand({
         return (
           <g
             key={cell.isFolded ? cell.repId : `turn-${cell.turn}`}
-            onClick={() => onSelect(isSel ? null : cell.repId)}
+            onClick={() => {
+              onSelect(isSel ? null : cell.repId);
+              // 对话轮才跳 TUI:底座/折叠块无终端锚点(见 plan §3b)。
+              if (!cell.isBase && !cell.isFolded) onActivateTurn?.(cell.turn);
+            }}
             className="cursor-pointer"
           >
             <title>{tip}</title>
@@ -583,6 +590,7 @@ export function ContextVisPanel({
   onCollapse,
   fateMap,
   onClearFates,
+  onActivateTurn,
 }: {
   snapshot: ContextSnapshot;
   /** 受控选中：选中态上提到挂载壳，与右侧栏 inspector 共享。 */
@@ -594,6 +602,8 @@ export function ContextVisPanel({
   fateMap: FateMap;
   /** 清除全部命运标记。 */
   onClearFates: () => void;
+  /** 第三刀:点对话轮 → 挂载壳把 TUI 滚到该轮(renderer 不碰 xterm)。 */
+  onActivateTurn?: (turn: number) => void;
 }) {
   const [mode, setMode] = useState<TreemapMode>("proportional");
   // 主视图主轴:默认「轮次」(turn 优先,见 turn-band.md);「类型」一键回旧树图。
@@ -1084,6 +1094,7 @@ export function ContextVisPanel({
                 selected={selected}
                 onSelect={onSelect}
                 chunkTopics={activeTopics}
+                onActivateTurn={onActivateTurn}
               />
             ) : (
               <Treemap

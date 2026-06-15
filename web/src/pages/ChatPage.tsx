@@ -184,6 +184,38 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
   const selectedChunk =
     contextSnapshot.chunks.find((c) => c.id === selectedChunkId) ?? null;
+  // 第三刀:选中块所属轮的全部 chunk(同 turn)；inspector 在 >1 时显「本轮构成」。
+  const turnChunks = selectedChunk
+    ? contextSnapshot.chunks.filter((c) => c.turn === selectedChunk.turn)
+    : undefined;
+
+  // 第三刀:点对话轮 → 启发式把 TUI 滚到那一轮(按该轮用户原话搜 xterm 滚动缓冲 +
+  // scrollToLine)。TUI 耦合**收敛在挂载壳**;band/inspector 不碰 xterm(守三层隔离)。
+  // 尽力而为:无锚点/太短/找不到 → 静默不动。
+  const jumpToTurn = useCallback(
+    (turn: number) => {
+      const term = termRef.current;
+      if (!term) return;
+      const hist = contextSnapshot.chunks.find(
+        (c) => c.id === `history:turn${turn}`,
+      );
+      if (!hist) return;
+      // label 形如「第N轮 · {用户首句}」;取「· 」后片段、去尾部省略号作搜索锚。
+      const needle = (hist.label.split("· ").pop() ?? "")
+        .replace(/…+$/, "")
+        .trim();
+      if (needle.length < 4) return;
+      const buf = term.buffer.active;
+      for (let i = 0; i < buf.length; i++) {
+        const line = buf.getLine(i)?.translateToString(true) ?? "";
+        if (line.includes(needle)) {
+          term.scrollToLine(i);
+          return;
+        }
+      }
+    },
+    [contextSnapshot.chunks],
+  );
 
   // 方向 A：命运标记（用户意图）。与后端真值分离 —— 不写回 snapshot.chunks，
   // 单独持有一张 chunkId→命运 的图。chunk id 确定性（sys:/history:turn{n}/…），
@@ -885,6 +917,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
               fate={selectedChunkId ? fateMap[selectedChunkId] : undefined}
               onSetFate={setFate}
               onClose={() => setSelectedChunkId(null)}
+              turnChunks={turnChunks}
+              onSelectChunk={setSelectedChunkId}
             />
           </div>
         </div>
@@ -927,6 +961,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             onSelect={setSelectedChunkId}
             fateMap={fateMap}
             onClearFates={() => setFateMap({})}
+            onActivateTurn={jumpToTurn}
           />
 
           <Button
@@ -969,6 +1004,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                 fate={selectedChunkId ? fateMap[selectedChunkId] : undefined}
                 onSetFate={setFate}
                 onClose={() => setSelectedChunkId(null)}
+                turnChunks={turnChunks}
+                onSelectChunk={setSelectedChunkId}
               />
             </div>
           </div>
