@@ -28,7 +28,7 @@
 合并重心)③预览影响 ④sub-agent 应用。
 
 **命令通道 —— 原判"硬骨头"已被推翻,实测可用**(证据链见
-[phase3-channel.md](phase3-channel.md)):dashboard 部署里 PTY 子进程走 **attach 模式**
+[phase3-channel.md](archive/phase3-channel.md)):dashboard 部署里 PTY 子进程走 **attach 模式**
 (`HERMES_TUI_GATEWAY_URL`),真实 agent 就活在 **web_server 进程的 `_sessions`**,与
 `/api/ws` dispatch 同进程。前端新开 `/api/ws` 即可**按 sid** 调 `session.*`;sid 从
 `_emit` 每帧带的 `session_id` 免费拿到。浏览器只读探针已坐实跨连接按 sid 读到真实会话
@@ -86,7 +86,7 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
 - **M. 压缩块诚实显示(✅ 已建成,取代废弃的"结构突变账本")**:压缩/fold 产物**如实标注、摆正位置、
   不冒充对话轮**,但**不重建被销毁的拓扑**——分块层识别对齐 `regime._is_boilerplate` 全集 → 标 `folded`
   → band 画「压缩 context」块。**原"结构突变账本"(突变前快照 + 折叠出处 + 两咽喉一本账)已判过度设计、
-  废弃**(不变量归突变层、折叠后已是单一可操作单元),决策痕迹见 [mutation-ledger.md](mutation-ledger.md)、
+  废弃**(不变量归突变层、折叠后已是单一可操作单元),决策痕迹见 [mutation-ledger.md](archive/mutation-ledger.md)、
   设计见 [turn-band.md](turn-band.md) §4。
 - **T. turn 带(主视图主轴翻转)**:turn 优先 + 纵向时间序 + 逐轮主题着色,见
   [turn-band.md](turn-band.md) §9。**第一刀(时间序带 + 压缩块诚实显示)✅、第二刀(逐轮主题着色 +

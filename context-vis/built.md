@@ -52,7 +52,7 @@ master-detail 联动。**删除右侧栏 MODEL/TOOLS**(原 `ChatSidebar`),右侧
 
 ### 交互式压缩 · 阶段 3 v1(应用 drop,落地真实上下文)
 治理闭环最后一步:把标记的 **drop 真正从真实 agent 的上下文删除**。通道已坐实(见
-[phase3-channel.md](phase3-channel.md)),v1 **只做 drop、确定性、零 LLM**(fold 留 v2)。
+[phase3-channel.md](archive/phase3-channel.md)),v1 **只做 drop、确定性、零 LLM**(fold 留 v2)。
 - **后端**`tui_gateway/server.py`:新 RPC `context.apply`(删消息 → 复用
   `ContextCompressor._sanitize_tool_pairs` 缝合孤儿 tool 配对 → 写回 `session["history"]`
   + bump `history_version` + 重置 `last_prompt_tokens` 让占用即时回落 → re-emit)与
@@ -146,7 +146,7 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
 - **第一刀 · 时间序 turn 带(零 LLM)**:`web/src/lib/contextvis/turns.ts` `buildTurnCells`(按
   `chunk.turn` 聚合,折叠产物各自成格)+ `ContextVisPanel` 的 `TurnBand`(纵向、顶老底新、占用轴、
   比例/占用双模式)+ 视图开关「轮次/类型」(**默认轮次**,旧类型树图一键可回)。点轮 → inspector 显该轮原文。
-- **压缩块诚实显示(取代废弃的"结构突变账本",决策痕迹见 [mutation-ledger.md](mutation-ledger.md))**:
+- **压缩块诚实显示(取代废弃的"结构突变账本",决策痕迹见 [mutation-ledger.md](archive/mutation-ledger.md))**:
   `chunking._is_compression_artifact` 对齐 `regime._is_boilerplate` 全 5 marker → 压缩产物标 `folded`、
   **不计轮号**、画成「压缩 context」斜纹块、摆在正确位置。**不重建**被销毁的拓扑(folded 后已是单一可操作单元)。
   实测:多次压缩合并为一坨、真实轮号不乱。
@@ -198,7 +198,7 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
   面积 ∝ token,小块放不下文字会变噪音;信息不丢——悬停 `<title>` + 点击进检视器兜底。
 - **方向 A 先做阶段 1+2、不碰阶段 3**(用户敲定):标记+预览是纯前端零风险,
   先出"治理"手感;应用(动真上下文)留下一轮。**[后续]** 阶段 3 命令通道经调研 +
-  浏览器只读探针**实测可用**,原判"独立架构决策/硬骨头"已推翻,见 [phase3-channel.md](phase3-channel.md)。
+  浏览器只读探针**实测可用**,原判"独立架构决策/硬骨头"已推翻,见 [phase3-channel.md](archive/phase3-channel.md)。
 - **命运标记入口在检视器按钮,不在 treemap 点击**(用户敲定):treemap 点击保持
   =选中看原文;命运靠按钮设、靠叠加渲染显,分工清晰、有空间放释放量估算。
 - **命运意图与后端真值分离**:用户标记存 `fateMap`,**不写回 `snapshot.chunks`**;

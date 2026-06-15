@@ -60,19 +60,32 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 
 ---
 
-## 文档地图(按需读取)
+## 文档地图(按状态分组)
 
-| 想知道… | 读 |
-|---|---|
-| 要满足谁的什么需求 & 每条需求的解决方案 | [needs.md](needs.md) — 用户需求 → 解决方案地图 |
-| 做了什么 & 每个取舍为什么 | [built.md](built.md) — 已建成 + 决策日志 |
-| 真实数据怎么流、怎么本地跑起来调试 | [dataflow.md](dataflow.md) — 数据流 + 部署坑 |
-| Hermes 现在自动怎么压缩上下文(方向 A 的基线) | [compression-baseline.md](compression-baseline.md) |
-| 方向 A-v2 fold（折成摘要而非整删）设计 | [fold.md](fold.md) |
-| 主视图主轴翻转：turn 优先 + 逐轮主题（吸收 E3/E4，大窗口主操作台） | [turn-band.md](turn-band.md) — 纵向语义 minimap（设计定稿） |
-| 压缩块怎么在轮次视图里诚实显示（不重建拓扑，反转决策痕迹） | [turn-band.md](turn-band.md) §4 ＋ [mutation-ledger.md](mutation-ledger.md)（⚠️ 已废弃存档） |
-| 任务态识别原理 + 判定依据（ContextVis 何时该醒 + 压什么） | [regime.md](regime.md) — 自适应总开关(已建成) |
-| 阶段 3 命令通道为何可行(架构真相 + 实测证据) | [phase3-channel.md](phase3-channel.md) |
-| 压缩闸门（拦 auto-compress 改用户确认）调研 | [compaction-gate.md](compaction-gate.md) |
-| 接下来去哪、优先级 | [roadmap.md](roadmap.md) — 路线图 + 待决方向 |
-| 设计理念 / 不变量(渲染无关) | [../CLAUDE.md](../CLAUDE.md) |
+> 三类:🟢 **活跃**(当前在动 / 常查)· 📘 **参考**(已建成机制的设计 + 基线 + 理念,稳定、按需查)·
+> 🗄 **归档**([`archive/`](archive/),已废弃 / 调研完成,留作决策痕迹,平时不必读)。
+> 文档**状态**以各文件顶部的「状态」行为准;本表是入口索引。
+
+### 🟢 活跃 — 当前在动 / 常查
+| 文档 | 是什么 | 状态 |
+|---|---|---|
+| [turn-band.md](turn-band.md) | **当前工作线**:主视图主轴翻转(turn 优先 + 逐轮主题,语义 minimap) | 第一刀+第二刀✅,**第三刀下一步**(§9) |
+| [roadmap.md](roadmap.md) | 接下来去哪、优先级、待决方向 | 活跃 |
+| [built.md](built.md) | 做了什么 + 每个取舍为什么(里程碑日志) | 持续追加 |
+| [needs.md](needs.md) | 用户需求 → 解决方案地图(每条需求挂方案 + 状态) | 活跃 |
+
+### 📘 参考 — 已建成机制的设计 / 基线 / 理念(稳定,按需查)
+| 文档 | 是什么 | 状态 |
+|---|---|---|
+| [../CLAUDE.md](../CLAUDE.md) | 设计理念 / 不变量(渲染无关,最高纲领) | 纲领 |
+| [regime.md](regime.md) | 任务态识别原理 + 判定(ContextVis 的"脑",喂闸门 + turn 带着色) | ✅ 已建成 |
+| [fold.md](fold.md) | 方向 A-v2 fold(折成摘要而非整删)设计 | ✅ 已建成 |
+| [compaction-gate.md](compaction-gate.md) | 压缩闸门(拦 auto-compress 改用户确认) | ◑ 第一阶段已建成;二/三阶段待做 |
+| [compression-baseline.md](compression-baseline.md) | Hermes 自动压缩基线(要接管/复用的引擎) | 参考 |
+| [dataflow.md](dataflow.md) | 真实数据怎么流 + 本地跑起来调试(踩坑必看) | 参考 |
+
+### 🗄 归档 — 已废弃 / 调研完成(决策痕迹,平时不必读)
+| 文档 | 是什么 | 状态 |
+|---|---|---|
+| [archive/mutation-ledger.md](archive/mutation-ledger.md) | "结构突变账本"——曾想重建被压缩销毁的轮次拓扑 | ⛔ 已废弃(被"诚实显示压缩块"取代,见 [turn-band.md](turn-band.md) §4) |
+| [archive/phase3-channel.md](archive/phase3-channel.md) | 阶段 3 命令通道可行性调研(架构真相 + 实测证据) | ✅ 结论已落地为生产代码 |

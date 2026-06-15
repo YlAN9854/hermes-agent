@@ -8,7 +8,7 @@
 
 ## 一、早期的错误前提
 
-旧记录(见 [roadmap.md](roadmap.md) 修订前 / [dataflow.md](dataflow.md))认为:
+旧记录(见 [roadmap.md](../roadmap.md) 修订前 / [dataflow.md](../dataflow.md))认为:
 
 - `/api/events` 是**单向 push**,浏览器无法回发命令;
 - dashboard 的 `/api/ws` JSON-RPC sidecar 是**另一个 throwaway 会话**(usage≈0),
@@ -24,16 +24,16 @@
 证据(代码层):
 
 1. **dashboard 总是注入 `HERMES_TUI_GATEWAY_URL`** —— `_resolve_chat_argv`
-   ([web_server.py:9151](../hermes_cli/web_server.py#L9151)),docstring 明说"so the PTY child
+   ([web_server.py:9151](../../hermes_cli/web_server.py#L9151)),docstring 明说"so the PTY child
    can **attach to this process's in-memory tui_gateway instance instead of spawning its own**"。
 2. **ui-tui 见到该 URL 即 attach、不再自起 Python gateway** ——
-   [gatewayClient.ts:515](../ui-tui/src/gatewayClient.ts#L515):`if (attachUrl) startAttachedGateway(...)`,
+   [gatewayClient.ts:515](../../ui-tui/src/gatewayClient.ts#L515):`if (attachUrl) startAttachedGateway(...)`,
    否则才 `startSpawnedGateway`。
 3. **`session.active_list` 枚举的是"this gateway process"内的 live TUI sessions** ——
-   [server.py:4119](../tui_gateway/server.py#L4119)。即真实会话注册在 web_server 进程的 `_sessions`,
+   [server.py:4119](../../tui_gateway/server.py#L4119)。即真实会话注册在 web_server 进程的 `_sessions`,
    与 `/api/ws` dispatch、所有 REST 同进程同注册表。
 4. **会话 id 发现是免费的** —— `_emit` 每帧 params 都带 `session_id`
-   ([server.py:748](../tui_gateway/server.py#L748));ContextVis 适配器消费的 `context.snapshot`
+   ([server.py:748](../../tui_gateway/server.py#L748));ContextVis 适配器消费的 `context.snapshot`
    帧里就有,读出来即可,无需额外发现机制。
 
 > 所以"sidecar usage≈0"不是进程隔离,而是 **dashboard 的 React sidecar 自建了空会话、
@@ -72,10 +72,10 @@ per-session usage:
 
 通道既通,阶段 3 不再需要造新通道,剩下都是可控的工程:
 
-1. **选择式压缩 RPC**:`session.compress`([server.py:4559](../tui_gateway/server.py#L4559))
+1. **选择式压缩 RPC**:`session.compress`([server.py:4559](../../tui_gateway/server.py#L4559))
    现做**位置式全量**压缩、只吃 `focus_topic`。扩它 / 新增 `context.apply`,改吃**结构化
    fate 选择**(drop/fold/keep 的 chunk 集),内部**复用** `_generate_summary` /
-   `_prune_old_tool_results` / `_sanitize_tool_pairs`(见 [compression-baseline.md](compression-baseline.md)
+   `_prune_old_tool_results` / `_sanitize_tool_pairs`(见 [compression-baseline.md](../compression-baseline.md)
    复用表),但**用显式 message 索引定边界**,而非头/尾位置。
 2. **fate → message 索引映射**:用 chunk 的 `sourceRefs`(档3 已埋 provenance)把"标记的块"
    翻成"真实消息下标"。
@@ -83,7 +83,7 @@ per-session usage:
    带 `session_id`(事件帧取)+ fateMap 发 RPC;面板加**带确认**的「应用」按钮。
    压缩完后端 re-emit `session.info` + `context.snapshot`,UI 与 fateMap 自动刷新。
 4. **并发闸**:`session.compress` 在 `session["running"]` 时拒(已有);apply 按钮仅空闲可点。
-   irreversible → 配合 `session.undo`([server.py:4531](../tui_gateway/server.py#L4531))做安全网。
+   irreversible → 配合 `session.undo`([server.py:4531](../../tui_gateway/server.py#L4531))做安全网。
 
 **写路径已实测通过**(阶段 3 v1):浏览器 `context.apply` 跨连接按 sid 删消息,真实
 agent 的 TUI 占比条 + treemap 同步回落、token 真减少、撤销还原、对话进行中被礼貌拒绝。

@@ -1,7 +1,7 @@
 # 轮次带（turn band）—— 纵向、与 TUI 同向的语义 minimap
 
-> **状态:设计定稿(本次讨论定型),未动工。** 这是 ContextVis 主视图的**主轴翻转**:
-> 从"类型优先"翻成"**turn 优先**"。它**吸收并取代** [needs.md](needs.md) 的 E3(语义化 chunk)
+> **状态:第一刀 + 第二刀已建成并实测,第三刀为下一步**(分期见 §9)。这是 ContextVis 主视图的
+> **主轴翻转**:从"类型优先"翻成"**turn 优先**"。它**吸收并取代** [needs.md](needs.md) 的 E3(语义化 chunk)
 > 与 E4(语义排列),是 [regime.md](regime.md) 检测器的**可视化出口**,落地动作复用
 > [fold.md](fold.md) 的 fold/drop。相关:[needs.md](needs.md) §A/§E、[roadmap.md](roadmap.md)。
 
@@ -86,7 +86,7 @@
 曾设计过一套重机器(**修法②·结构突变账本**:突变前快照、折叠出处、稳定键、递归合并)去
 **重建**压缩前的逐轮拓扑,画"已折叠 第1–5轮〔topics〕"。**已判定过度设计、废弃**——因为
 (1) 不变量归突变层不归 viz;(2) 折叠后中段已是一个可操作单元,重建对核心目的无用。
-完整论证与存档见 [mutation-ledger.md](mutation-ledger.md)(已废弃)。
+完整论证与存档见 [mutation-ledger.md](archive/mutation-ledger.md)(已废弃)。
 
 > 若将来真要"折叠了几轮"这种轻量信息,只需在突变点记一个**计数**(非全账本),届时单独评估。
 

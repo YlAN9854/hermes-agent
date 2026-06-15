@@ -2,7 +2,7 @@
 
 > **状态:⛔ 已废弃,不实现。** 经讨论判定**过度设计**——见下「为什么废弃」。
 > 取而代之的简化方案:**诚实显示压缩块即可,不重建被销毁的拓扑**,落在
-> [turn-band.md](turn-band.md) §4。本文作为**决策痕迹**保留,别让后人重走这条弯路。
+> [turn-band.md](../turn-band.md) §4。本文作为**决策痕迹**保留,别让后人重走这条弯路。
 
 ## 为什么废弃（决策痕迹）
 
@@ -58,9 +58,9 @@ context 消失**,被换成几坨摘要块。turn 带靠数当前(突变后)histo
 
 | 场景 | 突变入口(代码) | 钩点 |
 |---|---|---|
-| **1. 未达阈值,手动 drop/fold** | `context.apply`([server.py:4694](../tui_gateway/server.py#L4694))/ `context.fold`([:4795](../tui_gateway/server.py#L4795)) → 都走 [`_commit_history_mutation`](../tui_gateway/server.py#L4657) | **手动咽喉**:该函数已在突变前抓 `before` 快照(undo,[:4672](../tui_gateway/server.py#L4672))——留痕几乎免费 |
+| **1. 未达阈值,手动 drop/fold** | `context.apply`([server.py:4694](../../tui_gateway/server.py#L4694))/ `context.fold`([:4795](../../tui_gateway/server.py#L4795)) → 都走 [`_commit_history_mutation`](../../tui_gateway/server.py#L4657) | **手动咽喉**:该函数已在突变前抓 `before` 快照(undo,[:4672](../../tui_gateway/server.py#L4672))——留痕几乎免费 |
 | **2. 达阈值后,手动管理** | 同上(闸门二阶段"闸内编辑"也落到 fold/drop) | 同场景 1,**同一咽喉** |
-| **3. 自动压缩** | `_compress_context`(4 处:阈值路 [3825](../agent/conversation_loop.py#L3825) + 反应式 2527/2701/2857) | **自动咽喉**:在 `_compress_context` **入口**抓 before,一钩覆盖 4 个调用点 |
+| **3. 自动压缩** | `_compress_context`(4 处:阈值路 [3825](../../agent/conversation_loop.py#L3825) + 反应式 2527/2701/2857) | **自动咽喉**:在 `_compress_context` **入口**抓 before,一钩覆盖 4 个调用点 |
 
 > **两咽喉、一原语、一本账。** 手动侧已现成 `before`;自动侧加一处入口钩子。
 
@@ -77,8 +77,8 @@ FoldProvenance = [ { turn, label, tokens, topic? } , … ]   // 被这块折叠�
 ```
 
 - **产生(突变时)**:突变握有 `before` + 被折/删的 message 下标集。对 `before` 跑现有分块的
-  轮派生([chunking._segment_history](../agent/contextvis/chunking.py))→ 得这些下标落在哪些真实轮 +
-  其 label/tokens → 即 provenance。(`topic` 待 [turn-band.md](turn-band.md) 第二刀的逐轮主题落地后填。)
+  轮派生([chunking._segment_history](../../agent/contextvis/chunking.py))→ 得这些下标落在哪些真实轮 +
+  其 label/tokens → 即 provenance。(`topic` 待 [turn-band.md](../turn-band.md) 第二刀的逐轮主题落地后填。)
 - **抗递归(关键)**:若 `before` 里**本就含**更早的折叠块(压缩的压缩),那块**自带 provenance**
   (从账本查)。新折叠的 provenance = (折叠范围内的真实轮,分块派生) **∪** (范围内旧折叠块的 provenance,
   账本查表后**合并**)。于是"摘要的摘要"自然展开成全部原始轮,无需全局重放。
@@ -98,10 +98,10 @@ record_structural_mutation(session, before_history, folded_indices, summary_key,
     # 3. 写账本： session["_cv_fold_ledger"][summary_key] = merged_provenance
 ```
 
-- **手动侧**:在 [`_commit_history_mutation`](../tui_gateway/server.py#L4657) 抓 `before` 的同一处调用
+- **手动侧**:在 [`_commit_history_mutation`](../../tui_gateway/server.py#L4657) 抓 `before` 的同一处调用
   (drop/fold 共用);`summary_key` = 新摘要块的稳定键(§7),drop 无摘要 → 记墓碑条目。
 - **自动侧**:在 `_compress_context` 入口抓 `before`、出口拿 `head_end/tail_start` 与新摘要 → 调同一原语。
-- **与 undo 配对**:手动突变可撤销([context.undo](../tui_gateway/server.py#L4897) 还原 `before`)→
+- **与 undo 配对**:手动突变可撤销([context.undo](../../tui_gateway/server.py#L4897) 还原 `before`)→
   撤销时**同步回滚账本**(弹出刚记的条目)。账本与 history 必须同生共死,否则出现孤儿出处。
 
 > 一个原语、两处调用。`kind` 标 fold/drop/compress,但 provenance 形状一致——**对具体 action 不可知**,
@@ -111,11 +111,11 @@ record_structural_mutation(session, before_history, folded_indices, summary_key,
 
 ## 5. band 如何消费
 
-1. **后端附挂**:[build_snapshot_chunks](../agent/contextvis/chunking.py#L411) 给每个 `folded` 块
-   按 `summary_key` 查账本 → 在 [`_chunk_dict`](../agent/contextvis/chunking.py#L499) 写
+1. **后端附挂**:[build_snapshot_chunks](../../agent/contextvis/chunking.py#L411) 给每个 `folded` 块
+   按 `summary_key` 查账本 → 在 [`_chunk_dict`](../../agent/contextvis/chunking.py#L499) 写
    `foldedTurns: [{turn,label,tokens,topic?}]`。
 2. **契约**:`ContextChunk` 加 `foldedTurns?: {turn,label,tokens,topic?}[]`(承接 A 已加的 `folded`)。
-3. **渲染**:[`TurnBand`](../web/src/components/ContextVisPanel.tsx) 把折叠块标题从"已折叠摘要"升级为
+3. **渲染**:[`TurnBand`](../../web/src/components/ContextVisPanel.tsx) 把折叠块标题从"已折叠摘要"升级为
    **"已折叠 第1–5轮〔主题〕→ 摘要"**;点击 → inspector 列出被折轮的 label(原文已无,见 §9)。
 
 闭环:A 把摘要标成 `folded` 块(不冒充轮)→ ② 给该块补"折了哪些轮"→ band 还原拓扑。
@@ -151,7 +151,7 @@ drop 删消息、无摘要。两种画法:
 
 ② 算 `before` 结构时,要求**所有压缩产物都已被认成 `folded` 块**(否则旧摘要又被当真实轮、出处算错)。
 A 只认了 `_SUMMARY_END_MARKER` 一种;须扩成 **regime 的全集**——复用
-[`regime._is_boilerplate`](../agent/contextvis/regime.py#L99) 的 `_BOILERPLATE_MARKERS`(5 个),
+[`regime._is_boilerplate`](../../agent/contextvis/regime.py#L99) 的 `_BOILERPLATE_MARKERS`(5 个),
 让 `[active task list preserved…]` 等也标 `folded`。**这是 ② 的第 0 步,非可选。**
 
 > 区别牢记:regime 为**检测**把样板隐形;band 为**占用诚实**(CLAUDE.md 第 1 条)须**显示成折叠块**,

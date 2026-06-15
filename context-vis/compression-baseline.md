@@ -110,6 +110,6 @@ fate=keep → 排除在可压集合外(内容寻址的"保护",取代位置寻�
 
 > **结论**:阶段 3 = 新增一层薄薄的「fate → 消息选择」映射,把活儿**转包给现有引擎**。
 > 不造摘要轮子、不造缝合轮子。新增代码量小;**风险集中在"选择",不在"压缩"本身**。
-> (那条命令通道**已实测可用**,不再是风险点,见 [phase3-channel.md](phase3-channel.md)。)
+> (那条命令通道**已实测可用**,不再是风险点,见 [phase3-channel.md](archive/phase3-channel.md)。)
 
-详见 [roadmap.md](roadmap.md) §交互式压缩、[phase3-channel.md](phase3-channel.md) §命令通道证据链。
+详见 [roadmap.md](roadmap.md) §交互式压缩、[phase3-channel.md](archive/phase3-channel.md) §命令通道证据链。
