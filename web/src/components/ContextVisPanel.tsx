@@ -376,12 +376,17 @@ function TurnBand({
     mode === "actual" ? Math.min(1, Math.max(0, percent / 100)) : 1;
   const fillH = VB_H * usedFrac;
 
-  // 顶=最老(底座)→ 往下逐轮累积;格高 ∝ token,设最小高保证可点。
+  // 顶=最老(底座)→ 往下逐轮累积。布局:每格先得**保底高**,余下空间再按 token 占比分配,
+  // 使所有格之和**恰为 fillH**——这样最小高不会累加溢出、把最新的轮挤出视口下沿(时间轴视图
+  // 绝不能丢掉"现在",这正是 resume + 多轮时第三轮在带里消失的根因)。格太多(n·保底 > fillH)
+  // 时保底自动缩小到 fillH/n,保证仍全部可见(代价:极端时比例略失真,见 doc §10)。
   // for-of 而非 .map:避免在渲染期闭包里改累加量(react-hooks/immutability)。
+  const minH = Math.min(TURN_MIN_H, fillH / Math.max(1, cells.length));
+  const extra = Math.max(0, fillH - minH * cells.length);
   const laid: { cell: TurnCell; y: number; h: number }[] = [];
   let yCursor = 0;
   for (const cell of cells) {
-    const h = Math.max(TURN_MIN_H, (cell.tokens / total) * fillH);
+    const h = minH + (total > 0 ? (cell.tokens / total) * extra : 0);
     laid.push({ cell, y: yCursor, h });
     yCursor += h;
   }

@@ -174,9 +174,18 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
   `applyFold`/`applyDrops` + "应用 fold/drop (N)" 按钮,一行未改;多条支线逐轮标后一次应用即并折(非连续 splice)。
   ④ **折叠块=终点叶子(修)**:`ChatPage.turnChunks` 对齐 `buildTurnCells`——选中压缩块不显本轮构成(只读摘要原文)、
   某轮构成排除同 turn 号的折叠块,免压缩产物冒充该轮成员。
+- **第四刀后续修(实测发现)**:
+  - **turn 带布局溢出 = 最新轮被裁(关键修)**:旧逻辑每格 `max(TURN_MIN_H, 比例高)`,格多时保底高**累加溢出**
+    `fillH`→ 顶老底新堆叠下,**排在最后的最新轮被挤出视口下沿、被 SVG 裁掉**(resume 老 session=底座+折叠块+多轮
+    最易触发;类型版用 squarify 二维铺排不溢出故能看到——曾据此误判为数据问题)。改为**保底 + 余量按 token 占比**:
+    每格之和**恰为 fillH**,永不裁掉任何轮;格太多时保底自动缩到 `fillH/n`。时间轴视图绝不能丢"现在"。
+  - **本轮构成视觉优化**(`TurnComposition`):成员 chip 列表**限高 120px + 滚动**(整块 `shrink-0`)→ 工具调用再多
+    也不挤占下方原文视图;文件 chip 只显**末两段路径**(`tui_gateway/server.py`,全路径留 title)→ 一行并排多个;
+    **按 token 降序(history 置顶)** → 大块/谁在吃 context 先露头。
 - **验证**:web build + lint 干净;后端 mock-LLM 测森林(三话题三色全支线)+ 任务(主线轮同色高亮、
   工具结果归对轮)+ join off-by-one 正确吸收。第三刀实测:点轮 inspector 显本轮构成 + TUI 同步滚动。
-  第四刀实测:整轮 fold/drop → band 叠加 → 应用落地 token 真减;闸门弹起待折叠轮自动碰撞高亮;压缩块点击只读摘要不混入轮。
+  第四刀实测:整轮 fold/drop → band 叠加 → 应用落地 token 真减;闸门弹起待折叠轮自动碰撞高亮;压缩块点击只读摘要不混入轮;
+  resume 老 session 续轮 → 最新轮在带内正常显示(布局溢出修复后)。
 
 ---
 

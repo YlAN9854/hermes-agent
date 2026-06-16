@@ -46,6 +46,17 @@ const FATE_DOT: Record<Fate, string> = {
 };
 
 /**
+ * 成员 chip 的紧凑标签:文件路径取末两段(`tui_gateway/server.py`),免整条全路径占满一行
+ * (CSS 从右截断会把最有用的文件名切掉)。完整路径仍留在 chip 的 title 里。
+ */
+function chipLabel(c: ContextChunk): string {
+  if (c.type === "file" && c.label.includes("/")) {
+    return c.label.split("/").filter(Boolean).slice(-2).join("/");
+  }
+  return c.label;
+}
+
+/**
  * 本轮构成（第三刀细节层）—— 选中的是对话轮时,显示该轮的类型细分 + 成员块。
  *
  * 响应侧(assistant + tool_result + file)常远大于提问侧(一句小提问能拽进 20K 工具结果),
@@ -71,6 +82,14 @@ function TurnComposition({
   for (const c of chunks) byType.set(c.type, (byType.get(c.type) ?? 0) + c.tokens);
   const turn = chunks[0]?.turn;
 
+  // chip 排序:history(提问/回复)置顶,其余按 token 降序——大块(谁在吃 context)先露头,
+  // 配合下方限高滚动,工具调用再多也不挤占原文视图。
+  const ordered = [...chunks].sort((a, b) => {
+    const ah = a.type === "history" ? 0 : 1;
+    const bh = b.type === "history" ? 0 : 1;
+    return ah - bh || b.tokens - a.tokens;
+  });
+
   // 第四刀:可落地(message 背书)的成员才能整轮 fold/drop;底座(system/tool_schema)无。
   const applicable = chunks.filter((c) => MESSAGE_BACKED_TYPES.has(c.type));
   const applicableIds = applicable.map((c) => c.id);
@@ -84,7 +103,7 @@ function TurnComposition({
   const showTurnFate = !!onSetFates && applicable.length > 0;
 
   return (
-    <div className="flex flex-col gap-1.5 rounded border border-current/10 px-2 py-1.5">
+    <div className="flex shrink-0 flex-col gap-1.5 rounded border border-current/10 px-2 py-1.5">
       <div className="flex items-center justify-between text-[11px] text-text-tertiary">
         <span className="text-display tracking-wider">本轮构成</span>
         <span className="tabular-nums">
@@ -101,9 +120,10 @@ function TurnComposition({
           />
         ))}
       </div>
-      {/* 成员块 chips:点击钻进该块原文;右侧小点标该块当前命运。 */}
-      <div className="flex flex-wrap gap-1">
-        {chunks.map((c) => {
+      {/* 成员块 chips:点击钻进该块原文;右侧小点标该块当前命运。
+          限高 + 滚动:工具调用再多也只占这一块、不挤占下方原文视图(用户诉求)。 */}
+      <div className="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto pr-0.5">
+        {ordered.map((c) => {
           const isSel = c.id === selectedId;
           const cFate = fateMap?.[c.id];
           return (
@@ -113,7 +133,7 @@ function TurnComposition({
               onClick={() => onSelectChunk?.(c.id)}
               title={`${c.label} · ${formatTokenCount(c.tokens)} tok`}
               className={cn(
-                "flex min-w-0 max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] transition-colors",
+                "flex h-fit min-w-0 max-w-[210px] items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] transition-colors",
                 isSel
                   ? "border-current/40 bg-current/10 text-text-secondary"
                   : "border-current/15 text-text-tertiary hover:text-text-secondary",
@@ -123,7 +143,7 @@ function TurnComposition({
                 className="inline-block h-2 w-2 shrink-0 rounded-sm"
                 style={{ backgroundColor: TYPE_COLOR[c.type] ?? "#888" }}
               />
-              <span className="truncate">{c.label}</span>
+              <span className="truncate">{chipLabel(c)}</span>
               <span className="shrink-0 tabular-nums opacity-70">
                 {formatTokenCount(c.tokens)}
               </span>
