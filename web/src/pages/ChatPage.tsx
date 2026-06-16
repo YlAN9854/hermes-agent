@@ -229,20 +229,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // （projectFates / treemap cell / inspector）都只按当前 chunks 查表，指向已
   // 消失 chunk 的条目天然惰性、不影响任何渲染或计算；「清除标记」整体重置。
   const [fateMap, setFateMap] = useState<FateMap>({});
-  const setFate = useCallback((id: string, fate: Fate | null) => {
-    setFateMap((prev) => {
-      if (!fate) {
-        if (!(id in prev)) return prev;
-        const rest = { ...prev };
-        delete rest[id];
-        return rest;
-      }
-      if (prev[id] === fate) return prev;
-      return { ...prev, [id]: fate };
-    });
-  }, []);
-  // 第四刀:整轮命运——一次给一组 chunk 批量标/清命运(band 选支线 → 预填 fateMap →
-  // 复用既有 apply fold/drop 落地)。一个 setState 处理整组,同 setFate 的孤儿惰性策略。
+  // 命运标记——一次给一组 chunk 批量标/清(inspector 单块=传 [id],整轮=传该轮全部 id;
+  // band 选支线 → 预填 fateMap → 复用既有 apply fold/drop 落地)。孤儿条目天然惰性,不剪除。
   const setFates = useCallback((ids: string[], fate: Fate | null) => {
     if (ids.length === 0) return;
     setFateMap((prev) => {
@@ -941,8 +929,6 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
           >
             <ChunkInspector
               chunk={selectedChunk}
-              fate={selectedChunkId ? fateMap[selectedChunkId] : undefined}
-              onSetFate={setFate}
               onClose={() => setSelectedChunkId(null)}
               turnChunks={turnChunks}
               onSelectChunk={setSelectedChunkId}
@@ -1030,8 +1016,6 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             <div className="min-h-0 flex-1 overflow-hidden">
               <ChunkInspector
                 chunk={selectedChunk}
-                fate={selectedChunkId ? fateMap[selectedChunkId] : undefined}
-                onSetFate={setFate}
                 onClose={() => setSelectedChunkId(null)}
                 turnChunks={turnChunks}
                 onSelectChunk={setSelectedChunkId}
