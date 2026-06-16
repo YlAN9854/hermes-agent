@@ -47,6 +47,23 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
    产出 mainline_turns/focus,失败回退启发式。森林静默、任务才弹。
 3. ⬜ **后续**:focus 喂压缩 `focus_topic`(焦点压缩)、深析**死重清单**(喂闸门 + 方向 A 主动清理)、
    ②→① 完成检测触发清理、滚动增量(压缩前快照,根治"跑在压缩后历史")、产品门槛(纯浏览算不算任务)。
+4. ⬜ **持久自动主题着色(turn 带常驻底色)** — 用户需求(2026-06-16 调研定调,本次只记录不动工)。
+   现状:着色是**按需 + 闸门触发**,且新一轮 historyVersion 推进 → 前端 `colorsFresh` 失效 →
+   **主动回落中性**(见 [ContextVisPanel.tsx](../web/src/components/ContextVisPanel.tsx) 着色新鲜度门控)。
+   想要:**自动、持久、同主线/主题的轮同色、不同主题不同色**。两个障碍:① **成本**——LLM 路
+   [`_assess_llm`](../agent/contextvis/regime.py#L364) 单条缓存按 `hash(skeleton)` 命中,每新增一轮即失效 →
+   每轮一次 aux 调用;② **颜色稳定性**——`buildTopicColorMap` 按 topic **字符串**排序分色,LLM 重命名→跳色。
+   **分两层(推荐先①后②)**:
+   - **① 启发式自动着色(免费、确定性、可现在做)**:[`_compute`](../agent/contextvis/regime.py#L298) 已产出
+     逐轮 `turn_salient` + `token_turns` + `linking`——把"共享 linking token 的轮"做**连通分量聚类**,
+     每簇=一色,**无 LLM**。落点:`_compute` 加聚类 → 新增/扩 `regime_colors` 的 `engine=heuristic` 簇模式(免 LLM)→
+     前端默认开、按 snapshot 自动刷新(免费故可常驻)、颜色按**簇签名**(排序后 top linking token,跨重算稳定)分配。
+     代价:标签弱(取簇内 top token)。现有 LLM「主题着色」保留为按需**语义升级**(好标签 + 主线判定)。
+     契合现有"启发式免费打底 + LLM 权威按需"两引擎哲学。
+   - **② LLM 增量着色(好标签,属本"后续")**:改 `_assess_llm` 单条缓存为**按 turn 身份缓存**(跨压缩用
+     **内容 hash**而非轮号当身份)+ 只判**新轮**(老轮 topic/色复用)+ 前端持久 topic→色注册表。
+     与"滚动增量"同机器,顺带服务长会话扩展。
+   - ✗ **不做朴素"每轮全量 LLM"**:成本高 + 颜色抖动,体验更差。
 
 ### 压缩闸门(把静默 auto-compress 改成用户确认)
 ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理(上面 A 路)之外,
