@@ -58,6 +58,8 @@ interface CompactionRequestPayload {
   /** 两级门控放行的任务态标记("task")+ 原因(供闸门条标"检测到主线任务")。 */
   regime?: string;
   collision_reason?: string;
+  /** R 后续①:检测出的主线焦点,前端只读显示"将按此焦点压"(确认后喂 focus_topic)。 */
+  focus?: string;
   /** 闸门时刻(turn 中途)的新鲜 chunks + 窗口,用来把 treemap/占用刷成与 banner 一致。 */
   chunks?: ContextChunk[];
   budget?: number;
@@ -138,6 +140,7 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
                 estAfterPercent: p.est_after_percent ?? 0,
                 foldTurns: p.fold_turns ?? 0,
                 regime: p.regime,
+                focus: p.focus,
               },
             }));
           }

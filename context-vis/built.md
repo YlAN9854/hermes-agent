@@ -138,6 +138,20 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
   LLM 路(mock aux)task/forest/失败回退/禁用。**实测**:森林(电竞/塔罗/Rust 混问)静默自动压、
   `engine:llm reason` 正确;多轮读代码任务弹闸门 + 标 focus。
 
+### R 后续① · 焦点压缩(把检测出的 focus 接进自动压缩)
+闸门触发时 `assess` 已产出的主线 `focus`,过去**弹完即弃**、自动压缩 `focus_topic=None`(焦点盲、纯位置)。
+①**把脑接到手**:`focus` → 既有 `focus_topic`(`_generate_summary` 焦点 prompt:相关留全细节 60–70% 预算、
+无关狠压)。**几乎全是接线,零新机制/RPC,regime.py 零改。**
+- **后端**:`compaction_gate._should_gate_for_regime` 回传 `(should_gate, reason, focus)`;
+  `request_compaction_decision` 把 `focus` 进闸门 payload + 返回 `{choice, focus}`;
+  [conversation_loop.py:3825](../agent/conversation_loop.py#L3825) continue 时 `_compress_context(…, focus_topic=focus or None)`
+  (**仅闸门这一处**;另三处压缩 + turn_context 不接,需无条件 assess、留后续)。focus 空 → 位置式回退。
+- **前端(只读)**:`PendingCompaction.focus` + adapter 映射 + 闸门条加一行「将按焦点压缩: …」。
+  「继续压缩」即确认该 focus(编辑 focus 需扩 shared 审批 payload,留 gate 第二阶段)。
+- **验证**:stub 证 `_should_gate_for_regime` 回传 focus、`request_compaction_decision` payload 含 focus 且返回
+  `{choice,focus}`;web build+lint 干净。**实测铁证**:`~/.hermes/logs/agent.log`「compression started … focus=」
+  从历来 `None` → 本次 `focus='opencode agent architecture analysis'`,摘要 `## Goal` 收窄到 agent 模块。
+
 ---
 
 ### turn 带 · 主视图主轴翻转(第一~第四刀,设计见 [turn-band.md](turn-band.md))

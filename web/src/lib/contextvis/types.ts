@@ -83,6 +83,8 @@ export interface PendingCompaction {
   foldTurns: number;
   /** 两级门控:检测到的任务态（"task"）。森林态不会弹闸门,故有值即 task。 */
   regime?: string;
+  /** R 后续①:检测出的主线焦点。非空时闸门显「将按焦点压缩: …」,确认后喂压缩 focus_topic。 */
+  focus?: string;
 }
 
 /** 容器 = 一组块，填进一个有预算上限的容器。 */

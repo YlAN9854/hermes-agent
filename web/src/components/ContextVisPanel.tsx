@@ -974,6 +974,12 @@ export function ContextVisPanel({
                   检测到主线任务 · 本次压缩将触及主线,故请你把关(森林态会静默自动压)。
                 </div>
               )}
+              {pending!.focus && (
+                <div className="text-[10px] leading-snug text-text-tertiary">
+                  将按焦点压缩:
+                  <span className="text-text-secondary">{pending!.focus}</span>
+                </div>
+              )}
               <div className="text-[11px] leading-snug text-text-secondary">
                 系统计划:折叠 {pending!.foldTurns} 轮为摘要、保留首轮+最近窗口
                 <span className="text-text-tertiary">

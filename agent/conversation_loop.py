@@ -3818,14 +3818,18 @@ def run_conversation(
                         _gate_decision = request_compaction_decision(agent, messages)
                     except Exception:
                         _gate_decision = None
-                    if _gate_decision == "defer":
+                    _gate_choice = _gate_decision.get("choice") if _gate_decision else None
+                    if _gate_choice == "defer":
                         agent._safe_print("  ⟳ compaction deferred (user)")
                     else:
                         agent._safe_print("  ⟳ compacting context…")
+                        # R 后续①:闸门检测出的主线 focus → 焦点压缩(空则 None → 位置式回退)。
+                        _gate_focus = (_gate_decision or {}).get("focus") or None
                         messages, active_system_prompt = agent._compress_context(
                             messages, system_message,
                             approx_tokens=agent.context_compressor.last_prompt_tokens,
                             task_id=effective_task_id,
+                            focus_topic=_gate_focus,
                         )
                         # Compression created a new session — clear history so
                         # _flush_messages_to_session_db writes compressed messages

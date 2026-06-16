@@ -32,32 +32,34 @@ def _regime_gating_enabled() -> bool:
 
 def _should_gate_for_regime(
     agent: Any, messages: List[Dict[str, Any]], plan: Dict[str, Any]
-) -> tuple[bool, str]:
+) -> tuple[bool, str, str]:
     """两级门控判定:这次压缩到底要不要打断用户?
 
     A 级(regime):有没有值得护的主线?没有 → 森林,静默自动压。
     B 级(collision):这次压缩的折叠区 [head_end, tail_start) 是否触及主线消息?
                      不触及(只压死重)→ 即使在任务态也静默压。
-    A ∧ B 才打断。返回 (是否打断, 原因串)。任何异常 → 保守放行打断(退回一级行为)。
+    A ∧ B 才打断。返回 (是否打断, 原因串, 主线 focus)。任何异常 → 保守放行打断(退回一级行为)。
 
-    误判代价不对称:漏弹只是退化成今天的静默自动压(无回归),故拿不准时倾向不扰。
+    `focus` = 检测出的当前主线焦点(R 后续①:喂给焦点压缩的 focus_topic);仅 task 态有意义,
+    其余为空串。误判代价不对称:漏弹只是退化成今天的静默自动压(无回归),故拿不准时倾向不扰。
     """
     if not _regime_gating_enabled():
-        return True, "regime-gating-off"
+        return True, "regime-gating-off", ""
     try:
         from agent.contextvis.regime import get_regime_detector
 
         a = get_regime_detector(agent).assess(messages, agent)
     except Exception as e:  # noqa: BLE001 — 检测失败绝不能挡住压缩流程
         logger.debug("regime detect failed: %s", e)
-        return True, "regime-detect-error"
+        return True, "regime-detect-error", ""
     if a.regime != "task":
-        return False, f"forest ({a.reason})"
+        return False, f"forest ({a.reason})", ""
     head_end, tail_start = plan.get("head_end", 0), plan.get("tail_start", 0)
     collision = any(head_end <= i < tail_start for i in a.on_thread_indices)
+    focus = (getattr(a, "focus", "") or "").strip()
     if not collision:
-        return False, f"task-no-collision ({a.reason})"
-    return True, f"task-collision ({a.reason})"
+        return False, f"task-no-collision ({a.reason})", focus
+    return True, f"task-collision ({a.reason})", focus
 
 
 def _resolve_session_key() -> str:
@@ -149,13 +151,14 @@ def _system_fate_for_chunks(
 
 def request_compaction_decision(
     agent: Any, messages: List[Dict[str, Any]]
-) -> Optional[str]:
+) -> Optional[Dict[str, str]]:
     """auto-compress 触发时拦一道:把系统计划发给前端,阻塞 agent 线程等用户决定。
 
     返回:
-      ``"continue"`` —— 照常压缩(用户确认 / 超时 / 无法定位响应 / 出错)
-      ``"defer"``    —— 本轮不压(用户推迟)
-      ``None``       —— 未开闸 / 非交互 / 无中段可折叠 → 调用方走原自动压缩
+      ``{"choice": "continue", "focus": <主线焦点>}`` —— 照常压缩(用户确认 / 超时 / 出错);
+          `focus` 喂焦点压缩的 `focus_topic`(R 后续①),空串表示位置式回退。
+      ``{"choice": "defer", "focus": ...}``           —— 本轮不压(用户推迟)
+      ``None``                                         —— 未开闸 / 非交互 / 无中段可折叠 → 调用方走原自动压缩
     """
     if not _gate_enabled():
         return None
@@ -191,7 +194,7 @@ def request_compaction_decision(
         return None
 
     # 两级门控(R 第一刀):森林 → 闸门闭嘴;任务但这次只压死重 → 也别扰。静默自动压。
-    should_gate, gate_reason = _should_gate_for_regime(agent, messages, plan)
+    should_gate, gate_reason, focus = _should_gate_for_regime(agent, messages, plan)
     if not should_gate:
         logger.debug("compaction gate suppressed by regime — %s", gate_reason)
         return None
@@ -238,6 +241,8 @@ def request_compaction_decision(
         # 两级门控放行原因(任务态 + 本次压缩触及主线),供闸门条标"检测到主线任务"。
         "regime": "task",
         "collision_reason": gate_reason,
+        # R 后续①:检测出的主线焦点。前端只读显示"将按此焦点压";确认(continue)后喂 focus_topic。
+        "focus": focus,
         # 闸门 turn 中途触发,带上这一刻的新鲜 chunks + 占用,让前端 treemap 立刻
         # 刷成"即将被压的真实状态"——否则 treemap/占用还停在轮初的旧值,与 banner
         # 和 system_fate(按新消息算的 chunk id)对不上。
@@ -250,5 +255,6 @@ def request_compaction_decision(
         )
     except Exception as e:  # noqa: BLE001 — 出错别挡着,照常压
         logger.warning("compaction gate await failed: %s", e)
-        return "continue"
-    return "defer" if decision.get("choice") == "defer" else "continue"
+        return {"choice": "continue", "focus": focus}
+    choice = "defer" if decision.get("choice") == "defer" else "continue"
+    return {"choice": choice, "focus": focus}
