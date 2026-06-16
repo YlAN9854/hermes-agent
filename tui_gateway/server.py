@@ -4828,14 +4828,22 @@ def _(rid, params: dict) -> dict:
             if not idxs:
                 continue  # system/tool_schema：无消息背书，不着色
             topic = ""
+            done = False  # R 后续②:该 chunk 所属轮是否已完成/放弃(死重清单候选)
             for mi in idxs:
                 t = turn_of[mi] if 0 <= mi < len(turn_of) else None
-                if t is not None and topics.get(t, {}).get("topic"):
-                    topic = topics[t]["topic"]
-                    break
+                if t is None:
+                    continue
+                tv = topics.get(t)
+                if not tv:
+                    continue
+                if tv.get("topic") and not topic:
+                    topic = tv["topic"]
+                if tv.get("done"):
+                    done = True
             chunk_topics[cid] = {
                 "topic": topic,
                 "mainline": any(mi in on for mi in idxs),
+                "done": done,
             }
 
         return _ok(rid, {

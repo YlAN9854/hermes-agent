@@ -687,6 +687,7 @@ export function ContextVisPanel({
   fateMap,
   onClearFates,
   onActivateTurn,
+  onSetFates,
 }: {
   snapshot: ContextSnapshot;
   /** 受控选中：选中态上提到挂载壳，与右侧栏 inspector 共享。 */
@@ -700,6 +701,8 @@ export function ContextVisPanel({
   onClearFates: () => void;
   /** 第三刀:点对话轮 → 挂载壳把 TUI 滚到该轮(renderer 不碰 xterm)。 */
   onActivateTurn?: (turn: number) => void;
+  /** R 后续②:批量预填命运(「建议清理」按 regime 预填 fold)。 */
+  onSetFates?: (ids: string[], fate: Fate | null) => void;
 }) {
   const [mode, setMode] = useState<TreemapMode>("proportional");
   // 主视图主轴:默认「轮次」(turn 优先,见 turn-band.md);「类型」一键回旧树图。
@@ -911,6 +914,47 @@ export function ContextVisPanel({
     }
   };
 
+  // R 后续②「建议清理」:跑 regime → 挑「已完成的支线」(done ∧ 非主线 ∧ message-backed)→
+  // 预填 fateMap=fold + 顺带着色;此后复用既有 fate 预览 +「应用 fold (N)」落地。
+  // 检测层只产"选什么",落地一行不改(铁律)。
+  const [suggestBusy, setSuggestBusy] = useState(false);
+  const [suggestNote, setSuggestNote] = useState<string | null>(null);
+  const suggestCleanup = async () => {
+    if (!sid || !onSetFates) return;
+    setSuggestBusy(true);
+    setSuggestNote(null);
+    try {
+      const r = await fetchRegimeColors(sid);
+      setColorData({
+        hv: snapshot.historyVersion,
+        topics: r.chunk_topics,
+        regime: r.regime,
+        focus: r.focus,
+        engine: r.engine,
+      });
+      setColorOn(true); // 顺带着色,让用户复核时看清主题分布
+      const msgBacked = new Set(
+        chunks.filter((c) => MESSAGE_BACKED_TYPES.has(c.type)).map((c) => c.id),
+      );
+      const ids = Object.entries(r.chunk_topics)
+        .filter(([id, v]) => v.done && !v.mainline && msgBacked.has(id))
+        .map(([id]) => id);
+      if (ids.length > 0) {
+        onSetFates(ids, "fold");
+      } else {
+        setSuggestNote(
+          r.engine === "llm"
+            ? "未发现已完成的支线可折"
+            : "需语义检测(开启 LLM)才能建议清理",
+        );
+      }
+    } catch {
+      setSuggestNote("建议清理失败，请重试");
+    } finally {
+      setSuggestBusy(false);
+    }
+  };
+
   return (
     <Card className="flex flex-none flex-col gap-2 px-3 py-2">
       <div className="flex items-center justify-between gap-2">
@@ -935,6 +979,17 @@ export function ContextVisPanel({
                 : colorOn && !colorsFresh
                   ? "重新着色"
                   : "主题着色"}
+            </button>
+          )}
+          {hasChunks && view === "turn" && onSetFates && (
+            <button
+              type="button"
+              onClick={suggestCleanup}
+              disabled={suggestBusy || colorBusy}
+              className="rounded border border-current/15 px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary transition-colors hover:text-text-secondary"
+              title="按 regime 自动挑出「已完成的支线」预填折叠，复核后点「应用 fold」（调用辅助模型）"
+            >
+              {suggestBusy ? "分析中…" : "建议清理"}
             </button>
           )}
           {hasChunks && <ModeToggle mode={mode} onChange={setMode} />}
@@ -1187,6 +1242,9 @@ export function ContextVisPanel({
               {" · "}
               {activeMeta.engine === "llm" ? "语义" : "启发式"}
             </div>
+          )}
+          {suggestNote && (
+            <div className="text-[10px] text-text-tertiary">{suggestNote}</div>
           )}
           {hasChunks &&
             (view === "turn" ? (

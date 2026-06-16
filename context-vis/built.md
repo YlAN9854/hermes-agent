@@ -152,6 +152,20 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
   `{choice,focus}`;web build+lint 干净。**实测铁证**:`~/.hermes/logs/agent.log`「compression started … focus=」
   从历来 `None` → 本次 `focus='opencode agent architecture analysis'`,摘要 `## Goal` 收窄到 agent 模块。
 
+### R 后续② 首刀 · 死重清单「建议清理」(按需主动梳理)
+把"选谁折"也变聪明:**检测器自动认出"已完成的支线"→ 预填 fateMap fold → 复用第四刀的落地手**。
+这是 regime.md §死重清单 的"方向 A 主动清理"路(大窗口下闸门罕触发,按需主动路才是日常主场)。
+**检测器只多一个 `done` 字段,落地一行不改(铁律:检测层只产"选什么")。**
+- **后端**:`regime.py` `_REGIME_PROMPT` 的 `turns[]` 加 `done`(钉死:仅线程明显完成/放弃才 true、**主线 NEVER done**、
+  拿不准 false),`_assess_llm` 解析进 `turn_topics[t]["done"]`;`server.py` `context.regime_colors` 的 `chunk_topics[cid]`
+  加 `done`(沿用挑 topic 同一轮取 done)。启发式路无 done → 无建议(保守)。
+- **前端**:`apply.ts` `RegimeColors.chunk_topics` 加 `done?`;`setFates` 透传 ChatPage→Overlay→Panel;
+  Panel turn 视图加「建议清理」按钮 → `fetchRegimeColors` → 挑 `done ∧ !mainline ∧ message-backed` → `onSetFates(ids,"fold")`
+  + 顺带着色;**此后完全复用** fate 预览 +「应用 fold (N)」+ 撤销。0 条/非 LLM 给小字提示。默认 **fold 不 delete**(留痕)。
+- **验证**:stub 证 `done` 经 `_assess_llm` 进 `turn_topics`、dead-weight=`done ∧ !mainline` 精确挑出已完成支线、
+  **排除主线**;web build+lint 干净。**实测**:会话(opencode 主线 + "你知道opencode"引子 + "星座"跑题)→「建议清理」
+  预填 7 块 fold(引子 + 跑题,主线不动)→「应用 fold」→ 44%→21%、释放 ~34.5K、可撤销;幸存轮重编号。
+
 ---
 
 ### turn 带 · 主视图主轴翻转(第一~第四刀,设计见 [turn-band.md](turn-band.md))

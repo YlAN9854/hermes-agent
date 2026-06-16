@@ -977,6 +977,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             fateMap={fateMap}
             onClearFates={() => setFateMap({})}
             onActivateTurn={jumpToTurn}
+            onSetFates={setFates}
           />
 
           <Button

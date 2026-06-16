@@ -103,7 +103,10 @@ export interface RegimeColors {
   focus: string;
   engine: string;
   reason: string;
-  chunk_topics: Record<string, { topic: string; mainline: boolean }>;
+  chunk_topics: Record<
+    string,
+    { topic: string; mainline: boolean; done?: boolean }
+  >;
 }
 
 /**

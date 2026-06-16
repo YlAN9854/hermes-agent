@@ -223,13 +223,16 @@ Respond with ONLY a JSON object, no prose:
 {{"regime": "task" | "forest",
   "focus": "<=8 word label of the current task, or empty if forest",
   "turns": [{{"turn": <number>, "topic": "<=4 word subject of THIS turn", \
-"mainline": true|false}}, ... EXACTLY ONE entry per turn shown above],
+"mainline": true|false, "done": true|false}}, ... EXACTLY ONE entry per turn shown above],
   "reason": "<=20 word justification"}}
 
 For EACH turn give a SHORT topic = its own subject (e.g. "valorant prediction", \
 "read opencode source", "tarot reading"). Set mainline=true ONLY for turns that \
 belong to the current ongoing task; earlier unrelated one-offs get mainline=false. \
-If regime is "forest", every turn is mainline=false."""
+If regime is "forest", every turn is mainline=false.
+Set done=true ONLY for a turn whose thread is clearly FINISHED or ABANDONED — a \
+completed side-quest, a dead end, or a resolved one-off no longer being built on. \
+The CURRENT ongoing task is NEVER done. When unsure, set done=false."""
 
 
 def _parse_json_object(text: str) -> Dict[str, Any]:
@@ -412,6 +415,8 @@ class RegimeDetector:
             turn_topics[int(tn)] = {
                 "topic": str(item.get("topic", "")).strip()[:40],
                 "mainline": bool(item.get("mainline", False)),
+                # R 后续②:该轮线程是否已完成/放弃(死重清单候选;主线 NEVER done)。
+                "done": bool(item.get("done", False)),
             }
 
         # 主线轮:优先逐轮 mainline 标记,回退旧 mainline_turns 字段(向后兼容)。

@@ -16,7 +16,7 @@
 import { useState } from "react";
 
 import { ContextVisPanel } from "@/components/ContextVisPanel";
-import type { FateMap } from "@/lib/contextvis/plan";
+import type { Fate, FateMap } from "@/lib/contextvis/plan";
 import type { ContextSnapshot } from "@/lib/contextvis/types";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +33,7 @@ export function ContextVisOverlay({
   fateMap,
   onClearFates,
   onActivateTurn,
+  onSetFates,
 }: {
   snapshot: ContextSnapshot;
   selected: string | null;
@@ -41,6 +42,8 @@ export function ContextVisOverlay({
   onClearFates: () => void;
   /** 第三刀:点对话轮 → 把 TUI 滚到该轮(挂载壳实现,band 不碰 xterm)。 */
   onActivateTurn?: (turn: number) => void;
+  /** R 后续②:批量预填命运(「建议清理」预填 fold)。 */
+  onSetFates?: (ids: string[], fate: Fate | null) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -92,6 +95,7 @@ export function ContextVisOverlay({
             fateMap={fateMap}
             onClearFates={onClearFates}
             onActivateTurn={onActivateTurn}
+            onSetFates={onSetFates}
           />
         </div>
       )}
