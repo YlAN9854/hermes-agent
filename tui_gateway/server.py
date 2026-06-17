@@ -4806,45 +4806,17 @@ def _(rid, params: dict) -> dict:
     if err:
         return err
     try:
-        from agent.contextvis.regime import get_regime_detector, _segment_turns
+        from agent.contextvis.regime import get_regime_detector, chunk_topic_map
         from agent.contextvis.chunking import build_snapshot_chunks
 
         agent = session["agent"]
         with session["history_lock"]:
             history = list(session.get("history", []))
         a = get_regime_detector(agent).assess(history, agent)
-        turn_of, _n, _b, _r = _segment_turns(history)
-        topics = getattr(a, "turn_topics", {}) or {}
-        on = a.on_thread_indices
 
         payload = build_snapshot_chunks(agent, {"history": history})
-        chunk_topics: Dict[str, Any] = {}
-        for c in payload.get("chunks", []):
-            cid = c.get("id")
-            idxs = [
-                r.get("messageIndex") for r in (c.get("sourceRefs") or [])
-                if isinstance(r, dict) and isinstance(r.get("messageIndex"), int)
-            ]
-            if not idxs:
-                continue  # system/tool_schema：无消息背书，不着色
-            topic = ""
-            done = False  # R 后续②:该 chunk 所属轮是否已完成/放弃(死重清单候选)
-            for mi in idxs:
-                t = turn_of[mi] if 0 <= mi < len(turn_of) else None
-                if t is None:
-                    continue
-                tv = topics.get(t)
-                if not tv:
-                    continue
-                if tv.get("topic") and not topic:
-                    topic = tv["topic"]
-                if tv.get("done"):
-                    done = True
-            chunk_topics[cid] = {
-                "topic": topic,
-                "mainline": any(mi in on for mi in idxs),
-                "done": done,
-            }
+        # 逐 chunk topic/主线/完成态(done)——与压缩闸门死重建议共用同一映射,保证选择一致。
+        chunk_topics = chunk_topic_map(history, a, payload.get("chunks", []))
 
         return _ok(rid, {
             "regime": a.regime,

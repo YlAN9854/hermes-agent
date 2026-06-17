@@ -5,6 +5,9 @@
       "Edit(~/.claude/skills/sync-fork-upstream/**)",
       "Bash(git add *)",
       "Bash(npx tsc *)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }

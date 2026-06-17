@@ -351,6 +351,7 @@ function TurnBand({
   chunkTopics,
   onActivateTurn,
   fateMap,
+  gateActive = false,
 }: {
   snapshot: ContextSnapshot;
   mode: TreemapMode;
@@ -362,6 +363,8 @@ function TurnBand({
   onActivateTurn?: (turn: number) => void;
   /** 第四刀:命运叠加(平时=用户标记;闸门时=systemFate 碰撞高亮)。逐格聚合成员命运。 */
   fateMap: FateMap;
+  /** 死重喂闸门(点 3):闸门激活时,fold 格悬浮标来由(已完成支线 / 位置式中段)。 */
+  gateActive?: boolean;
 }) {
   const { percent, budget, compactAt } = snapshot;
   const cells = buildTurnCells(snapshot);
@@ -502,11 +505,18 @@ function TurnBand({
           : fullFate
             ? FATE_STROKE[fullFate]
             : "stroke-background-base";
+        // 死重喂闸门(点 3):闸门时 fold 格标来由——已完成支线(死重,语义识别)/ 位置式中段。
+        const foldReason =
+          gateActive && fullFate === "fold"
+            ? ct && ct.done
+              ? " · 建议折:已完成支线"
+              : " · 建议折:位置式中段"
+            : "";
         const tip = cell.isFolded
           ? `${cell.label}（压缩折叠产物）· ${formatTokenCount(cell.tokens)}`
           : `${cell.label} · ${formatTokenCount(cell.tokens)}${cell.isBase ? "" : ` · 第${cell.turn}轮`}${
               ct && ct.topic ? ` · ${ct.topic}${ct.mainline ? "（主线）" : "（支线）"}` : ""
-            }${fateText}`;
+            }${fateText}${foldReason}`;
         return (
           <g
             key={cell.isFolded ? cell.repId : `turn-${cell.turn}`}
@@ -1095,8 +1105,17 @@ export function ContextVisPanel({
                   <span className="text-text-secondary">{pending!.focus}</span>
                 </div>
               )}
+              {(pending!.deadweightTurns ?? 0) > 0 && (
+                <div className="text-[10px] leading-snug text-text-tertiary">
+                  其中{" "}
+                  <span className="text-text-secondary">
+                    {pending!.deadweightTurns} 个为已完成支线
+                  </span>
+                  （语义识别，含首尾，折它们最安全）+ 位置式中段。
+                </div>
+              )}
               <div className="text-[11px] leading-snug text-text-secondary">
-                系统计划:折叠 {pending!.foldTurns} 轮为摘要、保留首轮+最近窗口
+                系统计划:折叠 {pending!.foldTurns} 轮为摘要
                 <span className="text-text-tertiary">
                   （预计释放 ~
                   {formatTokenCount(
@@ -1104,7 +1123,7 @@ export function ContextVisPanel({
                   )}
                   ）
                 </span>
-                。下方 treemap 已画出此计划。
+                。下方 treemap 命运沟已画出折/留。
               </div>
               <div className="text-[10px] leading-snug text-text-tertiary">
                 {userEdited
@@ -1353,6 +1372,7 @@ export function ContextVisPanel({
                 chunkTopics={activeTopics}
                 onActivateTurn={onActivateTurn}
                 fateMap={effectiveFateMap}
+                gateActive={gateActive}
               />
             ) : (
               <Treemap

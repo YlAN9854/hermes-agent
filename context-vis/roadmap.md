@@ -47,10 +47,12 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
    产出 mainline_turns/focus,失败回退启发式。森林静默、任务才弹。
 3. ✅ **后续①:焦点压缩(focus → `focus_topic`)** — **已建成并实测**。闸门检测出的主线 focus 接进
    既有 `_generate_summary`(仅闸门压缩路);`agent.log` `compression started … focus=` 从 `None` → 主线串。见 [built.md](built.md)。
-4. ◑ **后续②:死重清单** — **首刀(方向 A 主动清理「建议清理」)✅ 已建成实测**:逐轮 `done` → turn 带按钮挑
-   已完成支线(`done ∧ !mainline`)→ 预填 fateMap fold → 复用第四刀「应用 fold」落地。见 [built.md](built.md)。
-5. ⬜ **后续(未做)**:死重②剩项(喂闸门 / ②→①完成自动触发 / chunk 级过期精测+回收量排序 / drop 噪音)、
-   滚动增量(压缩前快照,根治"跑在压缩后历史")、产品门槛(纯浏览算不算任务)、非闸门路喂 focus、闸门内编辑 focus。
+4. ✅ **后续②:死重清单** — **首刀(主动「建议清理」)✅ + 喂闸门 ✅ 已建成实测**:逐轮 `done` → 共用 `chunk_topic_map`
+   挑已完成支线(`done ∧ !mainline`)→ ① turn 带按钮预填 fold(主动);② 闸门弹出时自动预填进 `system_fate`(被迫压缩前,
+   含首尾、带来由)。两条都复用 `apply_gate_plan` 落地。**死重建议用 fold 不 drop**(决策见 [built.md](built.md))。
+5. ⬜ **后续(未做)**:死重②剩项(②→①完成自动触发 / **drop 残值信号**〔失败 tool_result / 被取代的旧 read / 闲聊,
+   比 done→drop 更准〕/ 回收量排序)、自动**护主线中段轮**、滚动增量(压缩前快照,根治"跑在压缩后历史")、
+   产品门槛(纯浏览算不算任务)、非闸门路喂 focus、闸门内编辑 focus。
 6. ⬜ **持久自动主题着色(turn 带常驻底色)** — 用户需求(2026-06-16 调研定调,本次只记录不动工)。
    现状:着色是**按需 + 闸门触发**,且新一轮 historyVersion 推进 → 前端 `colorsFresh` 失效 →
    **主动回落中性**(见 [ContextVisPanel.tsx](../web/src/components/ContextVisPanel.tsx) 着色新鲜度门控)。
@@ -81,10 +83,11 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
    **本地 `messages`**;落地统一进 `apply_gate_plan`(方案 A:编辑后的有效 fateMap = 权威计划,直接 apply、
    跳过位置式 `_compress_context`;复用手动 `context.fold` 的 `_generate_summary`+`splice_fold_summary`)。keystone =
    应答带回编辑(`approval.py` 的 `result_extra`)。命运沟可读性 + 在途 spinner 已打磨。见 [built.md](built.md) / [compaction-gate.md](compaction-gate.md)。
-   **剩**:keep-as-pin(持久免压区)、纠正 focus、死重喂闸门(均复用 extra keystone / apply_gate_plan)。
-3. ⬜ **第三阶段 / 横切**:死重清单**喂闸门**(系统预 mark 建议 fate 进闸门 = "建议策略注册表",落地路一行不改)——
-   含两 backlog(用户复测提出):① 自动推荐够到**首尾**(引擎已位置无关、手动可折首尾,缺自动推荐);
-   ② 标注每个 fate 的**理由**(推荐层产物,落点 inspector 顶/band 悬浮);以及 **keep-as-pin**、**闸门内纠正 focus**。
+   **剩**:keep-as-pin(持久免压区)、纠正 focus。
+3. ◑ **第三阶段 / 横切:死重清单喂闸门 ✅ 已建成实测**:闸门预填 = 位置式 ∪ 死重语义(done∧!mainline 自动预标 fold,
+   `system_fate[cid]="fold"` 覆盖位置式 keep → **够首尾**)。抽 `chunk_topic_map` 与「建议清理」共用判据、复用门控那次 assessment(零新 LLM)、
+   复用 `apply_gate_plan` 落地。点 1(够首尾)+ 点 3(banner/band 标来由)已兑现。**死重建议 fold 不 drop**(决策见 [built.md](built.md))。
+   **剩**:drop **残值信号**(失败 tool_result / 被取代旧 read / 闲聊,比 done→drop 准)、自动**护主线中段轮**、keep-as-pin、纠正 focus。
 
 ### 主视图主轴翻转:turn 优先 + 逐轮主题(设计定稿,见 [turn-band.md](turn-band.md))
 把主视图从"类型优先"(5 类型带)翻成 **"turn 优先"**:纵向时间序、与 TUI 同向、逐轮主题着色。
@@ -105,12 +108,13 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
 - **R. 任务态识别(自适应总开关)**:**第一刀(启发式)+ 第二刀(LLM 语义)均已建成并实测**——
   闸门从"逢阈值弹"升级为 **regime ∧ collision 才弹**(森林闭嘴、任务出声)。检测器常驻 agent,
   LLM 按目标/主题判 + 启发式回退。见 [regime.md](regime.md)、[needs.md](needs.md) §E E0。
-  **后续①焦点压缩(focus → `focus_topic`,仅闸门路)✅ + 后续②死重清单首刀(方向 A「建议清理」)✅ 已建成实测**。
-  **剩**:死重②喂闸门 / ②→①完成自动触发 / chunk 级过期精测、滚动增量、产品门槛、非闸门路喂 focus、闸门内编辑 focus。
+  **后续①焦点压缩 ✅ + 后续②死重清单(「建议清理」✅ + 喂闸门 ✅)均已建成实测**。
+  **剩**:②→①完成自动触发 / drop 残值信号(比 done→drop 准)/ 自动护主线中段、滚动增量、产品门槛、非闸门路喂 focus、闸门内编辑 focus。
 - **G. 压缩闸门**:第一阶段(预览 + 确认)**已建成**;已与 R 合流——闸门现"**regime ∧ collision
-  才弹**"。**第二阶段 drop ✅ + fold/keep ✅ 编辑均已建成**(两暗礁经"编辑随应答带回、作用本地 messages"消解;
-  keystone=应答带回编辑 payload;落地统一 `apply_gate_plan`,方案 A:编辑后计划即权威、跳过位置式压缩)。
-  **剩**:死重喂闸门(含首尾自动推荐 + fate 理由两 backlog)、keep-as-pin、纠正压缩焦点(均复用 extra keystone)。
+  才弹**"。**第二阶段 drop ✅ + fold/keep ✅ 编辑 + 死重清单喂闸门 ✅ 均已建成**(两暗礁经"编辑随应答带回、作用本地 messages"消解;
+  keystone=应答带回编辑 payload;落地统一 `apply_gate_plan`,方案 A:编辑后计划即权威、跳过位置式压缩;
+  死重把 detector 已完成支线预填进 system_fate、含首尾、共用 `chunk_topic_map`)。
+  **剩**:keep-as-pin、纠正压缩焦点、drop 残值信号、自动护主线中段(均复用 extra keystone / apply_gate_plan)。
 - **M. 压缩块诚实显示(✅ 已建成,取代废弃的"结构突变账本")**:压缩/fold 产物**如实标注、摆正位置、
   不冒充对话轮**,但**不重建被销毁的拓扑**——分块层识别对齐 `regime._is_boilerplate` 全集 → 标 `folded`
   → band 画「压缩 context」块。**原"结构突变账本"(突变前快照 + 折叠出处 + 两咽喉一本账)已判过度设计、
@@ -131,10 +135,10 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
   treemap 视觉(配色/字号/带顺序)、浮层交互(拖动/缩放)、截断上限可配;
   小块标签体感(降阈值 / 选中强制显标签 / band 级兜底标签)。
 
-> 建议优先级:**R 后续**(焦点压缩 ✅ + 死重清单首刀(主动清理)✅ + 闸门内 drop/fold/keep 编辑 ✅ →
-> 下一步**死重②喂闸门 / 滚动增量**,在已建成的自适应总开关 + 闸门编辑地基上加智能,见 [regime.md](regime.md))>
+> 建议优先级:**R 后续**(焦点压缩 ✅ + 死重清单(主动清理 ✅ + 喂闸门 ✅)+ 闸门内 drop/fold/keep 编辑 ✅ →
+> 下一步**滚动增量 / drop 残值信号 / ②→①完成自动触发**,在已建成的自适应总开关 + 闸门编辑/建议地基上加智能,见 [regime.md](regime.md))>
 > C2(增量)> D/E4(收尾/可选)。
 > 观察→治理(drop+fold)→落地、系统压缩前用户把关、**自适应总开关**(森林闭嘴/任务出声)、
-> **焦点压缩**(focus 接进压缩)、**死重清单主动清理**(系统建议折已完成支线)、
+> **焦点压缩**(focus 接进压缩)、**死重清单**(主动清理 + **喂闸门**:被迫压缩前自动建议折已完成支线、含首尾、带来由)、
 > **闸门内 drop/fold/keep 编辑**(被迫压缩前改写折叠计划,方案 A 直接落地)均已闭环;
-> 下一步是把死重清单也接进闸门(自动推荐折/留/删 + 理由,含首尾)、补滚动增量。
+> 下一步候选:滚动增量(长会话健壮)、drop 残值信号(比 done→drop 准)、自动护主线中段、keep-as-pin。

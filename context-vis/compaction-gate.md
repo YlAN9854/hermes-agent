@@ -1,7 +1,7 @@
 # 压缩闸门 —— 把"自动压缩"改成"用户确认的压缩"（调研证据链）
 
-> **状态:第一阶段(预览 + 确认)+ 第二阶段 drop / fold / keep 编辑均已建成并实测通过**,见 [built.md](built.md)。
-> 两暗礁被"编辑随应答带回、作用于本地 messages"的架构**消解**(非打补丁);keep-as-pin、死重喂闸门、纠正 focus 留后(见文末分期)。
+> **状态:第一阶段(预览 + 确认)+ 第二阶段 drop / fold / keep 编辑 + 死重清单喂闸门(detector 建议预填)均已建成并实测通过**,见 [built.md](built.md)。
+> 两暗礁被"编辑随应答带回、作用于本地 messages"的架构**消解**(非打补丁);keep-as-pin、纠正 focus、drop 残值信号、自动护主线中段留后(见文末分期)。
 
 > **动机**:Hermes 现在到阈值(默认 50%)就**静默** auto-compress——用户看不到改了什么、
 > 无从干预。这违背 CLAUDE.md 第 6 条「干预必须透明,永不静默改动上下文」。压缩闸门:
@@ -106,9 +106,16 @@ if agent.compression_enabled and _compressor.should_compress(_real_tokens):
     用户设想的"提升到持久免压区"= **keep-as-pin**(正向持久保护、场景小)单独设计,本刀不做。
   - **可读性「命运沟」**:闸门时每轮都被派命运,改为 **fold 压暗后退 + 左缘 4px 命运沟**(keep 绿/fold 橙/drop 红)一眼分清。
   - **在途 spinner**:应答后→压缩后快照前的沉默期(后端跑摘要数秒)显示「正在应用计划…」,新快照到达自动消失。
-  - **剩(各自后续,均复用 extra keystone / apply_gate_plan)**:**keep-as-pin**、**死重清单喂闸门**、**纠正 focus**。
-- **横切:编辑建议**:系统预先 mark 一份建议 fate(失败工具结果 / 重复读同一文件 /
-  久未触及支线)→ 用户增删 → 确认。即 roadmap 的"建议策略注册表",UI 一行不改。
+  - **剩(各自后续,均复用 extra keystone / apply_gate_plan)**:**keep-as-pin**、**纠正 focus**。
+- **横切:编辑建议(死重清单喂闸门)— ✅ 已建成实测**。把闸门预填从纯位置式升级为**位置式 ∪ 死重语义**:
+  detector 的「已完成支线」(done ∧ !mainline)自动预标 fold(`system_fate[cid]="fold"`,覆盖位置式 keep → **够首尾**)。
+  **落地机制(apply_gate_plan)一行不改,只让预填更聪明**。
+  - **单一真相**:抽 `regime.chunk_topic_map`,`context.regime_colors` 与闸门**共用** → 「建议清理」按钮与闸门死重逐字同判据。
+  - **零新 LLM**:死重 = 两级门控刚跑的那次 assessment(`_should_gate_for_regime` 多回传 assessment);为空 → 退化纯位置式。
+  - **点 1/3 兑现**:够首尾(死重位置无关)+ 标注来由(banner「N 个已完成支线」+ band 悬浮「已完成支线 / 位置式中段」,前端用既有 chunk_topics 派生)。
+  - **决策:死重建议 fold 不 drop**(用户认可):误判代价不对称(错 drop 不可逆;`done` 会错)、`done` 分不开"废料 vs 已结但有料"、可一键升 drop。
+    想要 drop 智能 → 用更窄的**残值信号**(失败 tool_result / 被取代的旧 read / 闲聊)单独触发,而非 done→drop。
+  - **剩**:自动**护住主线中段轮**(语义反折 keep)、drop 残值信号。
 
 ---
 

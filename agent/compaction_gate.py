@@ -32,34 +32,35 @@ def _regime_gating_enabled() -> bool:
 
 def _should_gate_for_regime(
     agent: Any, messages: List[Dict[str, Any]], plan: Dict[str, Any]
-) -> tuple[bool, str, str]:
+) -> tuple[bool, str, str, Any]:
     """两级门控判定:这次压缩到底要不要打断用户?
 
     A 级(regime):有没有值得护的主线?没有 → 森林,静默自动压。
     B 级(collision):这次压缩的折叠区 [head_end, tail_start) 是否触及主线消息?
                      不触及(只压死重)→ 即使在任务态也静默压。
-    A ∧ B 才打断。返回 (是否打断, 原因串, 主线 focus)。任何异常 → 保守放行打断(退回一级行为)。
+    A ∧ B 才打断。返回 (是否打断, 原因串, 主线 focus, assessment)。任何异常 → 保守放行打断(退回一级行为)。
 
-    `focus` = 检测出的当前主线焦点(R 后续①:喂给焦点压缩的 focus_topic);仅 task 态有意义,
-    其余为空串。误判代价不对称:漏弹只是退化成今天的静默自动压(无回归),故拿不准时倾向不扰。
+    `focus` = 检测出的当前主线焦点(R 后续①:喂给焦点压缩的 focus_topic);仅 task 态有意义,其余为空串。
+    `assessment` = 这次评估对象(死重清单喂闸门复用它取 turn_topics,**避免二次 assess**);无评估时为 None。
+    误判代价不对称:漏弹只是退化成今天的静默自动压(无回归),故拿不准时倾向不扰。
     """
     if not _regime_gating_enabled():
-        return True, "regime-gating-off", ""
+        return True, "regime-gating-off", "", None
     try:
         from agent.contextvis.regime import get_regime_detector
 
         a = get_regime_detector(agent).assess(messages, agent)
     except Exception as e:  # noqa: BLE001 — 检测失败绝不能挡住压缩流程
         logger.debug("regime detect failed: %s", e)
-        return True, "regime-detect-error", ""
+        return True, "regime-detect-error", "", None
     if a.regime != "task":
-        return False, f"forest ({a.reason})", ""
+        return False, f"forest ({a.reason})", "", a
     head_end, tail_start = plan.get("head_end", 0), plan.get("tail_start", 0)
     collision = any(head_end <= i < tail_start for i in a.on_thread_indices)
     focus = (getattr(a, "focus", "") or "").strip()
     if not collision:
-        return False, f"task-no-collision ({a.reason})", focus
-    return True, f"task-collision ({a.reason})", focus
+        return False, f"task-no-collision ({a.reason})", focus, a
+    return True, f"task-collision ({a.reason})", focus, a
 
 
 def _resolve_session_key() -> str:
@@ -280,7 +281,9 @@ def request_compaction_decision(
         return None
 
     # 两级门控(R 第一刀):森林 → 闸门闭嘴;任务但这次只压死重 → 也别扰。静默自动压。
-    should_gate, gate_reason, focus = _should_gate_for_regime(agent, messages, plan)
+    should_gate, gate_reason, focus, assessment = _should_gate_for_regime(
+        agent, messages, plan
+    )
     if not should_gate:
         logger.debug("compaction gate suppressed by regime — %s", gate_reason)
         return None
@@ -295,6 +298,30 @@ def request_compaction_decision(
         chunks = []
     head_end, tail_start = plan["head_end"], plan["tail_start"]
     system_fate = _system_fate_for_chunks(chunks, head_end, tail_start)
+
+    # 死重清单喂闸门:把 detector 的「已完成支线」(done ∧ !mainline)预标 fold,**叠加**在位置式计划上
+    # (覆盖位置式 keep → 首尾的死重也会被建议折;不反折位置式中段)。复用门控刚跑的同一份 assessment、
+    # 无新 LLM;assessment 为空(门控关/检测失败/启发式回退无 turn_topics)→ 死重为空 → 纯位置式回退。
+    deadweight_turns = 0
+    if assessment is not None and chunks:
+        try:
+            from agent.contextvis.regime import chunk_topic_map
+
+            tmap = chunk_topic_map(messages, assessment, chunks)
+            deadweight = {
+                cid
+                for cid, v in tmap.items()
+                if v.get("done") and not v.get("mainline")
+            }
+            for cid in deadweight:
+                system_fate[cid] = "fold"
+            deadweight_turns = sum(
+                1
+                for c in chunks
+                if c["id"] in deadweight and c.get("type") == "history"
+            )
+        except Exception as e:  # noqa: BLE001 — 死重建议失败不挡闸门,退化纯位置式
+            logger.debug("compaction gate: deadweight suggestion failed: %s", e)
 
     fold_tokens = sum(
         c["tokens"] for c in chunks if system_fate.get(c["id"]) == "fold"
@@ -324,6 +351,8 @@ def request_compaction_decision(
         "est_after_tokens": est_after,
         "est_after_percent": pct(est_after),
         "fold_turns": fold_turns,
+        # 死重清单喂闸门:其中有多少轮是「已完成支线」(语义识别,含首尾),供 banner 标"建议折 N 个已完成支线"。
+        "deadweight_turns": deadweight_turns,
         # 两级门控放行原因(任务态 + 本次压缩触及主线),供闸门条标"检测到主线任务"。
         "regime": "task",
         "collision_reason": gate_reason,

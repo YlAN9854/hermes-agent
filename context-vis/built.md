@@ -213,6 +213,22 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
 - **第二刀边界**:**keep-as-pin(持久免压区)** + **死重清单喂闸门** + **闸门内纠正 focus** 留后(均复用 extra keystone / apply_gate_plan)。
   另记两 backlog(用户复测提出,归死重喂闸门):① 自动推荐够到**首尾**(引擎已位置无关、手动可折首尾,缺自动);② 标注每个 fate 的**理由**(推荐层产物,落点 inspector 顶/band 悬浮)。
 
+### G 压缩闸门 · 死重清单喂闸门(detector 的「已完成支线」预填进闸门)
+闸门弹出时的预填从纯**位置式**升级为**位置式 ∪ 死重语义**:detector 的「已完成支线」(done ∧ !mainline)自动预标 fold。
+这是 roadmap 横切**「建议策略注册表」**的兑现——**落地机制(apply_gate_plan)一行不改,只让预填更聪明**。一并兑现上刀两 backlog。
+- **复用 / 单一真相**:抽 `regime.chunk_topic_map(messages, assessment, chunks)`(逐 chunk `{topic,mainline,done}`,走 messageIndex);
+  `context.regime_colors` 与闸门**共用**它 → 「建议清理」按钮与闸门死重**逐字同判据**(done ∧ !mainline ∧ message-backed)。
+- **零新 LLM**:死重来源 = 两级门控**刚跑的那次** assessment(`_should_gate_for_regime` 多返回 assessment)。assessment 为空
+  (门控关 / 检测失败 / 启发式回退无 turn_topics)→ 死重为空 → 退化纯位置式,无回归。
+- **增广**:`request_compaction_decision` 把死重 chunk `system_fate[cid]="fold"`(**覆盖位置式 keep → 够首尾**,点 1;不反折位置式中段),
+  基于合并后 system_fate 重算 fold 指标,payload 带 `deadweight_turns`。
+- **点 3 理由**:banner「其中 N 个为已完成支线(含首尾)」+ band fold 格悬浮标来由(已完成支线 / 位置式中段),前端用既有 chunk_topics 派生、**零后端额外字段**。
+- **决策:死重建议用 fold 不用 drop**(用户认可)——误判代价不对称(错 drop=不可逆信息损失;`done` 会错)、`done` 分不开"废料 vs 已结但有料"、用户可一键 fold→drop 升级。
+  想要 drop 智能 → 用**更窄的残值信号**(失败 tool_result / 被取代的旧 read / 闲聊)单独触发,而非 done→drop。
+- **验证**:stub 证 chunk_topic_map(主线/死重/排除 system)+ 增广(**位置式 keep 末尾支线 → 死重改 fold**、计数、主线不误折)+ 启发式回退死重为空;
+  web build+lint 干净。**实测**:opencode 主线 + 末尾闲聊支线顶阈值弹闸门 → 首尾死重也带暗橙命运沟、banner 标已完成支线数、悬浮显来由、编辑+应用计划落地。
+- **边界**:自动**护住主线中段轮**(语义反折 keep)、drop 残值信号、keep-as-pin、纠正 focus 留后。
+
 ---
 
 ### turn 带 · 主视图主轴翻转(第一~第四刀,设计见 [turn-band.md](turn-band.md))

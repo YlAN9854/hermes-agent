@@ -492,3 +492,50 @@ def get_regime_detector(agent: Any) -> RegimeDetector:
         except Exception:
             pass
     return det
+
+
+def chunk_topic_map(
+    messages: List[Dict[str, Any]],
+    assessment: Any,
+    chunks: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """把一次 assessment 的逐轮 topic/主线/完成态 join 到 chunk → ``{chunkId: {topic, mainline, done}}``。
+
+    走 **messageIndex**(规避 regime 0-indexed vs chunking 1-indexed 编号不一致):每个 chunk 的
+    ``sourceRefs.messageIndex`` → ``turn_of`` → ``assessment.turn_topics``。system / tool_schema 无
+    messageIndex → 不出现(无消息背书,不可着色/不可 fold)。topic/done 仅 LLM 路填充,启发式回退留空。
+
+    **单一真相**:turn 带主题着色(`context.regime_colors`)与压缩闸门的死重建议都用本函数,确保
+    "已完成支线"(done ∧ !mainline)的选择两处逐字一致。纯函数、无 LLM、不依赖 chunking(chunks 传入)。
+    """
+    turn_of, _n, _b, _r = _segment_turns(messages)
+    topics = getattr(assessment, "turn_topics", {}) or {}
+    on = getattr(assessment, "on_thread_indices", set()) or set()
+    out: Dict[str, Dict[str, Any]] = {}
+    for c in chunks:
+        idxs = [
+            r.get("messageIndex")
+            for r in (c.get("sourceRefs") or [])
+            if isinstance(r, dict) and isinstance(r.get("messageIndex"), int)
+        ]
+        if not idxs:
+            continue  # system/tool_schema:无消息背书
+        topic = ""
+        done = False
+        for mi in idxs:
+            t = turn_of[mi] if 0 <= mi < len(turn_of) else None
+            if t is None:
+                continue
+            tv = topics.get(t)
+            if not tv:
+                continue
+            if tv.get("topic") and not topic:
+                topic = tv["topic"]
+            if tv.get("done"):
+                done = True
+        out[c["id"]] = {
+            "topic": topic,
+            "mainline": any(mi in on for mi in idxs),
+            "done": done,
+        }
+    return out
