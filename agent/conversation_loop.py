@@ -3822,22 +3822,37 @@ def run_conversation(
                     if _gate_choice == "defer":
                         agent._safe_print("  ⟳ compaction deferred (user)")
                     else:
-                        agent._safe_print("  ⟳ compacting context…")
-                        # R 后续①:闸门检测出的主线 focus → 焦点压缩(空则 None → 位置式回退)。
-                        _gate_focus = (_gate_decision or {}).get("focus") or None
-                        messages, active_system_prompt = agent._compress_context(
-                            messages, system_message,
-                            approx_tokens=agent.context_compressor.last_prompt_tokens,
-                            task_id=effective_task_id,
-                            focus_topic=_gate_focus,
-                        )
-                        # Compression created a new session — clear history so
-                        # _flush_messages_to_session_db writes compressed messages
-                        # to the new session (see preflight compression comment).
-                        conversation_history = None
-                        # 压缩在 turn 中途发生,而常规 context.snapshot 要等整轮结束才发——
-                        # 立即补发一份新鲜快照,让 dashboard 的 treemap/占用即时回落
+                        # G 闸门二阶段:先把"闸门内编辑"(drop)作用到**本地 messages**——
+                        # 直接改循环本地 list、不走 context.apply、不碰 session["history"],
+                        # 由此消解 running 守卫 + messages/history 对账两暗礁。
+                        _gate_drops = (_gate_decision or {}).get("drop_chunk_ids") or []
+                        if _gate_drops:
+                            try:
+                                from agent.compaction_gate import apply_gate_drops
+                                _n0 = len(messages)
+                                messages = apply_gate_drops(agent, messages, _gate_drops)
+                                agent._safe_print(
+                                    f"  ⟳ gate edit: dropped {_n0 - len(messages)} message(s)"
+                                )
+                            except Exception:
+                                pass
+                        if _gate_choice == "edit_only":
+                            # 用户编辑后选择"仅删除、不压缩"(drop 已腾够空间)→ 跳过系统压缩。
+                            agent._safe_print("  ⟳ compaction skipped (user-edited)")
+                        else:
+                            agent._safe_print("  ⟳ compacting context…")
+                            # R 后续①:闸门检测出的主线 focus → 焦点压缩(空则 None → 位置式回退)。
+                            _gate_focus = (_gate_decision or {}).get("focus") or None
+                            messages, active_system_prompt = agent._compress_context(
+                                messages, system_message,
+                                approx_tokens=agent.context_compressor.last_prompt_tokens,
+                                task_id=effective_task_id,
+                                focus_topic=_gate_focus,
+                            )
+                        # 任一改动(编辑删除 / 压缩)→ 清 history 缓存让新历史写回新会话;
+                        # turn 中途即补发新鲜 context.snapshot,让 dashboard treemap/占用回落
                         # (非交互会话自动 no-op;见 context-vis/compaction-gate.md)。
+                        conversation_history = None
                         try:
                             from agent.compaction_gate import emit_post_compaction_snapshot
                             emit_post_compaction_snapshot(agent, messages)

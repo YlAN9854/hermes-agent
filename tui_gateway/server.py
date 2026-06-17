@@ -6939,12 +6939,14 @@ def _(rid, params: dict) -> dict:
     try:
         from tools.approval import resolve_gateway_approval
 
+        # 闸门二阶段:应答可带回"闸门内编辑"(drop_chunk_ids)→ 循环侧作用于本地 messages。
         return _ok(
             rid,
             {
                 "resolved": resolve_gateway_approval(
                     session["session_key"],
                     params.get("choice", "continue"),
+                    extra={"drop_chunk_ids": params.get("drop_chunk_ids") or []},
                 )
             },
         )

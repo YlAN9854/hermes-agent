@@ -35,7 +35,7 @@ import {
   undoApply,
   type RegimeColors,
 } from "@/lib/contextvis/apply";
-import { respondCompaction } from "@/lib/contextvis/gate";
+import { respondCompaction, type CompactionChoice } from "@/lib/contextvis/gate";
 import type {
   ChunkType,
   ContextChunk,
@@ -826,14 +826,25 @@ export function ContextVisPanel({
   const [respondedPending, setRespondedPending] =
     useState<typeof pending>(undefined);
   const gateActive = !!pending && pending !== respondedPending;
-  // 闸门激活时,treemap 改画"系统的压缩计划";否则画用户自己的命运标记。
-  const effectiveFateMap = gateActive ? pending!.systemFate : fateMap;
+  // 闸门激活时,treemap 画"系统的压缩计划"叠加用户自标的 drop(二阶段闸门内编辑,
+  // 用户标记覆盖系统计划)→ band 上看得见自己要删的块;否则画用户自己的命运标记。
+  const effectiveFateMap = gateActive
+    ? { ...pending!.systemFate, ...fateMap }
+    : fateMap;
+  // 闸门内编辑(二阶段):用户在闸门期间标的可落地 drop。
+  const gateDrops = gateActive ? droppableChunkIds(snapshot, fateMap) : [];
 
-  const respondGate = async (choice: "continue" | "defer") => {
+  const respondGate = async (choice: CompactionChoice) => {
     setRespondedPending(pending); // 乐观隐藏;后端 re-emit 会清 pendingCompaction
+    const editing = choice === "edit_compress" || choice === "edit_only";
+    if (editing) onClearFates(); // 应用后 chunk id 会变,清掉残留标记
     if (snapshot.sessionId) {
       try {
-        await respondCompaction(snapshot.sessionId, choice);
+        await respondCompaction(
+          snapshot.sessionId,
+          choice,
+          editing ? gateDrops : undefined,
+        );
       } catch {
         /* 失败也别卡住:超时后端会按 continue 自动压 */
       }
@@ -1046,14 +1057,37 @@ export function ContextVisPanel({
                 </span>
                 。下方 treemap 已画出此计划。
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="text-[10px] leading-snug text-text-tertiary">
+                {gateDrops.length > 0
+                  ? `已标记删除 ${gateDrops.length} 块 —— 可"删除并压缩"或"仅删除"`
+                  : "也可在下方/右栏标记 drop，先删掉垃圾再压。"}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => respondGate("continue")}
                   className="rounded bg-warning/90 px-2 py-0.5 text-[11px] font-medium tracking-wide text-black hover:bg-warning"
                 >
-                  继续压缩
+                  直接压缩
                 </button>
+                {gateDrops.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => respondGate("edit_compress")}
+                      className="rounded border border-warning/50 px-2 py-0.5 text-[11px] tracking-wide text-warning hover:bg-warning/10"
+                    >
+                      删除并压缩 ({gateDrops.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => respondGate("edit_only")}
+                      className="rounded border border-destructive/50 px-2 py-0.5 text-[11px] tracking-wide text-destructive hover:bg-destructive/10"
+                    >
+                      仅删除 ({gateDrops.length})
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
                   onClick={() => respondGate("defer")}

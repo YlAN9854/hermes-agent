@@ -626,12 +626,16 @@ _permanent_approved: set = set()
 
 class _ApprovalEntry:
     """One pending dangerous-command approval inside a gateway session."""
-    __slots__ = ("event", "data", "result")
+    __slots__ = ("event", "data", "result", "result_extra")
 
     def __init__(self, data: dict):
         self.event = threading.Event()
         self.data = data          # command, description, pattern_keys, …
         self.result: Optional[str] = None  # "once"|"session"|"always"|"deny"
+        # Optional structured payload carried back with the decision (beyond the
+        # ``result`` string). ContextVis 压缩闸门二阶段用它带回"闸门内编辑"
+        # (如 drop_chunk_ids);工具审批不传 → 恒 None,行为不变。
+        self.result_extra: Optional[dict] = None
 
 
 _gateway_queues: dict[str, list] = {}        # session_key → [_ApprovalEntry, …]
@@ -664,13 +668,18 @@ def unregister_gateway_notify(session_key: str) -> None:
 
 
 def resolve_gateway_approval(session_key: str, choice: str,
-                             resolve_all: bool = False) -> int:
+                             resolve_all: bool = False,
+                             extra: Optional[dict] = None) -> int:
     """Called by the gateway's /approve or /deny handler to unblock
     waiting agent thread(s).
 
     When *resolve_all* is True every pending approval in the session is
     resolved at once (``/approve all``).  Otherwise only the oldest one
     is resolved (FIFO).
+
+    *extra* is an optional structured payload carried back alongside the
+    ``choice`` string (ContextVis 压缩闸门二阶段用它带回闸门内编辑,如
+    ``drop_chunk_ids``).  Tool/command approvals omit it → stays None.
 
     Returns the number of approvals resolved (0 means nothing was pending).
     """
@@ -688,6 +697,7 @@ def resolve_gateway_approval(session_key: str, choice: str,
 
     for entry in targets:
         entry.result = choice
+        entry.result_extra = extra
         entry.event.set()
     return len(targets)
 
@@ -1267,7 +1277,7 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict,
         surface=surface,
         choice=_outcome,
     )
-    return {"resolved": resolved, "choice": choice}
+    return {"resolved": resolved, "choice": choice, "extra": entry.result_extra}
 
 
 def check_all_command_guards(command: str, env_type: str,

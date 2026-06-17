@@ -250,6 +250,11 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       return changed ? next : prev;
     });
   }, []);
+  // 闸门激活时,inspector 的命运显示要与 band 对齐(band 画 systemFate ∪ 用户编辑):
+  // 叠加系统折叠计划 + 用户标记(用户覆盖)。**仅供显示**——编辑仍写真实 fateMap(setFates)。
+  const displayFateMap: FateMap = contextSnapshot.pendingCompaction
+    ? { ...contextSnapshot.pendingCompaction.systemFate, ...fateMap }
+    : fateMap;
 
   useEffect(() => {
     if (!resumeParam) return;
@@ -932,7 +937,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
               onClose={() => setSelectedChunkId(null)}
               turnChunks={turnChunks}
               onSelectChunk={setSelectedChunkId}
-              fateMap={fateMap}
+              fateMap={displayFateMap}
               onSetFates={setFates}
             />
           </div>
@@ -1020,7 +1025,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                 onClose={() => setSelectedChunkId(null)}
                 turnChunks={turnChunks}
                 onSelectChunk={setSelectedChunkId}
-                fateMap={fateMap}
+                fateMap={displayFateMap}
                 onSetFates={setFates}
               />
             </div>

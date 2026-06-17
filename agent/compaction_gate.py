@@ -128,6 +128,35 @@ def emit_post_compaction_snapshot(agent: Any, messages: List[Dict[str, Any]]) ->
         logger.debug("post-compaction snapshot emit skipped: %s", e)
 
 
+def apply_gate_drops(
+    agent: Any, messages: List[Dict[str, Any]], drop_chunk_ids: Any
+) -> List[Dict[str, Any]]:
+    """闸门二阶段:把"闸门内编辑"的 drop 作用到**循环本地 messages**。
+
+    解析复用 `message_indices_for_chunks`(按 `{"history": messages}` 解 chunk id → 下标,
+    与闸门 payload 的 chunks 同源)→ 删除 → `_sanitize_tool_pairs` 缝合孤儿工具对。
+    **直接改本地 messages、不碰 `session["history"]`、不调 `context.apply`**——由此消解
+    running 守卫(暗礁①)与 messages/history 对账(暗礁②)。空/无效 id 或异常 → 原样返回。
+    """
+    ids = [str(x) for x in (drop_chunk_ids or [])]
+    if not ids:
+        return messages
+    try:
+        from agent.contextvis import drop_indices_for_chunks
+
+        drop_idx = drop_indices_for_chunks(agent, {"history": messages}, ids)
+        if not drop_idx:
+            return messages
+        new_msgs = [m for i, m in enumerate(messages) if i not in drop_idx]
+        comp = getattr(agent, "context_compressor", None)
+        if comp is not None:
+            new_msgs = comp._sanitize_tool_pairs(new_msgs)
+        return new_msgs
+    except Exception as e:  # noqa: BLE001 — 编辑失败绝不能挡住压缩流程
+        logger.debug("apply_gate_drops failed: %s", e)
+        return messages
+
+
 def _system_fate_for_chunks(
     chunks: List[Dict[str, Any]], head_end: int, tail_start: int
 ) -> Dict[str, str]:
@@ -255,6 +284,11 @@ def request_compaction_decision(
         )
     except Exception as e:  # noqa: BLE001 — 出错别挡着,照常压
         logger.warning("compaction gate await failed: %s", e)
-        return {"choice": "continue", "focus": focus}
-    choice = "defer" if decision.get("choice") == "defer" else "continue"
-    return {"choice": choice, "focus": focus}
+        return {"choice": "continue", "focus": focus, "drop_chunk_ids": []}
+    # 闸门二阶段:choice ∈ continue/defer/edit_compress/edit_only;edit 路带回 drop_chunk_ids。
+    choice = str(decision.get("choice") or "continue")
+    if choice not in ("continue", "defer", "edit_compress", "edit_only"):
+        choice = "continue"
+    extra = decision.get("extra") or {}
+    drop_chunk_ids = extra.get("drop_chunk_ids") or []
+    return {"choice": choice, "focus": focus, "drop_chunk_ids": drop_chunk_ids}

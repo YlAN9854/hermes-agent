@@ -166,6 +166,25 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
   **排除主线**;web build+lint 干净。**实测**:会话(opencode 主线 + "你知道opencode"引子 + "星座"跑题)→「建议清理」
   预填 7 块 fold(引子 + 跑题,主线不动)→「应用 fold」→ 44%→21%、释放 ~34.5K、可撤销;幸存轮重编号。
 
+### G 压缩闸门 · 第二阶段首刀 · 闸门内 drop 编辑(经应答落地)
+闸门从"只读二选一"升级到"**可编辑**":被迫压缩时先删垃圾再压。
+**架构选择(关键):不给 `context.apply` 的 running 守卫打补丁,而是把编辑随闸门应答带回、由被阻塞的
+循环线程自己作用到本地 `messages`**——单线程、无并发、不碰 `session["history"]`、不调 `context.apply`,
+**两暗礁(running 守卫 / messages-history 对账)直接消解**。
+- **keystone(共享审批基建,加法兼容)**:`tools/approval.py` `_ApprovalEntry` 加 `result_extra`、
+  `resolve_gateway_approval(..., extra=)`、`_await_gateway_decision` 返回加 `extra`(工具审批不传 → None,回归不破)。
+  **此通道同时解锁后续"闸门内纠正 focus""死重清单喂闸门"**(都需应答带回编辑)。
+- **后端**:`server.py` `compaction.respond` 经 extra 带回 `drop_chunk_ids`;`compaction_gate.apply_gate_drops`
+  (`message_indices_for_chunks({"history": messages})` → 删 → `_sanitize_tool_pairs` 缝合,纯函数);
+  `request_compaction_decision` 返回加 `drop_chunk_ids`;`conversation_loop` 闸门处:`defer` 不变,否则先 `apply_gate_drops`,
+  `edit_only` 跳过压缩、其余照常压(`continue`/`edit_compress`),统一补发快照。
+- **前端**:`gate.ts` `CompactionChoice` 扩 4 值 + `respondCompaction(…, dropChunkIds?)`;`ContextVisPanel` 闸门时
+  `effectiveFateMap = {...systemFate, ...fateMap}`(band 显用户 drop)+ 闸门条按 `gateDrops` 显「删除并压缩 / 仅删除」;
+  `ChatPage` 同样把 `displayFateMap`(systemFate ∪ fateMap)喂 inspector,**band↔inspector 命运显示同步**(实测踩坑修复)。
+- **验证**:stub 证 `apply_gate_drops`(删对消息 + 孤儿 tool 缝合 + 空/无效原样)、`extra` roundtrip(带回 drop_chunk_ids、
+  无 extra→None 回归);web build+lint 干净。**实测**:两支线 + opencode 主线会话顶阈值弹闸门 → band 标 drop →「删除并压缩 / 仅删除」生效、占用回落;直接压缩 / 推迟照旧。
+- **首刀边界**:闸门编辑只认 **drop**;fold/keep 改写系统计划、死重喂闸门、纠正 focus 留后(均复用上面的 extra keystone)。
+
 ---
 
 ### turn 带 · 主视图主轴翻转(第一~第四刀,设计见 [turn-band.md](turn-band.md))
