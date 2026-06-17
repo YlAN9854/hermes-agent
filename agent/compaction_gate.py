@@ -128,33 +128,90 @@ def emit_post_compaction_snapshot(agent: Any, messages: List[Dict[str, Any]]) ->
         logger.debug("post-compaction snapshot emit skipped: %s", e)
 
 
-def apply_gate_drops(
-    agent: Any, messages: List[Dict[str, Any]], drop_chunk_ids: Any
+def apply_gate_plan(
+    agent: Any,
+    messages: List[Dict[str, Any]],
+    drop_chunk_ids: Any,
+    fold_chunk_ids: Any = None,
+    focus_topic: Any = None,
 ) -> List[Dict[str, Any]]:
-    """闸门二阶段:把"闸门内编辑"的 drop 作用到**循环本地 messages**。
+    """闸门二阶段:把"闸门内编辑后的 fate 计划"(drop + fold)作用到**循环本地 messages**。
 
-    解析复用 `message_indices_for_chunks`(按 `{"history": messages}` 解 chunk id → 下标,
-    与闸门 payload 的 chunks 同源)→ 删除 → `_sanitize_tool_pairs` 缝合孤儿工具对。
-    **直接改本地 messages、不碰 `session["history"]`、不调 `context.apply`**——由此消解
-    running 守卫(暗礁①)与 messages/history 对账(暗礁②)。空/无效 id 或异常 → 原样返回。
+    方案 A:用户在闸门里编辑出的有效计划即权威落地计划,直接 apply、**跳过位置式 `_compress_context`**。
+    全部解析复用 `message_indices_for_chunks`(按 `{"history": messages}` 解 chunk id → 下标,
+    与闸门 payload 的 chunks 同源);fold 摘要复用手动 `context.fold` 同一套
+    `_generate_summary` + `splice_fold_summary` + `_sanitize_tool_pairs`。
+    **直接改本地 messages、不碰 `session["history"]`、不调 `context.apply`/`context.fold`**——
+    由此消解 running 守卫(暗礁①)与 messages/history 对账(暗礁②)。
+
+    下标漂移防护:drop 与 fold 都按**同一份原始 messages**解析;先按 drop 过滤出 `filtered`
+    并建 old→new 映射,把 fold 下标重映射到 `filtered` 上再 splice(摘要从原始 fold 消息生成)。
+    drop 与 fold 重叠 → drop 优先。fold 摘要失败 → **降级为仅删除**(不半落地、不抛)。
+    空计划 / 无效 id / 异常 → 原样返回。
     """
-    ids = [str(x) for x in (drop_chunk_ids or [])]
-    if not ids:
+    drop_ids = [str(x) for x in (drop_chunk_ids or [])]
+    fold_ids = [str(x) for x in (fold_chunk_ids or [])]
+    if not drop_ids and not fold_ids:
         return messages
     try:
         from agent.contextvis import drop_indices_for_chunks
+        from agent.context_compressor import splice_fold_summary
 
-        drop_idx = drop_indices_for_chunks(agent, {"history": messages}, ids)
-        if not drop_idx:
-            return messages
-        new_msgs = [m for i, m in enumerate(messages) if i not in drop_idx]
         comp = getattr(agent, "context_compressor", None)
+        drop_idx = (
+            set(drop_indices_for_chunks(agent, {"history": messages}, drop_ids))
+            if drop_ids
+            else set()
+        )
+        fold_idx = (
+            set(drop_indices_for_chunks(agent, {"history": messages}, fold_ids))
+            if fold_ids
+            else set()
+        )
+        fold_idx -= drop_idx  # 重叠 → drop 优先
+        if not drop_idx and not fold_idx:
+            return messages
+
+        # 1) 先按 drop 过滤,建 old→new 下标映射(供 fold 下标重映射,避开漂移)。
+        filtered: List[Dict[str, Any]] = []
+        old_to_new: Dict[int, int] = {}
+        for i, m in enumerate(messages):
+            if i in drop_idx:
+                continue
+            old_to_new[i] = len(filtered)
+            filtered.append(m)
+
+        # 2) fold:从**原始** fold 消息生成一条摘要 → 在 filtered 上的重映射下标处 splice。
+        result = filtered
+        if fold_idx:
+            turns = [messages[i] for i in sorted(fold_idx)]
+            summary = (
+                comp._generate_summary(turns, focus_topic=focus_topic or None)
+                if comp is not None
+                else None
+            )
+            if summary:
+                fold_new = sorted(old_to_new[i] for i in fold_idx if i in old_to_new)
+                result = splice_fold_summary(filtered, fold_new, summary)
+            else:
+                logger.debug("apply_gate_plan: summary unavailable — degrade to drop-only")
+
         if comp is not None:
-            new_msgs = comp._sanitize_tool_pairs(new_msgs)
-        return new_msgs
+            result = comp._sanitize_tool_pairs(result)
+        return result
     except Exception as e:  # noqa: BLE001 — 编辑失败绝不能挡住压缩流程
-        logger.debug("apply_gate_drops failed: %s", e)
+        logger.debug("apply_gate_plan failed: %s", e)
         return messages
+
+
+def apply_gate_drops(
+    agent: Any, messages: List[Dict[str, Any]], drop_chunk_ids: Any
+) -> List[Dict[str, Any]]:
+    """闸门内编辑「仅删除」的薄封装 —— 委托 `apply_gate_plan`(单一实现)。
+
+    保留此函数名以兼容既有调用方 / stub;语义 = drop 子集、无 fold。
+    """
+    return apply_gate_plan(agent, messages, drop_chunk_ids, [], None)
 
 
 def _system_fate_for_chunks(
@@ -284,11 +341,17 @@ def request_compaction_decision(
         )
     except Exception as e:  # noqa: BLE001 — 出错别挡着,照常压
         logger.warning("compaction gate await failed: %s", e)
-        return {"choice": "continue", "focus": focus, "drop_chunk_ids": []}
-    # 闸门二阶段:choice ∈ continue/defer/edit_compress/edit_only;edit 路带回 drop_chunk_ids。
+        return {"choice": "continue", "focus": focus, "drop_chunk_ids": [], "fold_chunk_ids": []}
+    # 闸门二阶段:choice ∈ continue/defer/apply_plan/edit_only;编辑路经 extra 带回 drop/fold chunk ids。
     choice = str(decision.get("choice") or "continue")
-    if choice not in ("continue", "defer", "edit_compress", "edit_only"):
+    if choice not in ("continue", "defer", "apply_plan", "edit_only"):
         choice = "continue"
     extra = decision.get("extra") or {}
     drop_chunk_ids = extra.get("drop_chunk_ids") or []
-    return {"choice": choice, "focus": focus, "drop_chunk_ids": drop_chunk_ids}
+    fold_chunk_ids = extra.get("fold_chunk_ids") or []
+    return {
+        "choice": choice,
+        "focus": focus,
+        "drop_chunk_ids": drop_chunk_ids,
+        "fold_chunk_ids": fold_chunk_ids,
+    }

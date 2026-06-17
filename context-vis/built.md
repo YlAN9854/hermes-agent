@@ -185,6 +185,34 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
   无 extra→None 回归);web build+lint 干净。**实测**:两支线 + opencode 主线会话顶阈值弹闸门 → band 标 drop →「删除并压缩 / 仅删除」生效、占用回落;直接压缩 / 推迟照旧。
 - **首刀边界**:闸门编辑只认 **drop**;fold/keep 改写系统计划、死重喂闸门、纠正 focus 留后(均复用上面的 extra keystone)。
 
+### G 压缩闸门 · 第二阶段第二刀 · 闸门内 fold/keep 编辑(方案 A:编辑后的计划即权威)
+闸门从"只能删"升级到"**改写折叠计划**":保护中段某轮不进摘要(keep)、补折系统漏掉的支线(fold)。
+**方案 A(用户敲定)**:用户编辑出的有效 fateMap = 权威落地计划,直接 apply、**跳过位置式 `_compress_context`**——
+因为 `_compress_context` 纯位置式、不认手标的 fold/keep,要让编辑生效就不能再让它当落地器;且不碰核心压缩函数(与三条反应式路共用),爆炸半径小。
+- **复用(零新机制)**:fold 落地全用手动 `context.fold` 同一套——`_generate_summary(turns, focus_topic)` +
+  `splice_fold_summary` + `_sanitize_tool_pairs`;解析复用 `message_indices_for_chunks({"history": messages})`。
+- **后端**:`apply_gate_plan(agent, messages, drop_ids, fold_ids, focus_topic)`——drop/fold 按**同一份原始 messages**
+  解析(drop 优先去重),**先按 drop 过滤再把 fold 下标重映射**到过滤后列表(消除下标漂移),生成一条摘要 splice,
+  摘要失败**降级仅删除**(不半落地、不抛),异常原样返回;`apply_gate_drops` 改为薄封装委托它(单一实现)。
+  `compaction.respond`/`request_compaction_decision` 多带 `fold_chunk_ids`;`conversation_loop` 闸门分支重整为
+  `defer / apply_plan|edit_only(走 apply_gate_plan、跳过位置式压缩) / 否则 continue(位置式不动)`,
+  `conversation_history=None`+补发快照上提为 `if choice != "defer"`(编辑路也补发)。
+- **keep 的归宿(与用户讨论定)**:本刀 keep = **「取消系统预折」**(把被 systemFate 预标 fold 的中段轮改回不动,
+  靠 `{...systemFate, ...fateMap}` 合并里用户覆盖系统**免费**得到);用户设想的"提升到持久免压区"= keep-as-pin,
+  正向持久保护、场景小、单独设计,本刀不做。
+- **前端**:`gate.ts` `CompactionChoice` = `continue/defer/apply_plan/edit_only`,`respondCompaction(…, dropIds?, foldIds?)`;
+  `ContextVisPanel` 闸门时 `gateFolds=foldableChunkIds(effective)`(systemFate 中段折 ∪ 用户加折 − 用户 keep)、
+  按钮重整为 **直接压缩 / 应用计划(折N删M) / 仅删除(M) / 推迟**,banner 占用投影改用 `projectFates(effective)`(确认前看得见)。
+  **标记入口零新增**:cut-4 FateControls 已能标 fold/keep/drop、经 `effectiveFateMap`/`displayFateMap` 同步显示。
+- **可读性打磨(用户复测点 2)**:闸门时 systemFate 给每轮都派命运,旧版只用细描边、被主题色盖住 →
+  改为 **fold 压暗后退(fillOpacity 0.42)+ 左缘 4px「命运沟」**(keep 绿 / fold 橙 / drop 红),折/留一眼分清(同时改善手动标记)。
+- **在途反馈(用户复测:无加载提示)**:应答后→压缩后快照到达前(后端跑摘要数秒)是沉默期 → 派生 `applying` 态
+  (沿用 pending 引用比较,无 effect)在闸门原位显示 spinner「正在应用计划…」,新快照到达自动消失,60s 兜底撤销。
+- **验证**:stub 证 `apply_gate_plan`(纯 fold / fold+drop 无漂移 / 重叠 drop 优先 / 空·无效原样 / 摘要失败降级 / 委托回归);
+  web build+lint 干净。**实测**:opencode 主线会话顶阈值弹闸门 → 标 keep/fold/drop →「应用计划」spinner→ 占用回落、命运沟分明。
+- **第二刀边界**:**keep-as-pin(持久免压区)** + **死重清单喂闸门** + **闸门内纠正 focus** 留后(均复用 extra keystone / apply_gate_plan)。
+  另记两 backlog(用户复测提出,归死重喂闸门):① 自动推荐够到**首尾**(引擎已位置无关、手动可折首尾,缺自动);② 标注每个 fate 的**理由**(推荐层产物,落点 inspector 顶/band 悬浮)。
+
 ---
 
 ### turn 带 · 主视图主轴翻转(第一~第四刀,设计见 [turn-band.md](turn-band.md))

@@ -10,24 +10,27 @@
 import { ensureClient } from "@/lib/contextvis/apply";
 
 export type CompactionChoice =
-  | "continue" // 接受系统方案,照常压缩
+  | "continue" // 接受系统方案,照常位置式压缩
   | "defer" // 本轮不压
-  | "edit_compress" // 闸门内编辑(drop)后再系统压
-  | "edit_only"; // 闸门内编辑(drop)后跳过系统压
+  | "apply_plan" // 闸门内编辑后的有效计划(fold+drop)直接落地,跳过位置式压缩(方案 A)
+  | "edit_only"; // 仅删除(drop)、不折叠、跳过位置式压缩
 
 /**
- * 应答压缩闸门。`dropChunkIds` 为闸门内编辑(二阶段)选中要删的块——后端经应答带回、
- * 作用于循环本地 messages(见 compaction-gate.md);continue/defer 不传。
+ * 应答压缩闸门。`dropChunkIds`/`foldChunkIds` 为闸门内编辑(二阶段)的有效计划——后端经
+ * 应答带回、由循环线程 apply_gate_plan 作用于本地 messages(见 compaction-gate.md);
+ * continue/defer 不传。
  */
 export async function respondCompaction(
   sessionId: string,
   choice: CompactionChoice,
   dropChunkIds?: string[],
+  foldChunkIds?: string[],
 ): Promise<void> {
   const gw = await ensureClient();
   await gw.request("compaction.respond", {
     session_id: sessionId,
     choice,
     drop_chunk_ids: dropChunkIds ?? [],
+    fold_chunk_ids: foldChunkIds ?? [],
   });
 }

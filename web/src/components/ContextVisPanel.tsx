@@ -524,7 +524,15 @@ function TurnBand({
               width={VB_W}
               height={Math.max(0, h)}
               fill={fill}
-              fillOpacity={fullFate === "drop" ? 0.3 : isSel ? 0.95 : baseOpacity}
+              fillOpacity={
+                fullFate === "drop"
+                  ? 0.3
+                  : fullFate === "fold"
+                    ? 0.42 // 折叠=将被压缩→压暗后退(对比 keep 的满色,闸门里一眼分清)
+                    : isSel
+                      ? 0.95
+                      : baseOpacity
+              }
               className={strokeClass}
               strokeWidth={isSel ? 2 : fullFate ? 1.5 : cell.isFolded ? 1.25 : 0.75}
               strokeDasharray={
@@ -555,14 +563,22 @@ function TurnBand({
                 />
               </>
             )}
-            {/* 部分/混合标记:左缘竖条弱提示(还没标全;不整格压暗,诚实区分)。 */}
-            {hasPartial && (
+            {/* 命运左缘竖条 = "命运沟":整轮命运 4px 实色(keep 绿/fold 橙/drop 红——
+                闸门时每轮都被 systemFate 派了命运,这条沟让折/留一眼分清);部分/混合 3px
+                弱提示(还没标全,诚实区分,不整格压暗)。 */}
+            {(fullFate || hasPartial) && (
               <rect
                 x={0}
                 y={y}
-                width={3}
+                width={fullFate ? 4 : 3}
                 height={Math.max(0, h)}
-                className={partialFate ? FATE_FILL[partialFate] : "fill-current/40"}
+                className={
+                  fullFate
+                    ? FATE_FILL[fullFate]
+                    : partialFate
+                      ? FATE_FILL[partialFate]
+                      : "fill-current/40"
+                }
               />
             )}
             {showLabel && (
@@ -825,25 +841,55 @@ export function ContextVisPanel({
   const pending = snapshot.pendingCompaction;
   const [respondedPending, setRespondedPending] =
     useState<typeof pending>(undefined);
+  // 已应答的选择:用于在"应答后→压缩后快照到达前"那段沉默期显示「应用中」spinner
+  // (后端跑 _generate_summary 可达数秒)。沿用 pending 引用比较,无 effect。
+  const [respondedChoice, setRespondedChoice] = useState<CompactionChoice | null>(null);
   const gateActive = !!pending && pending !== respondedPending;
-  // 闸门激活时,treemap 画"系统的压缩计划"叠加用户自标的 drop(二阶段闸门内编辑,
-  // 用户标记覆盖系统计划)→ band 上看得见自己要删的块;否则画用户自己的命运标记。
+  // 应用中 = 已对**当前这份** pending 应答(引用相等)、且非"推迟"(推迟不触发后端工作);
+  // 新快照到达 → pending 变新引用/清空 → 自动转 false。gateActive 与 applying 互斥。
+  const applying =
+    !!pending &&
+    pending === respondedPending &&
+    respondedChoice !== null &&
+    respondedChoice !== "defer";
+  const applyingLabel =
+    respondedChoice === "edit_only"
+      ? "正在删除…"
+      : respondedChoice === "continue"
+        ? "正在压缩…"
+        : "正在应用计划…";
+  // 闸门激活时,treemap 画"系统的压缩计划"叠加用户的编辑(二阶段闸门内编辑,用户标记
+  // 覆盖系统计划:加折/取消折/删除)→ band/inspector 上看得见有效计划;否则画用户自己的标记。
   const effectiveFateMap = gateActive
     ? { ...pending!.systemFate, ...fateMap }
     : fateMap;
-  // 闸门内编辑(二阶段):用户在闸门期间标的可落地 drop。
-  const gateDrops = gateActive ? droppableChunkIds(snapshot, fateMap) : [];
+  // 闸门内编辑(二阶段,方案 A):有效计划 = systemFate 中段折 ∪ 用户加折 − 用户 keep。
+  // 「应用计划」按这份**有效** fold/drop 列表落地;「仅删除」只取用户自标的 drop(不折)。
+  const gateFolds = gateActive ? foldableChunkIds(snapshot, effectiveFateMap) : [];
+  const gateDrops = gateActive ? droppableChunkIds(snapshot, effectiveFateMap) : [];
+  const userDrops = gateActive ? droppableChunkIds(snapshot, fateMap) : [];
+  const userEdited = gateActive && Object.keys(fateMap).length > 0;
+  // 编辑后的占用投影(确认前看得见效果);未编辑回落系统估算。
+  const gatePlanPercent = userEdited
+    ? projectFates(snapshot, effectiveFateMap).projectedPercent
+    : (pending?.estAfterPercent ?? 0);
 
   const respondGate = async (choice: CompactionChoice) => {
     setRespondedPending(pending); // 乐观隐藏;后端 re-emit 会清 pendingCompaction
-    const editing = choice === "edit_compress" || choice === "edit_only";
+    setRespondedChoice(choice); // 驱动「应用中」spinner(非 defer 时)
+    const editing = choice === "apply_plan" || choice === "edit_only";
     if (editing) onClearFates(); // 应用后 chunk id 会变,清掉残留标记
+    // 兜底:万一压缩后快照没回来(emit 失败),60s 后撤掉 spinner,不让它永转。
+    if (choice !== "defer") {
+      window.setTimeout(() => setRespondedChoice(null), 60_000);
+    }
     if (snapshot.sessionId) {
       try {
         await respondCompaction(
           snapshot.sessionId,
           choice,
-          editing ? gateDrops : undefined,
+          choice === "apply_plan" ? gateDrops : choice === "edit_only" ? userDrops : undefined,
+          choice === "apply_plan" ? gateFolds : undefined,
         );
       } catch {
         /* 失败也别卡住:超时后端会按 continue 自动压 */
@@ -1032,7 +1078,10 @@ export function ContextVisPanel({
                 <span className="tabular-nums text-text-secondary">
                   {pending!.currentPercent}%
                   <span className="text-text-tertiary">→</span>
-                  ~{pending!.estAfterPercent}%
+                  ~{gatePlanPercent}%
+                  {userEdited && (
+                    <span className="ml-1 text-[10px] text-text-tertiary">（按你的计划）</span>
+                  )}
                 </span>
               </div>
               {pending!.regime === "task" && (
@@ -1058,9 +1107,9 @@ export function ContextVisPanel({
                 。下方 treemap 已画出此计划。
               </div>
               <div className="text-[10px] leading-snug text-text-tertiary">
-                {gateDrops.length > 0
-                  ? `已标记删除 ${gateDrops.length} 块 —— 可"删除并压缩"或"仅删除"`
-                  : "也可在下方/右栏标记 drop，先删掉垃圾再压。"}
+                {userEdited
+                  ? `已编辑计划：折 ${gateFolds.length} 块 / 删 ${userDrops.length} 块 —— 「应用计划」直接落地`
+                  : "可在下方/右栏标记：加折支线、取消折中段某轮、或删掉垃圾，再「应用计划」。"}
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
@@ -1070,23 +1119,23 @@ export function ContextVisPanel({
                 >
                   直接压缩
                 </button>
-                {gateDrops.length > 0 && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => respondGate("edit_compress")}
-                      className="rounded border border-warning/50 px-2 py-0.5 text-[11px] tracking-wide text-warning hover:bg-warning/10"
-                    >
-                      删除并压缩 ({gateDrops.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => respondGate("edit_only")}
-                      className="rounded border border-destructive/50 px-2 py-0.5 text-[11px] tracking-wide text-destructive hover:bg-destructive/10"
-                    >
-                      仅删除 ({gateDrops.length})
-                    </button>
-                  </>
+                {userEdited && (
+                  <button
+                    type="button"
+                    onClick={() => respondGate("apply_plan")}
+                    className="rounded border border-warning/50 px-2 py-0.5 text-[11px] tracking-wide text-warning hover:bg-warning/10"
+                  >
+                    应用计划（折{gateFolds.length}删{userDrops.length}）
+                  </button>
+                )}
+                {userDrops.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => respondGate("edit_only")}
+                    className="rounded border border-destructive/50 px-2 py-0.5 text-[11px] tracking-wide text-destructive hover:bg-destructive/10"
+                  >
+                    仅删除 ({userDrops.length})
+                  </button>
                 )}
                 <button
                   type="button"
@@ -1096,6 +1145,20 @@ export function ContextVisPanel({
                   推迟
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* 应用中:应答后→压缩后快照到达前的沉默期(后端跑摘要可达数秒),给在途反馈。 */}
+          {applying && (
+            <div className="flex items-center gap-1.5 rounded border border-warning/40 bg-warning/10 px-2 py-1.5 text-xs text-warning">
+              <span
+                className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-warning border-t-transparent"
+                aria-hidden
+              />
+              <span className="text-display tracking-wider">{applyingLabel}</span>
+              <span className="text-[10px] text-text-tertiary">
+                生成摘要 / 重组上下文中，完成后下方 treemap 会回落
+              </span>
             </div>
           )}
 

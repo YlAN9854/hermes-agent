@@ -6928,10 +6928,10 @@ def _(rid, params: dict) -> dict:
 
 @method("compaction.respond")
 def _(rid, params: dict) -> dict:
-    """ContextVis 压缩闸门应答:用户在 dashboard 点「继续/推迟」→ 解阻塞 agent 线程。
+    """ContextVis 压缩闸门应答:用户在 dashboard 点「直接压缩/应用计划/仅删除/推迟」→ 解阻塞 agent 线程。
 
     镜像 approval.respond——闸门复用同一套审批队列(见 agent/compaction_gate.py +
-    context-vis/compaction-gate.md)。choice ∈ {"continue","defer"}。
+    context-vis/compaction-gate.md)。choice ∈ {"continue","defer","apply_plan","edit_only"}。
     """
     session, err = _sess(params, rid)
     if err:
@@ -6939,14 +6939,18 @@ def _(rid, params: dict) -> dict:
     try:
         from tools.approval import resolve_gateway_approval
 
-        # 闸门二阶段:应答可带回"闸门内编辑"(drop_chunk_ids)→ 循环侧作用于本地 messages。
+        # 闸门二阶段:应答经 extra 带回"闸门内编辑"(drop/fold chunk ids)→ 循环侧 apply_gate_plan
+        # 作用于本地 messages(方案 A:编辑后的计划即权威,直接落地、跳过位置式压缩)。
         return _ok(
             rid,
             {
                 "resolved": resolve_gateway_approval(
                     session["session_key"],
                     params.get("choice", "continue"),
-                    extra={"drop_chunk_ids": params.get("drop_chunk_ids") or []},
+                    extra={
+                        "drop_chunk_ids": params.get("drop_chunk_ids") or [],
+                        "fold_chunk_ids": params.get("fold_chunk_ids") or [],
+                    },
                 )
             },
         )

@@ -3821,37 +3821,45 @@ def run_conversation(
                     _gate_choice = _gate_decision.get("choice") if _gate_decision else None
                     if _gate_choice == "defer":
                         agent._safe_print("  ⟳ compaction deferred (user)")
-                    else:
-                        # G 闸门二阶段:先把"闸门内编辑"(drop)作用到**本地 messages**——
-                        # 直接改循环本地 list、不走 context.apply、不碰 session["history"],
+                    elif _gate_choice in ("apply_plan", "edit_only"):
+                        # G 闸门二阶段:用户在闸门里编辑出的有效计划即权威落地计划(方案 A)——
+                        # apply_gate_plan 把 drop+fold 直接作用到**本地 messages**(不走
+                        # context.apply/fold、不碰 session["history"]),**跳过位置式压缩**。
                         # 由此消解 running 守卫 + messages/history 对账两暗礁。
                         _gate_drops = (_gate_decision or {}).get("drop_chunk_ids") or []
-                        if _gate_drops:
-                            try:
-                                from agent.compaction_gate import apply_gate_drops
-                                _n0 = len(messages)
-                                messages = apply_gate_drops(agent, messages, _gate_drops)
-                                agent._safe_print(
-                                    f"  ⟳ gate edit: dropped {_n0 - len(messages)} message(s)"
-                                )
-                            except Exception:
-                                pass
-                        if _gate_choice == "edit_only":
-                            # 用户编辑后选择"仅删除、不压缩"(drop 已腾够空间)→ 跳过系统压缩。
-                            agent._safe_print("  ⟳ compaction skipped (user-edited)")
-                        else:
-                            agent._safe_print("  ⟳ compacting context…")
-                            # R 后续①:闸门检测出的主线 focus → 焦点压缩(空则 None → 位置式回退)。
-                            _gate_focus = (_gate_decision or {}).get("focus") or None
-                            messages, active_system_prompt = agent._compress_context(
-                                messages, system_message,
-                                approx_tokens=agent.context_compressor.last_prompt_tokens,
-                                task_id=effective_task_id,
-                                focus_topic=_gate_focus,
+                        # edit_only(仅删除)→ 只删不折;apply_plan(应用计划)→ drop + fold。
+                        _gate_folds = (
+                            (_gate_decision or {}).get("fold_chunk_ids") or []
+                            if _gate_choice == "apply_plan"
+                            else []
+                        )
+                        _gate_focus = (_gate_decision or {}).get("focus") or None
+                        try:
+                            from agent.compaction_gate import apply_gate_plan
+                            _n0 = len(messages)
+                            messages = apply_gate_plan(
+                                agent, messages, _gate_drops, _gate_folds, _gate_focus
                             )
-                        # 任一改动(编辑删除 / 压缩)→ 清 history 缓存让新历史写回新会话;
-                        # turn 中途即补发新鲜 context.snapshot,让 dashboard treemap/占用回落
-                        # (非交互会话自动 no-op;见 context-vis/compaction-gate.md)。
+                            agent._safe_print(
+                                f"  ⟳ gate plan: fold {len(_gate_folds)} / drop {len(_gate_drops)} "
+                                f"({_n0}→{len(messages)} msgs)"
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        agent._safe_print("  ⟳ compacting context…")
+                        # R 后续①:闸门检测出的主线 focus → 焦点压缩(空则 None → 位置式回退)。
+                        _gate_focus = (_gate_decision or {}).get("focus") or None
+                        messages, active_system_prompt = agent._compress_context(
+                            messages, system_message,
+                            approx_tokens=agent.context_compressor.last_prompt_tokens,
+                            task_id=effective_task_id,
+                            focus_topic=_gate_focus,
+                        )
+                    if _gate_choice != "defer":
+                        # 任一改动(闸门内编辑 / 位置式压缩 / 无闸自动压)→ 清 history 缓存让新历史
+                        # 写回新会话;turn 中途即补发新鲜 context.snapshot,让 dashboard treemap/占用
+                        # 回落(defer 未动上下文,跳过;非交互会话自动 no-op;见 compaction-gate.md)。
                         conversation_history = None
                         try:
                             from agent.compaction_gate import emit_post_compaction_snapshot

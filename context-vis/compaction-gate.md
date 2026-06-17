@@ -1,7 +1,7 @@
 # 压缩闸门 —— 把"自动压缩"改成"用户确认的压缩"（调研证据链）
 
-> **状态:第一阶段(预览 + 确认)+ 第二阶段首刀(闸门内 drop 编辑)均已建成并实测通过**,见 [built.md](built.md)。
-> 两暗礁被"编辑随应答带回、作用于本地 messages"的架构**消解**(非打补丁);闸门内 fold/keep、死重喂闸门、纠正 focus 留后(见文末分期)。
+> **状态:第一阶段(预览 + 确认)+ 第二阶段 drop / fold / keep 编辑均已建成并实测通过**,见 [built.md](built.md)。
+> 两暗礁被"编辑随应答带回、作用于本地 messages"的架构**消解**(非打补丁);keep-as-pin、死重喂闸门、纠正 focus 留后(见文末分期)。
 
 > **动机**:Hermes 现在到阈值(默认 50%)就**静默** auto-compress——用户看不到改了什么、
 > 无从干预。这违背 CLAUDE.md 第 6 条「干预必须透明,永不静默改动上下文」。压缩闸门:
@@ -92,11 +92,21 @@ if agent.compression_enabled and _compressor.should_compress(_real_tokens):
   - **keystone**:让应答携带编辑载荷(`tools/approval.py` 的 `_ApprovalEntry.result_extra` +
     `resolve_gateway_approval(extra=)` + `_await_gateway_decision` 返回 `extra`;`compaction.respond` 经 extra 带回
     `drop_chunk_ids`)。加法兼容,工具审批不传 → None。**此通道同时解锁"闸门内纠正 focus""死重喂闸门"**。
-  - **三选择 + 推迟**:直接压缩(`continue`)/ 删除并压缩(`edit_compress`)/ 仅删除(`edit_only`,drop 已腾够空间则跳过压缩)/ 推迟。
   - **band↔inspector 同步**:闸门时两者都画 `systemFate ∪ 用户 fateMap`(`ContextVisPanel.effectiveFateMap` /
     `ChatPage.displayFateMap`),用户标记覆盖系统计划。见 [built.md](built.md)。
-  - **剩(各自后续,均复用 extra keystone)**:闸门内 **fold/keep** 改写系统计划、**死重清单喂闸门**、**纠正 focus**。
-- **阶段 3**:A-v2(fold)就绪后,编辑动作更丰富(用户手动指定某轮折叠)。
+- **阶段 2 第二刀(闸门内 fold/keep 编辑,方案 A)— ✅ 已建成实测**。把"只能删"升级到"**改写折叠计划**":
+  保护中段某轮不进摘要(keep)、补折系统漏掉的支线(fold)。**方案 A**:用户编辑出的有效 fateMap = 权威落地计划,
+  直接 apply、**跳过位置式 `_compress_context`**(它纯位置式、不认手标 fold/keep,要让编辑生效就不能再当落地器;且不碰
+  与三条反应式路共用的核心压缩函数)。落地复用手动 `context.fold` 同一套(`_generate_summary` + `splice_fold_summary` +
+  `_sanitize_tool_pairs`),统一进 `compaction_gate.apply_gate_plan(drop_ids, fold_ids, focus)`(drop/fold 按同一份原始
+  messages 解析、drop 优先、**先过滤 drop 再重映射 fold 下标消除漂移**、摘要失败降级仅删除);`apply_gate_drops` 委托它。
+  - **四选择 + 推迟**:直接压缩(`continue`,位置式不动)/ 应用计划(`apply_plan`,有效 fold+drop 直接落地)/
+    仅删除(`edit_only`,只删不折)/ 推迟。banner 占用投影改用 `projectFates(effective)`(确认前看得见)。
+  - **keep 的归宿**:本刀 keep = **「取消系统预折」**(合并里用户覆盖 systemFate 的 fold,**免费**);
+    用户设想的"提升到持久免压区"= **keep-as-pin**(正向持久保护、场景小)单独设计,本刀不做。
+  - **可读性「命运沟」**:闸门时每轮都被派命运,改为 **fold 压暗后退 + 左缘 4px 命运沟**(keep 绿/fold 橙/drop 红)一眼分清。
+  - **在途 spinner**:应答后→压缩后快照前的沉默期(后端跑摘要数秒)显示「正在应用计划…」,新快照到达自动消失。
+  - **剩(各自后续,均复用 extra keystone / apply_gate_plan)**:**keep-as-pin**、**死重清单喂闸门**、**纠正 focus**。
 - **横切:编辑建议**:系统预先 mark 一份建议 fate(失败工具结果 / 重复读同一文件 /
   久未触及支线)→ 用户增删 → 确认。即 roadmap 的"建议策略注册表",UI 一行不改。
 

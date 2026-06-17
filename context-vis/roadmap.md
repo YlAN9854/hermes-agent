@@ -76,12 +76,15 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
    [conversation_loop.py:3812](../agent/conversation_loop.py#L3812) → treemap 画系统计划 +
    占用投影 → 继续 / 推迟(300s 超时自动继续)。复用审批基建,opt-in
    `HERMES_CONTEXTVIS_GATE`。实测次数/占用与 TUI 一致。
-2. ◑ **第二阶段(闸门内编辑)· drop 首刀 ✅ 已建成实测**:闸门内标 drop + 三选择(直接压缩 /
-   删除并压缩 / 仅删除)+ 推迟。**两暗礁被架构消解**(非打补丁):编辑随应答带回、由循环线程作用于
-   **本地 `messages`**(`apply_gate_drops`),不调 `context.apply`、不碰 `session["history"]`。keystone =
-   应答带回编辑(`approval.py` 的 `result_extra`)。见 [built.md](built.md) / [compaction-gate.md](compaction-gate.md)。
-   **剩**:闸门内 fold/keep 改写系统计划、纠正 focus、死重喂闸门(均复用 extra keystone)。
-3. ⬜ **第三阶段**:A-v2(fold)闸门内编辑;横切"编辑建议"(系统预 mark 建议 fate = 死重清单喂闸门)。
+2. ◑ **第二阶段(闸门内编辑)· drop ✅ + fold/keep ✅ 已建成实测**:闸门内标 drop/fold/keep + 四选择
+   (直接压缩 / 应用计划 / 仅删除 / 推迟)。**两暗礁被架构消解**(非打补丁):编辑随应答带回、由循环线程作用于
+   **本地 `messages`**;落地统一进 `apply_gate_plan`(方案 A:编辑后的有效 fateMap = 权威计划,直接 apply、
+   跳过位置式 `_compress_context`;复用手动 `context.fold` 的 `_generate_summary`+`splice_fold_summary`)。keystone =
+   应答带回编辑(`approval.py` 的 `result_extra`)。命运沟可读性 + 在途 spinner 已打磨。见 [built.md](built.md) / [compaction-gate.md](compaction-gate.md)。
+   **剩**:keep-as-pin(持久免压区)、纠正 focus、死重喂闸门(均复用 extra keystone / apply_gate_plan)。
+3. ⬜ **第三阶段 / 横切**:死重清单**喂闸门**(系统预 mark 建议 fate 进闸门 = "建议策略注册表",落地路一行不改)——
+   含两 backlog(用户复测提出):① 自动推荐够到**首尾**(引擎已位置无关、手动可折首尾,缺自动推荐);
+   ② 标注每个 fate 的**理由**(推荐层产物,落点 inspector 顶/band 悬浮);以及 **keep-as-pin**、**闸门内纠正 focus**。
 
 ### 主视图主轴翻转:turn 优先 + 逐轮主题(设计定稿,见 [turn-band.md](turn-band.md))
 把主视图从"类型优先"(5 类型带)翻成 **"turn 优先"**:纵向时间序、与 TUI 同向、逐轮主题着色。
@@ -105,8 +108,9 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
   **后续①焦点压缩(focus → `focus_topic`,仅闸门路)✅ + 后续②死重清单首刀(方向 A「建议清理」)✅ 已建成实测**。
   **剩**:死重②喂闸门 / ②→①完成自动触发 / chunk 级过期精测、滚动增量、产品门槛、非闸门路喂 focus、闸门内编辑 focus。
 - **G. 压缩闸门**:第一阶段(预览 + 确认)**已建成**;已与 R 合流——闸门现"**regime ∧ collision
-  才弹**"。**第二阶段 drop 编辑首刀 ✅ 已建成**(两暗礁经"编辑随应答带回、作用本地 messages"消解;
-  keystone=应答带回编辑 payload)。**剩**:闸门内 fold/keep 编辑、纠正压缩焦点、死重喂闸门(均复用 extra keystone)。
+  才弹**"。**第二阶段 drop ✅ + fold/keep ✅ 编辑均已建成**(两暗礁经"编辑随应答带回、作用本地 messages"消解;
+  keystone=应答带回编辑 payload;落地统一 `apply_gate_plan`,方案 A:编辑后计划即权威、跳过位置式压缩)。
+  **剩**:死重喂闸门(含首尾自动推荐 + fate 理由两 backlog)、keep-as-pin、纠正压缩焦点(均复用 extra keystone)。
 - **M. 压缩块诚实显示(✅ 已建成,取代废弃的"结构突变账本")**:压缩/fold 产物**如实标注、摆正位置、
   不冒充对话轮**,但**不重建被销毁的拓扑**——分块层识别对齐 `regime._is_boilerplate` 全集 → 标 `folded`
   → band 画「压缩 context」块。**原"结构突变账本"(突变前快照 + 折叠出处 + 两咽喉一本账)已判过度设计、
@@ -127,8 +131,10 @@ ContextVis 最贴使命的一块,**交互式压缩的对偶**:用户主动治理
   treemap 视觉(配色/字号/带顺序)、浮层交互(拖动/缩放)、截断上限可配;
   小块标签体感(降阈值 / 选中强制显标签 / band 级兜底标签)。
 
-> 建议优先级:**R 后续**(焦点压缩 ✅ + 死重清单首刀(主动清理)✅ → 下一步**死重②喂闸门 / 滚动增量**,
-> 在已建成的自适应总开关上加智能,见 [regime.md](regime.md))> C2(增量)> D/E4(收尾/可选)。
+> 建议优先级:**R 后续**(焦点压缩 ✅ + 死重清单首刀(主动清理)✅ + 闸门内 drop/fold/keep 编辑 ✅ →
+> 下一步**死重②喂闸门 / 滚动增量**,在已建成的自适应总开关 + 闸门编辑地基上加智能,见 [regime.md](regime.md))>
+> C2(增量)> D/E4(收尾/可选)。
 > 观察→治理(drop+fold)→落地、系统压缩前用户把关、**自适应总开关**(森林闭嘴/任务出声)、
-> **焦点压缩**(focus 接进压缩)、**死重清单主动清理**(系统建议折已完成支线)均已闭环;
-> 下一步是把死重清单也接进闸门、补滚动增量。
+> **焦点压缩**(focus 接进压缩)、**死重清单主动清理**(系统建议折已完成支线)、
+> **闸门内 drop/fold/keep 编辑**(被迫压缩前改写折叠计划,方案 A 直接落地)均已闭环;
+> 下一步是把死重清单也接进闸门(自动推荐折/留/删 + 理由,含首尾)、补滚动增量。
