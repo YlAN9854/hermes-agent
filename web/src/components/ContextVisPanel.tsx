@@ -1046,6 +1046,16 @@ export function ContextVisPanel({
   const activeTopics = wantColor && colorData ? colorData.topics : null;
   const activeCellColors = wantColor && colorData ? colorData.cellColors : null;
   const activeMeta = wantColor && colorData ? colorData : null;
+  // 着色是否已过期 = 此前着色的某 chunkId 在当前 chunks 中消失(= 压缩/删/折重构了 id)。
+  // 与下方"结构变更重取"effect **同判据**:为真即后台正按新历史重检测着色(此刻仍显示旧色),
+  // 据此给用户一个"主题检测中"的提示——纯 render 派生,无 effect 置态,lint 安全。
+  const colorStale = (() => {
+    if (!wantColor || !colorData) return false;
+    const ids = new Set(snapshot.chunks.map((c) => c.id));
+    return Object.keys(colorData.topics).some((id) => !ids.has(id));
+  })();
+  // 着色后台在跑(显式按钮/建议清理触发的 colorBusy,或压缩后结构重取的 colorStale)→ 提示。
+  const coloringPending = wantColor && (colorBusy || colorStale);
 
   const loadColors = async () => {
     if (!sid) return;
@@ -1487,6 +1497,13 @@ export function ContextVisPanel({
                 : "森林（无主线）"}
               {" · "}
               {activeMeta.engine === "llm" ? "语义" : "启发式"}
+            </div>
+          )}
+          {/* 着色后台在跑(压缩后结构重取 / 显式着色)→ 提示,避免用户误以为当前颜色已是最终态。 */}
+          {view === "turn" && coloringPending && (
+            <div className="flex items-center gap-1 text-[10px] text-warning">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />
+              {colorStale ? "主题已变,正在重测着色…" : "主题检测中…"}
             </div>
           )}
           {suggestNote && (
