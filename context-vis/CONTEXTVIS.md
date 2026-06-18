@@ -15,7 +15,8 @@
 > + 第四刀主动梳理:整轮 fold/drop 预填 fateMap 复用落地 + 闸门折叠碰撞高亮)** 完成——
 > 观察→治理(删/折)→落地 + 系统压缩前用户把关 + 自适应介入 + **焦点压缩(把关时确认主线焦点→喂压缩)** +
 > **死重清单(主动清理 + 喂闸门:被迫压缩前自动建议折已完成支线、含首尾、banner/band 标来由;建议用 fold 不 drop)** + **闸门内 drop/fold/keep 编辑(被迫压缩前改写折叠计划:删垃圾/补折支线/护住中段轮,经应答落地、方案 A 直接落地、两暗礁消解)** +
-> **按 turn 看时间/主题、点轮跳对话、整轮主动 fold/drop 的语义 minimap / 主操作台(band 概览 + inspector 类型细节)** 均闭环。
+> **按 turn 看时间/主题、点轮跳对话、整轮主动 fold/drop 的语义 minimap / 主操作台(band 概览 + inspector 类型细节)** +
+> **持久主题着色(前端「主题→色」注册表:同主题跨多次着色同色、只增不洗、localStorage 按 sessionId、零后端)** 均闭环。
 > **下一步:R 滚动增量(长会话健壮)/ drop 残值信号(失败 tool/被取代 read/闲聊,比 done→drop 准)/ 自动护主线中段 / keep-as-pin / 纠正 focus / ②→①完成自动触发;
 > 视口高亮框、非闸门路喂 focus 延后**,详见 [turn-band.md](turn-band.md) §9 / [roadmap.md](roadmap.md)。
 

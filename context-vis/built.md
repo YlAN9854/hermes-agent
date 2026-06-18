@@ -229,6 +229,17 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
   web build+lint 干净。**实测**:opencode 主线 + 末尾闲聊支线顶阈值弹闸门 → 首尾死重也带暗橙命运沟、banner 标已完成支线数、悬浮显来由、编辑+应用计划落地。
 - **边界**:自动**护住主线中段轮**(语义反折 keep)、drop 残值信号、keep-as-pin、纠正 focus 留后。
 
+### 持久主题着色 · 同主题同色(前端注册表,零后端)
+「主题着色」/ 闸门着色时**同一主题每次换色**,用户不满。**根因**:`buildTopicColorMap` 按 topic 串**排序下标**分色 +
+每 render 从零重建无记忆 → 主题集合一变即**整排重洗**。
+- **痛点收缩(用户敲定)**:不要增量评估/启发式/常驻检测,**只要同主题跨多次着色同色**。检测频率、LLM 着色照旧。
+- **方案 = 前端持久「主题→色」注册表**(`assignTopicColors` 替换 `buildTopicColorMap`):首见分下一空闲色并记下、复用、**只增不洗**;
+  存 **localStorage 按 sessionId**(浮层折叠会重挂载 panel → 内存 ref 会丢,故必须持久化);**归一化键**(trim/小写/压空格)吸收 LLM 琐碎改名。
+  `colorData` 携 `colorMap`(抽 `buildColorData` 统一三处加载点),TurnBand 改用 `topicColors` prop。**零后端 / 零 Hermes / 零检测器改动**。
+- **决策痕迹**:否决旧 roadmap §6 的「启发式连通分量聚类(经验效果差)+ LLM 增量着色(不要求每轮检测,无需此基建)」。
+  残留:LLM **显著**改名仍可能跳色 → 留白,实测确有再加保守模糊匹配(token 重叠复用旧色)。
+- **验证**:web build+lint 干净。**待 dashboard 实测**:重复着色色一致 / 新轮不重洗老色 / 折叠浮层重挂载后仍一致(localStorage)/ 闸门与按钮同色。
+
 ---
 
 ### turn 带 · 主视图主轴翻转(第一~第四刀,设计见 [turn-band.md](turn-band.md))

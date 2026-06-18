@@ -14,7 +14,7 @@
 
 import { Card } from "@nous-research/ui/ui/components/card";
 import { ChevronUp } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { formatTokenCount } from "@/lib/format";
 import { squarify } from "@/lib/contextvis/treemap";
@@ -60,14 +60,68 @@ const TOPIC_PALETTE = [
 
 type ChunkTopicMap = RegimeColors["chunk_topics"];
 
-/** 出现过的 topic 串稳定分配到色板(排序定序,避免重渲染跳色)。 */
-function buildTopicColorMap(ct: ChunkTopicMap): Map<string, string> {
-  const topics = [
-    ...new Set(Object.values(ct).map((v) => v.topic).filter(Boolean)),
-  ].sort();
-  const m = new Map<string, string>();
-  topics.forEach((t, i) => m.set(t, TOPIC_PALETTE[i % TOPIC_PALETTE.length]));
-  return m;
+/** 主题键归一化:吸收 LLM 对同一主题的琐碎改名差异(trim / 小写 / 压空格)。 */
+function normalizeTopic(t: string): string {
+  return t.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * 持久「主题→色」注册表:**只增不洗**——首次见某主题分下一个空闲色并记下,以后复用,
+ * 永不重排(根治旧版"排序下标法"一加新主题就整排重洗 + 每次从零重建无记忆)。
+ *
+ * 存 localStorage 按 sessionId(浮层折叠/展开会重挂载 panel,内存 ref 会丢 → 必须持久化;
+ * 顺带扛页面重载)。归一化键吸收 LLM 改名。返回 **原始 topic 串 → color**(供按 `ct.topic` 原串查)。
+ * localStorage 失败(隐私模式/配额)→ 退化为本次内存分配(仍比旧版稳)。
+ */
+function assignTopicColors(
+  ct: ChunkTopicMap,
+  sessionId: string | undefined,
+): Record<string, string> {
+  const key = sessionId ? `cv-topics:${sessionId}` : "";
+  let reg: Record<string, string> = {};
+  if (key) {
+    try {
+      reg = JSON.parse(localStorage.getItem(key) || "{}") || {};
+    } catch {
+      reg = {};
+    }
+  }
+  const out: Record<string, string> = {};
+  let dirty = false;
+  for (const v of Object.values(ct)) {
+    const topic = v.topic;
+    if (!topic) continue;
+    const norm = normalizeTopic(topic);
+    if (!reg[norm]) {
+      reg[norm] = TOPIC_PALETTE[Object.keys(reg).length % TOPIC_PALETTE.length];
+      dirty = true;
+    }
+    out[topic] = reg[norm];
+  }
+  if (dirty && key) {
+    try {
+      localStorage.setItem(key, JSON.stringify(reg));
+    } catch {
+      /* 配额/隐私模式:退化为本次内存分配,out 已填好 */
+    }
+  }
+  return out;
+}
+
+/** 把一次 regime_colors 结果 + 持久注册表解析,组装成 colorData(三处加载点共用)。 */
+function buildColorData(
+  r: RegimeColors,
+  hv: number | undefined,
+  sid: string | undefined,
+) {
+  return {
+    hv,
+    topics: r.chunk_topics,
+    regime: r.regime,
+    focus: r.focus,
+    engine: r.engine,
+    colorMap: assignTopicColors(r.chunk_topics, sid),
+  };
 }
 /** turn 格最小高度(保证极小轮仍可点;轻微破「高∝token」严格比例,见 doc §10)。 */
 const TURN_MIN_H = 12;
@@ -349,6 +403,7 @@ function TurnBand({
   selected,
   onSelect,
   chunkTopics,
+  topicColors,
   onActivateTurn,
   fateMap,
   gateActive = false,
@@ -359,6 +414,8 @@ function TurnBand({
   onSelect: (id: string | null) => void;
   /** 第二刀主题着色:chunkId → {topic, mainline};null=未着色(中性结构)。 */
   chunkTopics: ChunkTopicMap | null;
+  /** 持久注册表解析出的 主题→色(原始 topic 串);null=未着色。同主题跨多次着色稳定同色。 */
+  topicColors: Record<string, string> | null;
   /** 第三刀:点对话轮 → 把 TUI 滚到该轮(底座/折叠块无锚点,不触发)。 */
   onActivateTurn?: (turn: number) => void;
   /** 第四刀:命运叠加(平时=用户标记;闸门时=systemFate 碰撞高亮)。逐格聚合成员命运。 */
@@ -368,7 +425,6 @@ function TurnBand({
 }) {
   const { percent, budget, compactAt } = snapshot;
   const cells = buildTurnCells(snapshot);
-  const topicColors = chunkTopics ? buildTopicColorMap(chunkTopics) : null;
   // 第四刀:chunkId → 类型,用于逐格筛出 message-backed 成员(只有它们能被 fold/drop)。
   const typeById = new Map<string, ChunkType>();
   for (const c of snapshot.chunks) typeById.set(c.id, c.type);
@@ -471,7 +527,7 @@ function TurnBand({
           chunkTopics && !cell.isBase && !cell.isFolded
             ? chunkTopics[cell.repId]
             : undefined;
-        const topicColor = ct && ct.topic ? topicColors?.get(ct.topic) : undefined;
+        const topicColor = ct && ct.topic ? topicColors?.[ct.topic] : undefined;
         const offthread = ct ? !ct.mainline : false;
         const fill = cell.isFolded
           ? TURN_FOLD_COLOR
@@ -743,6 +799,8 @@ export function ContextVisPanel({
     regime: string;
     focus: string;
     engine: string;
+    /** 持久注册表解析出的 主题→色(原始 topic 串);TurnBand 直接查,不再排序下标分色。 */
+    colorMap: Record<string, string>;
   } | null>(null);
   // 阶段 3「应用」本地状态:确认/进行中、上次释放量(供撤销)、错误。
   // action 原子化:一次只 drop 或只 fold,applyKind 记当前确认/进行中的动作。
@@ -929,6 +987,7 @@ export function ContextVisPanel({
   const colorsFresh = !!colorData && colorData.hv === snapshot.historyVersion;
   const wantColor = colorOn || gateActive;
   const activeTopics = wantColor && colorsFresh ? colorData!.topics : null;
+  const activeColorMap = wantColor && colorsFresh ? colorData!.colorMap : null;
   const activeMeta = wantColor && colorsFresh ? colorData : null;
 
   const loadColors = async () => {
@@ -936,13 +995,7 @@ export function ContextVisPanel({
     setColorBusy(true);
     try {
       const r = await fetchRegimeColors(sid);
-      setColorData({
-        hv: snapshot.historyVersion,
-        topics: r.chunk_topics,
-        regime: r.regime,
-        focus: r.focus,
-        engine: r.engine,
-      });
+      setColorData(buildColorData(r, snapshot.historyVersion, sid));
     } catch {
       setColorData(null);
     } finally {
@@ -958,19 +1011,34 @@ export function ContextVisPanel({
     fetchRegimeColors(sid)
       .then((r) => {
         if (cancelled) return;
-        setColorData({
-          hv: snapshot.historyVersion,
-          topics: r.chunk_topics,
-          regime: r.regime,
-          focus: r.focus,
-          engine: r.engine,
-        });
+        setColorData(buildColorData(r, snapshot.historyVersion, sid));
+        setColorOn(true); // 粘滞:关闸/压缩后仍保持着色(否则 wantColor 回 false → 中性)
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [gateActive, sid, snapshot.historyVersion]);
+
+  // 压缩后自动重取着色:压缩重写历史(chunkId 变)→ colorsFresh 失效会打回中性。仅在
+  // **压缩次数增加**时重取一次(非每轮,无逐轮成本);注册表保证重取的颜色与闸门时一致。
+  const prevCompRef = useRef(snapshot.compressionCount ?? 0);
+  useEffect(() => {
+    const cc = snapshot.compressionCount ?? 0;
+    const grew = cc > prevCompRef.current;
+    prevCompRef.current = cc;
+    if (!grew || !colorOn || !sid) return;
+    let cancelled = false;
+    fetchRegimeColors(sid)
+      .then((r) => {
+        if (cancelled) return;
+        setColorData(buildColorData(r, snapshot.historyVersion, sid));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot.compressionCount, colorOn, sid, snapshot.historyVersion]);
 
   const toggleColor = () => {
     if (colorOn && colorsFresh) {
@@ -992,13 +1060,7 @@ export function ContextVisPanel({
     setSuggestNote(null);
     try {
       const r = await fetchRegimeColors(sid);
-      setColorData({
-        hv: snapshot.historyVersion,
-        topics: r.chunk_topics,
-        regime: r.regime,
-        focus: r.focus,
-        engine: r.engine,
-      });
+      setColorData(buildColorData(r, snapshot.historyVersion, sid));
       setColorOn(true); // 顺带着色,让用户复核时看清主题分布
       const msgBacked = new Set(
         chunks.filter((c) => MESSAGE_BACKED_TYPES.has(c.type)).map((c) => c.id),
@@ -1370,6 +1432,7 @@ export function ContextVisPanel({
                 selected={selected}
                 onSelect={onSelect}
                 chunkTopics={activeTopics}
+                topicColors={activeColorMap}
                 onActivateTurn={onActivateTurn}
                 fateMap={effectiveFateMap}
                 gateActive={gateActive}
