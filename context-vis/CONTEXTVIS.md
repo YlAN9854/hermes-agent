@@ -17,8 +17,8 @@
 > **死重清单(主动清理 + 喂闸门:被迫压缩前自动建议折已完成支线、含首尾、banner/band 标来由;建议用 fold 不 drop)** + **闸门内 drop/fold/keep 编辑(被迫压缩前改写折叠计划:删垃圾/补折支线/护住中段轮,经应答落地、方案 A 直接落地、两暗礁消解)** +
 > **按 turn 看时间/主题、点轮跳对话、整轮主动 fold/drop 的语义 minimap / 主操作台(band 概览 + inspector 类型细节)** +
 > **主题着色升级(前端、零后端:① 持久注册表→同主题同色、只增不洗、localStorage 按 sessionId;② 显示放宽+结构变更才重取→压缩/删/折后不回退、纯追加零成本;③ 按线程定色——主线收 focus 一色/支线按 topic,topic 仅作标签;两拍着色=闸门期压缩前·落地后压缩后)** 均闭环。
-> **下一步:R 滚动增量(长会话健壮)/ drop 残值信号(失败 tool/被取代 read/闲聊,比 done→drop 准)/ 自动护主线中段 / keep-as-pin / 纠正 focus / ②→①完成自动触发;
-> 视口高亮框、非闸门路喂 focus 延后**,详见 [turn-band.md](turn-band.md) §9 / [roadmap.md](roadmap.md)。
+> **下一步:drop 残值信号(失败 tool/被取代 read/闲聊,比 done→drop 准)/ 自动护主线中段 / keep-as-pin / 闸门内纠正 focus / ②→①完成自动触发;
+> 视口高亮框、非闸门路喂 focus 延后。R 滚动增量已降级**(非活跃·留后根治:增量评估动机随持久着色改前端注册表而失,仅剩压缩前快照硬限,不紧迫且会动 Hermes)**,详见 [turn-band.md](turn-band.md) §9 / [roadmap.md](roadmap.md)。
 
 ---
 
