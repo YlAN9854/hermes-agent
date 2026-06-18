@@ -56,6 +56,9 @@ interface CompactionRequestPayload {
   est_after_percent?: number;
   fold_turns?: number;
   deadweight_turns?: number;
+  /** 残值 drop 喂闸门:预填为 drop 的 chunk 数 + 每格来由(被取代旧读/失败工具/闲聊)。 */
+  residual_drops?: number;
+  fate_reasons?: Record<string, string>;
   /** 两级门控放行的任务态标记("task")+ 原因(供闸门条标"检测到主线任务")。 */
   regime?: string;
   collision_reason?: string;
@@ -141,6 +144,8 @@ export function useContextSnapshot(channel: string): ContextSnapshot {
                 estAfterPercent: p.est_after_percent ?? 0,
                 foldTurns: p.fold_turns ?? 0,
                 deadweightTurns: p.deadweight_turns ?? 0,
+                residualDrops: p.residual_drops ?? 0,
+                fateReasons: p.fate_reasons ?? {},
                 regime: p.regime,
                 focus: p.focus,
               },

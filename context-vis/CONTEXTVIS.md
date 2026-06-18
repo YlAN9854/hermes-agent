@@ -14,10 +14,10 @@
 > + 压缩块诚实显示 + 闸门自动着色 + 第三刀联动导航/细节层:点轮跳 TUI + inspector 本轮构成
 > + 第四刀主动梳理:整轮 fold/drop 预填 fateMap 复用落地 + 闸门折叠碰撞高亮)** 完成——
 > 观察→治理(删/折)→落地 + 系统压缩前用户把关 + 自适应介入 + **焦点压缩(把关时确认主线焦点→喂压缩)** +
-> **死重清单(主动清理 + 喂闸门:被迫压缩前自动建议折已完成支线、含首尾、banner/band 标来由;建议用 fold 不 drop)** + **闸门内 drop/fold/keep 编辑(被迫压缩前改写折叠计划:删垃圾/补折支线/护住中段轮,经应答落地、方案 A 直接落地、两暗礁消解)** +
+> **死重清单(主动清理 + 喂闸门:被迫压缩前自动建议折已完成支线、含首尾、banner/band 标来由;建议用 fold 不 drop)** + **drop 残值信号(被取代旧读/失败工具/窄闲聊精准预填 drop、优先级 drop>fold>keep、轮次版 chunk 级红角标 ✕N + drop 优先沟 + tooltip 来由;apply_plan 系统建议即可见)** + **闸门内 drop/fold/keep 编辑(被迫压缩前改写折叠计划:删垃圾/补折支线/护住中段轮,经应答落地、方案 A 直接落地、两暗礁消解)** +
 > **按 turn 看时间/主题、点轮跳对话、整轮主动 fold/drop 的语义 minimap / 主操作台(band 概览 + inspector 类型细节)** +
 > **主题着色升级(前端、零后端:① 持久注册表→同主题同色、只增不洗、localStorage 按 sessionId;② 显示放宽+结构变更才重取→压缩/删/折后不回退、纯追加零成本;③ 按线程定色——主线收 focus 一色/支线按 topic,topic 仅作标签;两拍着色=闸门期压缩前·落地后压缩后)** 均闭环。
-> **下一步:drop 残值信号(失败 tool/被取代 read/闲聊,比 done→drop 准)/ 自动护主线中段 / keep-as-pin / 闸门内纠正 focus / ②→①完成自动触发;
+> **下一步:自动护主线中段 / keep-as-pin / 闸门内纠正 focus / ②→①完成自动触发(drop 残值信号已建成);
 > 视口高亮框、非闸门路喂 focus 延后。R 滚动增量已降级**(非活跃·留后根治:增量评估动机随持久着色改前端注册表而失,仅剩压缩前快照硬限,不紧迫且会动 Hermes)**,详见 [turn-band.md](turn-band.md) §9 / [roadmap.md](roadmap.md)。
 
 ---
@@ -86,7 +86,7 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 | [../CLAUDE.md](../CLAUDE.md) | 设计理念 / 不变量(渲染无关,最高纲领) | 纲领 |
 | [regime.md](regime.md) | 任务态识别原理 + 判定(ContextVis 的"脑",喂闸门 + turn 带着色) | ✅ 已建成 |
 | [fold.md](fold.md) | 方向 A-v2 fold(折成摘要而非整删)设计 | ✅ 已建成 |
-| [compaction-gate.md](compaction-gate.md) | 压缩闸门(拦 auto-compress 改用户确认) | ◑ 一阶段 + 二阶段 drop/fold/keep 编辑 + 死重喂闸门已建成;keep-as-pin/纠正 focus/drop 残值信号待做 |
+| [compaction-gate.md](compaction-gate.md) | 压缩闸门(拦 auto-compress 改用户确认) | ◑ 一阶段 + 二阶段 drop/fold/keep 编辑 + 死重喂闸门 + drop 残值信号已建成;keep-as-pin/纠正 focus/护主线中段待做 |
 | [compression-baseline.md](compression-baseline.md) | Hermes 自动压缩基线(要接管/复用的引擎) | 参考 |
 | [dataflow.md](dataflow.md) | 真实数据怎么流 + 本地跑起来调试(踩坑必看) | 参考 |
 

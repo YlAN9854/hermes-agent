@@ -30,6 +30,11 @@ def _regime_gating_enabled() -> bool:
     return os.environ.get("HERMES_CONTEXTVIS_REGIME", "1").strip().lower() in _TRUTHY
 
 
+def _residual_enabled() -> bool:
+    """残值 drop 信号开关(默认开)。设 0 → 关残值,退回纯死重 fold + 位置式行为。"""
+    return os.environ.get("HERMES_CONTEXTVIS_RESIDUAL", "1").strip().lower() in _TRUTHY
+
+
 def _should_gate_for_regime(
     agent: Any, messages: List[Dict[str, Any]], plan: Dict[str, Any]
 ) -> tuple[bool, str, str, Any]:
@@ -299,29 +304,44 @@ def request_compaction_decision(
     head_end, tail_start = plan["head_end"], plan["tail_start"]
     system_fate = _system_fate_for_chunks(chunks, head_end, tail_start)
 
-    # 死重清单喂闸门:把 detector 的「已完成支线」(done ∧ !mainline)预标 fold,**叠加**在位置式计划上
-    # (覆盖位置式 keep → 首尾的死重也会被建议折;不反折位置式中段)。复用门控刚跑的同一份 assessment、
-    # 无新 LLM;assessment 为空(门控关/检测失败/启发式回退无 turn_topics)→ 死重为空 → 纯位置式回退。
+    # 死重清单 + 残值 drop 喂闸门:都**叠加**在位置式计划上。命运优先级 **drop > fold > keep**。
+    #   · 死重 = detector 的「已完成支线」(done ∧ !mainline)→ 折(保守,因 done 可能错;覆盖位置式 keep → 含首尾)。
+    #   · 残值 = 被取代旧 read / 失败 tool / 窄闲聊 → 删(结构/高精度,闸门内可逆;窄闲聊从死重折里剔走、改删)。
+    # 复用门控刚跑的同一份 assessment、无新 LLM;assessment 为空 → 死重/闲聊为空,仅结构残值(仍可跑)。
     deadweight_turns = 0
-    if assessment is not None and chunks:
+    residual_drops = 0
+    fate_reasons: Dict[str, str] = {}
+    if chunks:
         try:
-            from agent.contextvis.regime import chunk_topic_map
+            from agent.contextvis.regime import chunk_topic_map, residual_drop_map
 
-            tmap = chunk_topic_map(messages, assessment, chunks)
-            deadweight = {
-                cid
-                for cid, v in tmap.items()
-                if v.get("done") and not v.get("mainline")
-            }
-            for cid in deadweight:
-                system_fate[cid] = "fold"
-            deadweight_turns = sum(
-                1
-                for c in chunks
-                if c["id"] in deadweight and c.get("type") == "history"
+            residual = (
+                residual_drop_map(messages, chunks, assessment)
+                if _residual_enabled()
+                else {}
             )
-        except Exception as e:  # noqa: BLE001 — 死重建议失败不挡闸门,退化纯位置式
-            logger.debug("compaction gate: deadweight suggestion failed: %s", e)
+
+            if assessment is not None:
+                tmap = chunk_topic_map(messages, assessment, chunks)
+                deadweight = {
+                    cid
+                    for cid, v in tmap.items()
+                    if v.get("done") and not v.get("mainline") and cid not in residual
+                }
+                for cid in deadweight:
+                    system_fate[cid] = "fold"
+                deadweight_turns = sum(
+                    1
+                    for c in chunks
+                    if c["id"] in deadweight and c.get("type") == "history"
+                )
+
+            for cid, reason in residual.items():
+                system_fate[cid] = "drop"  # 覆盖位置式 / 死重
+                fate_reasons[cid] = reason
+            residual_drops = len(residual)
+        except Exception as e:  # noqa: BLE001 — 建议失败不挡闸门,退化纯位置式
+            logger.debug("compaction gate: deadweight/residual suggestion failed: %s", e)
 
     fold_tokens = sum(
         c["tokens"] for c in chunks if system_fate.get(c["id"]) == "fold"
@@ -353,6 +373,9 @@ def request_compaction_decision(
         "fold_turns": fold_turns,
         # 死重清单喂闸门:其中有多少轮是「已完成支线」(语义识别,含首尾),供 banner 标"建议折 N 个已完成支线"。
         "deadweight_turns": deadweight_turns,
+        # 残值 drop 喂闸门:预填为 drop 的 chunk 数 + 每格来由(被取代旧读/失败工具/闲聊),供 banner + 轮次版角标/tooltip。
+        "residual_drops": residual_drops,
+        "fate_reasons": fate_reasons,
         # 两级门控放行原因(任务态 + 本次压缩触及主线),供闸门条标"检测到主线任务"。
         "regime": "task",
         "collision_reason": gate_reason,

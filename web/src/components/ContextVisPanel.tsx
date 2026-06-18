@@ -140,21 +140,30 @@ function aggregateCellFate(
   cell: TurnCell,
   typeById: Map<string, ChunkType>,
   fateMap: FateMap,
-): { full: Fate | null; partial: Fate | null; mixed: boolean } {
-  const none = { full: null, partial: null, mixed: false };
+): { full: Fate | null; partial: Fate | null; mixed: boolean; dropCount: number } {
+  const none = { full: null, partial: null, mixed: false, dropCount: 0 };
   if (cell.isBase || cell.isFolded) return none;
   const msgIds = cell.chunkIds.filter((id) => {
     const t = typeById.get(id);
     return t !== undefined && MESSAGE_BACKED_TYPES.has(t);
   });
   const marked = msgIds.map((id) => fateMap[id]).filter((f): f is Fate => !!f);
+  // dropCount = 该轮被标 drop 的成员数(残值 chunk 级 drop 藏在 fold 轮里,靠它在轮次版可见)。
+  const dropCount = marked.filter((f) => f === "drop").length;
   if (marked.length === 0) return none;
-  if (new Set(marked).size > 1) return { full: null, partial: null, mixed: true };
+  if (new Set(marked).size > 1) return { full: null, partial: null, mixed: true, dropCount };
   const f = marked[0];
   return marked.length === msgIds.length
-    ? { full: f, partial: null, mixed: false }
-    : { full: null, partial: f, mixed: false };
+    ? { full: f, partial: null, mixed: false, dropCount }
+    : { full: null, partial: f, mixed: false, dropCount };
 }
+
+/** 残值 drop 来由 → 中文标签(轮次版角标 tooltip)。 */
+const RESIDUAL_LABEL: Record<string, string> = {
+  superseded_read: "被取代旧读",
+  failed_tool: "失败工具",
+  chitchat: "闲聊",
+};
 
 /** 命运 → treemap 描边色（Tailwind 语义 token,与检视器按钮呼应）。 */
 const FATE_STROKE: Record<Fate, string> = {
@@ -409,6 +418,7 @@ function TurnBand({
   cellColors,
   onActivateTurn,
   fateMap,
+  fateReasons,
   gateActive = false,
 }: {
   snapshot: ContextSnapshot;
@@ -423,6 +433,8 @@ function TurnBand({
   onActivateTurn?: (turn: number) => void;
   /** 第四刀:命运叠加(平时=用户标记;闸门时=systemFate 碰撞高亮)。逐格聚合成员命运。 */
   fateMap: FateMap;
+  /** 残值喂闸门:chunkId → drop 来由(被取代旧读/失败工具/闲聊),供轮次版 drop 角标 tooltip。 */
+  fateReasons?: Record<string, string>;
   /** 死重喂闸门(点 3):闸门激活时,fold 格悬浮标来由(已完成支线 / 位置式中段)。 */
   gateActive?: boolean;
 }) {
@@ -551,9 +563,25 @@ function TurnBand({
           VB_W - 56,
         );
         // 命运叠加(第四刀):整轮强叠加 / 部分·混合弱提示。闸门时 fateMap=systemFate → 碰撞高亮。
-        const { full: fullFate, partial: partialFate, mixed: mixedMark } =
+        const { full: fullFate, partial: partialFate, mixed: mixedMark, dropCount } =
           aggregateCellFate(cell, typeById, fateMap);
         const hasPartial = partialFate !== null || mixedMark;
+        // 残值 chunk 级 drop:汇总该轮各 drop 成员来由,供角标 tooltip(被取代旧读×N、失败工具×N…)。
+        let dropReasonText = "";
+        if (dropCount > 0) {
+          const counts: Record<string, number> = {};
+          for (const id of cell.chunkIds) {
+            if (fateMap[id] !== "drop") continue;
+            const reason = fateReasons?.[id];
+            if (reason) counts[reason] = (counts[reason] ?? 0) + 1;
+          }
+          const parts = Object.entries(counts).map(
+            ([r, n]) => `${RESIDUAL_LABEL[r] ?? r}×${n}`,
+          );
+          dropReasonText = parts.length
+            ? ` · 丢弃 ${dropCount}:${parts.join("、")}`
+            : ` · 丢弃 ${dropCount}`;
+        }
         const fateText = fullFate
           ? ` · 整轮标记:${FATE_LABEL[fullFate]}`
           : mixedMark
@@ -577,7 +605,7 @@ function TurnBand({
           ? `${cell.label}（压缩折叠产物）· ${formatTokenCount(cell.tokens)}`
           : `${cell.label} · ${formatTokenCount(cell.tokens)}${cell.isBase ? "" : ` · 第${cell.turn}轮`}${
               ct && ct.topic ? ` · ${ct.topic}${ct.mainline ? "（主线）" : "（支线）"}` : ""
-            }${fateText}${foldReason}`;
+            }${fateText}${foldReason}${dropReasonText}`;
         return (
           <g
             key={cell.isFolded ? cell.repId : `turn-${cell.turn}`}
@@ -636,8 +664,9 @@ function TurnBand({
             )}
             {/* 命运左缘竖条 = "命运沟":整轮命运 4px 实色(keep 绿/fold 橙/drop 红——
                 闸门时每轮都被 systemFate 派了命运,这条沟让折/留一眼分清);部分/混合 3px
-                弱提示(还没标全,诚实区分,不整格压暗)。 */}
-            {(fullFate || hasPartial) && (
+                弱提示。**drop 优先**:非整轮但含 chunk 级 drop(残值藏在 fold 轮里)→ 沟用红,
+                别被中性灰吞掉(误判代价不对称,drop 该抢余光)。 */}
+            {(fullFate || hasPartial || dropCount > 0) && (
               <rect
                 x={0}
                 y={y}
@@ -646,11 +675,26 @@ function TurnBand({
                 className={
                   fullFate
                     ? FATE_FILL[fullFate]
-                    : partialFate
-                      ? FATE_FILL[partialFate]
-                      : "fill-current/40"
+                    : dropCount > 0
+                      ? FATE_FILL.drop
+                      : partialFate
+                        ? FATE_FILL[partialFate]
+                        : "fill-current/40"
                 }
               />
+            )}
+            {/* 残值角标:chunk 级 drop 个数(整轮 drop 已有红 X 斜划,故仅非整轮);矮格放不下
+                退给沟 + tooltip。红色与 drop 命运呼应,只唤起注意,token 量级走 tooltip。 */}
+            {dropCount > 0 && !fullFate && h >= 14 && (
+              <text
+                x={VB_W - 3}
+                y={y + h - 3}
+                fontSize={TOKEN_FS}
+                textAnchor="end"
+                className="pointer-events-none fill-destructive font-semibold"
+              >
+                {`✕${dropCount}`}
+              </text>
             )}
             {showLabel && (
               <>
@@ -942,8 +986,16 @@ export function ContextVisPanel({
   const gateDrops = gateActive ? droppableChunkIds(snapshot, effectiveFateMap) : [];
   const userDrops = gateActive ? droppableChunkIds(snapshot, fateMap) : [];
   const userEdited = gateActive && Object.keys(fateMap).length > 0;
+  // 系统已有可落地建议(死重折 / 残值删)→ 即便用户没编辑,也该让「应用计划」可见、可一键接受。
+  // 否则系统预填的残值 drop / 死重 fold 无处落地(「直接压缩」只走位置式)。
+  const systemSuggested =
+    gateActive &&
+    ((pending?.deadweightTurns ?? 0) > 0 || (pending?.residualDrops ?? 0) > 0);
+  const canApplyPlan = userEdited || systemSuggested;
   // 编辑后的占用投影(确认前看得见效果);未编辑回落系统估算。
-  const gatePlanPercent = userEdited
+  // 有可落地计划(用户编辑或系统建议)→ 按**有效**计划投影(含残值 drop 的全量释放);
+  // 否则回落后端 estAfter(仅位置式折,后端未计残值)。
+  const gatePlanPercent = canApplyPlan
     ? projectFates(snapshot, effectiveFateMap).projectedPercent
     : (pending?.estAfterPercent ?? 0);
 
@@ -1181,6 +1233,15 @@ export function ContextVisPanel({
                   （语义识别，含首尾，折它们最安全）+ 位置式中段。
                 </div>
               )}
+              {(pending!.residualDrops ?? 0) > 0 && (
+                <div className="text-[10px] leading-snug text-text-tertiary">
+                  另有{" "}
+                  <span className="text-destructive">
+                    {pending!.residualDrops} 处残值建议丢弃
+                  </span>
+                  （被取代旧读 / 失败工具 / 闲聊，轮次版红角标，可在下方取消）。
+                </div>
+              )}
               <div className="text-[11px] leading-snug text-text-secondary">
                 系统计划:折叠 {pending!.foldTurns} 轮为摘要
                 <span className="text-text-tertiary">
@@ -1194,8 +1255,10 @@ export function ContextVisPanel({
               </div>
               <div className="text-[10px] leading-snug text-text-tertiary">
                 {userEdited
-                  ? `已编辑计划：折 ${gateFolds.length} 块 / 删 ${userDrops.length} 块 —— 「应用计划」直接落地`
-                  : "可在下方/右栏标记：加折支线、取消折中段某轮、或删掉垃圾，再「应用计划」。"}
+                  ? `已编辑计划：折 ${gateFolds.length} 块 / 删 ${gateDrops.length} 块 —— 「应用计划」直接落地`
+                  : systemSuggested
+                    ? `系统已备计划：折 ${gateFolds.length} 块 / 删 ${gateDrops.length} 块 —— 「应用计划」一键落地，或在下方/右栏微调。`
+                    : "可在下方/右栏标记：加折支线、取消折中段某轮、或删掉垃圾，再「应用计划」。"}
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
@@ -1205,13 +1268,13 @@ export function ContextVisPanel({
                 >
                   直接压缩
                 </button>
-                {userEdited && (
+                {canApplyPlan && (
                   <button
                     type="button"
                     onClick={() => respondGate("apply_plan")}
                     className="rounded border border-warning/50 px-2 py-0.5 text-[11px] tracking-wide text-warning hover:bg-warning/10"
                   >
-                    应用计划（折{gateFolds.length}删{userDrops.length}）
+                    应用计划（折{gateFolds.length}删{gateDrops.length}）
                   </button>
                 )}
                 {userDrops.length > 0 && (
@@ -1440,6 +1503,7 @@ export function ContextVisPanel({
                 cellColors={activeCellColors}
                 onActivateTurn={onActivateTurn}
                 fateMap={effectiveFateMap}
+                fateReasons={gateActive ? pending?.fateReasons : undefined}
                 gateActive={gateActive}
               />
             ) : (

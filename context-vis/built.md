@@ -240,6 +240,31 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
 - **v1 局限(已接受)**:`mainline` 始终指**当下**主线 → 只收当下主线为一色;**已完成的旧主任务**退为非主线后仍按其逐轮 topic 上色(可能多色)。回溯把每条历史线程各收一色需"线程 id"(detector 新字段/聚类),留后。残留:focus/topic **显著**改名仍可能跳色(漂移时主线色会换)→ 留白(实测确碍眼再加保守模糊匹配,token 重叠复用旧色)。
 - **验证**:web build+lint 干净;**dashboard 实测通过**(用户截图:压缩 ×1/×2 均保持着色、opencode 全程一色 + tarot 单独色、压缩后焦点漂移如实跟随)。
 
+### G 压缩闸门 · drop 残值信号(把"零残值内容"精准预填为 drop)
+死重喂闸门只会 `done→fold`(保守,因 `done` 是语义猜测、会错)。残值信号是**另一类、残值近零、精度足够直接 drop** 的内容,
+**搭在死重管线旁**、复用 `apply_gate_plan` 落地(早就吃 drop),只新增"挑哪些该删"+ 轮次版 chunk 级 drop 指示。
+- **后端 `regime.residual_drop_map(messages, chunks, assessment=None) → {chunkId: reason}`**(三类,由稳到糙):
+  - **被取代旧 read**(结构确定):同一 path 被 `read_file` **全量**重读 ≥2 次 → 除最后一次外的旧读 `file:msg:{i}` 删(新读已把内容留在 context)。
+    任一读带行区间(offset/limit…)→ **不判取代**(`_read_has_range`,精度优先)。落在主线(keep)轮的旧读也可删——结构上确定其内容已被保留。
+  - **失败 tool**(内容启发式,三信号里最不准):非 file 工具的 tool_result **起始 ~300 字**命中错误标记集 / 非零退出码(`_is_failed_tool_result`)。
+    *实测逮住* `find … No such file or directory`(exit_code 0 但实为失败操作)——标记独立于退出码,正确。
+  - **窄闲聊**(需 assessment):`!mainline ∧ done ∧ 无产物(无 tool_calls/role=tool) ∧ 短`(env `HERMES_CONTEXTVIS_CHITCHAT_MAX_TOKENS`,默认 1500)的整轮 → 全轮 chunk 删。
+    *分流*:长的 `done∧!mainline∧无产物` Q&A 不算闲聊 → 落回死重 fold,不删。
+  - 全走 **messageIndex** 映射,与 `chunk_topic_map` 同源(规避 0/1-indexed 不一致)。
+- **闸门接入** `request_compaction_decision`:命运优先级 **drop > fold > keep** —— 残值 `system_fate[cid]="drop"` **覆盖** 位置式/死重;
+  窄闲聊原属死重 `done∧!mainline`,被残值抢走、**从 `deadweight_turns` 折计数剔除**(改删)。payload 加 `residual_drops` + `fate_reasons`(每格来由)。
+  env 逃生阀 `HERMES_CONTEXTVIS_RESIDUAL`(默认 1)。残值整段 try/except → 失败退化纯死重+位置式,无回归。
+- **轮次版 chunk 级 drop 指示**(用户提案 + 细化):turn = 单块,少量 drop 藏在 fold 轮里会被中性沟吞掉 → `aggregateCellFate` 多返回 `dropCount`;
+  **drop 优先命运沟**(非整轮含 drop → 沟用红,抢余光)+ **右下角红角标 `✕N`**(整轮 drop 已有红 X 斜划故仅非整轮;矮格退给沟+tooltip)+ **tooltip 来由**(`丢弃 N:被取代旧读×… 失败工具×…`)。
+  **token 量级走 tooltip,角标只唤起注意**(守"量级编码 token"不变量)。
+- **`apply_plan` 可见性放宽**:残值是系统预填、用户可不编辑即接受 → `canApplyPlan = userEdited || systemSuggested`(系统有死重折/残值删建议)。
+  必须如此——"直接压缩"只走位置式 `_compress_context`(不按 chunk-id 删),残值只能经 `apply_plan` 落;`gateDrops`(从 `effectiveFateMap`)早已带上系统残值 drop,故只改可见性+计数(删数用 `gateDrops`)+ 占用投影含残值全量释放,**未动 send 逻辑**。
+- **决策:残值 drop vs 死重 fold 的精度分界**——`!mainline` 不等于残值(它含已完成但有料的支线〔已选 fold〕、未完成并行任务、focus 漂移误孤立的奠基轮),
+  故不能 `!mainline→drop`;残值是结构/高精度的窄信号才配 drop。三信号精度排序:被取代旧 read > 失败 tool > 窄闲聊。窄闲聊虽需 LLM 的 done/mainline,但加"无产物+短"收窄到可 drop;长 Q&A 退回 fold。
+- **验证**:stub `/tmp/test_residual.py` 全绿(三信号正确、新读不误删、行区间不判取代、长闲聊不误判、assessment=None 仅结构信号、gate 导入 + 死重剔除闲聊);web build+lint 干净;
+  **dashboard 实测通过**(用户截图:第4轮红 `✕1` 角标 + banner「另有 1 处残值建议丢弃」+「应用计划(折34删1)」未编辑即可见 + inspector 显失败 find 来由)。
+- **边界(留后)**:read 行区间精细 supersession、失败 tool 结构化 is_error(Hermes 暂无)、主动「建议清理」路喂残值(chunk 级需 turn 带 chunk 粒度交互)、森林态喂残值(需非闸门路 assess)。
+
 ---
 
 ### turn 带 · 主视图主轴翻转(第一~第四刀,设计见 [turn-band.md](turn-band.md))

@@ -539,3 +539,174 @@ def chunk_topic_map(
             "done": done,
         }
     return out
+
+
+# ── 残值 drop 信号（确定性 / 启发式，零 LLM；喂闸门预填 drop） ──────────────
+#
+# 与死重 fold 互补:死重 = `done ∧ !mainline → 折`(保守,因 done 是语义猜测、可能错);
+# 残值 = 另一类"残值近零、精度足够直接删"的内容 → drop。三类信号(由稳到糙):
+# 被取代旧 read(结构确定)> 失败 tool(内容启发式)> 窄闲聊(需 assessment)。
+
+# tool_result 内容**起始 ~300 字**命中即视为失败工具(保守:避免正文里出现的 "error" 误判)。
+_FAILED_TOOL_MARKERS = (
+    "error:",
+    "error executing tool",
+    "traceback (most recent call last)",
+    "exception:",
+    "command not found",
+    "no such file or directory",
+    "tool execution failed",
+    "permission denied",
+)
+# read 工具的行区间参数键:任一存在 → 非全量读,不判"被取代"(精度优先,精细覆盖判定留后)。
+_READ_RANGE_KEYS = {
+    "offset", "limit", "start_line", "end_line", "start", "end",
+    "line_start", "line_end", "lines", "range", "head", "tail", "max_lines",
+}
+
+
+def _is_failed_tool_result(content: str) -> bool:
+    """tool_result 起始片段像不像执行失败(保守:仅看前 300 字 + 非零退出码)。"""
+    head = (content or "")[:300].lower()
+    if not head.strip():
+        return False
+    if any(mark in head for mark in _FAILED_TOOL_MARKERS):
+        return True
+    for code in re.findall(r"exit (?:code|status)\D{0,3}(-?\d+)", head):
+        if code != "0":
+            return True
+    return False
+
+
+def _read_has_range(args_json: str) -> bool:
+    """read 调用是否带行区间参数(带 → 非全量,不参与取代判定)。"""
+    import json
+
+    try:
+        args = json.loads(args_json) if args_json else {}
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(args, dict) and any(k in args for k in _READ_RANGE_KEYS)
+
+
+def residual_drop_map(
+    messages: List[Dict[str, Any]],
+    chunks: List[Dict[str, Any]],
+    assessment: Any = None,
+) -> Dict[str, str]:
+    """挑出"残值近零、精度足够直接 drop"的 chunk → ``{chunkId: reason}``。
+
+    ``reason ∈ {superseded_read, failed_tool, chitchat}``。结构信号(前两类)确定性、零 LLM、**不依赖
+    assessment**;chitchat 需 ``assessment.turn_topics``(无则跳过)。喂闸门预填 drop(闸门内可逆),
+    与死重 fold 互补。纯函数、不依赖 chunking 流程(chunks 传入);任何异常由调用方兜底(返回越界即空)。
+
+    chunk 映射走 **messageIndex**(规避 regime 0-indexed vs chunking 1-indexed):file/tool_result 为 1:1,
+    history 按 turn 聚合(多 index 同一 chunk)。被取代旧 read 即便落在主线(keep)轮也可删——
+    结构上确定其内容已被新读完整保留。
+    """
+    out: Dict[str, str] = {}
+    if not messages or not chunks:
+        return out
+    try:
+        from agent.contextvis.chunking import (
+            _FILE_TOOLS,
+            _path_from_args,
+            _tool_call_index,
+        )
+    except Exception:  # noqa: BLE001 — 残值检测失败绝不能挡住压缩
+        return out
+
+    # messageIndex → chunkId(file/tool_result 1:1;history 多 index 同 chunk)。
+    mi_to_chunk: Dict[int, str] = {}
+    for c in chunks:
+        cid = c.get("id")
+        for r in (c.get("sourceRefs") or []):
+            mi = r.get("messageIndex") if isinstance(r, dict) else None
+            if isinstance(mi, int) and cid:
+                mi_to_chunk.setdefault(mi, cid)
+
+    call_index = _tool_call_index(messages)
+
+    def _tool_name(m: Dict[str, Any]) -> str:
+        cid = m.get("tool_call_id") or ""
+        return m.get("tool_name") or call_index.get(cid, {}).get("name") or ""
+
+    def _args_json(m: Dict[str, Any]) -> str:
+        cid = m.get("tool_call_id") or ""
+        return call_index.get(cid, {}).get("args") or ""
+
+    # ① 被取代的旧 read:同 path 全量重读 → 除最后一次外的旧读 file chunk → superseded_read。
+    reads_by_path: Dict[str, List[int]] = {}
+    for i, m in enumerate(messages):
+        if m.get("role") != "tool" or _tool_name(m) not in _FILE_TOOLS:
+            continue
+        args_json = _args_json(m)
+        if _read_has_range(args_json):
+            continue  # 带行区间 → 不判取代(精度优先)
+        path = _path_from_args(args_json)
+        if not path or path == "?":
+            continue
+        reads_by_path.setdefault(path, []).append(i)
+    for idxs in reads_by_path.values():
+        for i in idxs[:-1]:  # 旧读被新读取代
+            cid = mi_to_chunk.get(i)
+            if cid:
+                out[cid] = "superseded_read"
+
+    # ② 失败 tool_result:非 file 工具、内容起始命中错误标记。
+    for i, m in enumerate(messages):
+        if m.get("role") != "tool" or _tool_name(m) in _FILE_TOOLS:
+            continue
+        cid = mi_to_chunk.get(i)
+        if cid and cid not in out and _is_failed_tool_result(_raw_text(m)):
+            out[cid] = "failed_tool"
+
+    # ③ 窄闲聊:!mainline ∧ done ∧ 无产物 ∧ 短 的整轮 → 全轮 message-backed chunk。
+    topics = getattr(assessment, "turn_topics", {}) or {}
+    if assessment is not None and topics:
+        turn_of, n_turns, _b, _r = _segment_turns(messages)
+        turn_has_artifact = [False] * (n_turns + 1)
+        for i, m in enumerate(messages):
+            t = turn_of[i] if i < len(turn_of) else 0
+            if t <= n_turns and (m.get("role") == "tool" or m.get("tool_calls")):
+                turn_has_artifact[t] = True
+        turn_tokens = [0] * (n_turns + 1)
+        for c in chunks:
+            mis = [
+                r.get("messageIndex")
+                for r in (c.get("sourceRefs") or [])
+                if isinstance(r, dict) and isinstance(r.get("messageIndex"), int)
+            ]
+            if not mis:
+                continue
+            t = turn_of[mis[0]] if 0 <= mis[0] < len(turn_of) else None
+            if t is not None and t <= n_turns:
+                turn_tokens[t] += int(c.get("tokens") or 0)
+        max_tok = _env_int("HERMES_CONTEXTVIS_CHITCHAT_MAX_TOKENS", 1500)
+        chitchat_turns = {
+            t
+            for t, v in topics.items()
+            if isinstance(t, int)
+            and 0 <= t <= n_turns
+            and not v.get("mainline")
+            and v.get("done")
+            and not turn_has_artifact[t]
+            and turn_tokens[t] <= max_tok
+        }
+        if chitchat_turns:
+            for c in chunks:
+                cid = c.get("id")
+                if not cid or cid in out:
+                    continue
+                mis = [
+                    r.get("messageIndex")
+                    for r in (c.get("sourceRefs") or [])
+                    if isinstance(r, dict) and isinstance(r.get("messageIndex"), int)
+                ]
+                if mis and all(
+                    0 <= mi < len(turn_of) and turn_of[mi] in chitchat_turns
+                    for mi in mis
+                ):
+                    out[cid] = "chitchat"
+
+    return out

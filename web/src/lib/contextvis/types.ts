@@ -83,6 +83,10 @@ export interface PendingCompaction {
   foldTurns: number;
   /** 死重清单喂闸门:foldTurns 中有多少轮是「已完成支线」(语义识别,含首尾)。0=纯位置式。 */
   deadweightTurns?: number;
+  /** 残值 drop 喂闸门:预填为 drop 的 chunk 数(被取代旧读/失败工具/闲聊)。0=无。 */
+  residualDrops?: number;
+  /** 残值来由:chunkId → reason(superseded_read/failed_tool/chitchat),供轮次版角标 tooltip。 */
+  fateReasons?: Record<string, string>;
   /** 两级门控:检测到的任务态（"task"）。森林态不会弹闸门,故有值即 task。 */
   regime?: string;
   /** R 后续①:检测出的主线焦点。非空时闸门显「将按焦点压缩: …」,确认后喂压缩 focus_topic。 */

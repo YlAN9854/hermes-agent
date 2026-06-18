@@ -137,11 +137,12 @@ Hermes 的 `_generate_summary(turns, focus_topic)` 语义就是"保住与该主�
 
 ---
 
-## 死重清单:一份脑,喂两个时机 —— ◑ 首刀已建成(方向 A 主动清理路)
+## 死重清单:一份脑,喂两个时机 —— ✅ 两路均已建成(主动清理 + 喂闸门),并加 drop 残值信号
 
 深析产出的"死重清单",同时服务两条路:
 
-- **G 闸门(被迫压缩时)**:"这些该折,确认?" —— **未做**(需 gate 二阶段:running 守卫 + 编辑 payload)。
+- **G 闸门(被迫压缩时)**:"这些该折,确认?" —— **✅ 已建成**:闸门弹出时死重(`done∧!mainline`)自动预填 fold、残值
+  (被取代旧读/失败工具/窄闲聊)自动预填 drop(优先级 drop>fold>keep),复用 `apply_gate_plan` 落地。见 [built.md](built.md)。
 - **方向 A 主动清理(随时、非对话态)**:"这是你做完的支线,折掉?"——**大窗口下压缩很少触发,
   这条主动路可能才是主场。** **✅ 首刀已建成**:逐轮 `done` 标记 → turn 带「建议清理」按钮挑
   `done ∧ !mainline ∧ message-backed` → 预填 fateMap fold → 复用第四刀「应用 fold」落地。见 [built.md](built.md)。
@@ -184,9 +185,11 @@ Hermes 的 `_generate_summary(turns, focus_topic)` 语义就是"保住与该主�
   接进既有 `_generate_summary` 的 `focus_topic`(仅闸门压缩路;`compaction_gate` 回传 + `conversation_loop`
   喂参 + 闸门条只读显示「将按焦点压缩」)。实测 `agent.log` 的 `compression started … focus=` 从 `None`
   变成检测出的主线串。见 [built.md](built.md)「R 后续①」。
-- ◑ **后续②:死重清单** — **首刀(方向 A 主动清理「建议清理」)已建成实测**:逐轮 `done` → turn 带按钮挑
-  已完成支线 → 预填 fateMap fold → 复用第四刀落地。**剩**:喂闸门(需 gate 二阶段)、②→① 完成事件自动触发、
-  chunk 级过期/放弃精测 + 回收量排序、drop 噪音。
+- ✅ **后续②:死重清单** — **主动清理「建议清理」✅ + 喂闸门 ✅ 已建成实测**:逐轮 `done` → 共用 `chunk_topic_map` 挑
+  已完成支线(`done ∧ !mainline`)→ ① turn 带按钮预填 fold(主动)② 闸门弹出自动预填 `system_fate`(含首尾、带来由),均复用 `apply_gate_plan` 落地。
+- ✅ **后续⑤:drop 残值信号** — **已建成实测**(原"drop 噪音"的兑现,比 done→drop 准):`residual_drop_map` 三类——
+  被取代旧 read(结构)/ 失败 tool(内容启发式)/ 窄闲聊(`!mainline∧done∧无产物∧短`)→ 喂闸门预填 **drop**(覆盖死重 fold,优先级 drop>fold>keep);
+  轮次版 chunk 级 drop 角标 `✕N` + drop 优先沟 + tooltip 来由。**剩**:②→① 完成事件自动触发、chunk 级回收量排序、残值留后项(行区间精细取代 / 结构化 is_error / 主动路喂残值)。
 - ⬜ **后续(未做)**:产品门槛(纯浏览式读代码是否算任务——当前"多轮连贯本地工作即任务",可抬高到需编辑/明确目标)。
   **焦点压缩仅接了闸门路**,非闸门的自动压缩三处仍焦点盲(喂 focus 需无条件 assess,留后续);闸门内**编辑** focus 需扩 shared 审批 payload。
 - 🅿 **滚动增量已降级(非活跃·留后根治)**:原捆两件——(A) 压缩前快照根治"跑在压缩后历史"、(B) 增量评估只判新轮。

@@ -1,7 +1,7 @@
 # 压缩闸门 —— 把"自动压缩"改成"用户确认的压缩"（调研证据链）
 
-> **状态:第一阶段(预览 + 确认)+ 第二阶段 drop / fold / keep 编辑 + 死重清单喂闸门(detector 建议预填)均已建成并实测通过**,见 [built.md](built.md)。
-> 两暗礁被"编辑随应答带回、作用于本地 messages"的架构**消解**(非打补丁);keep-as-pin、纠正 focus、drop 残值信号、自动护主线中段留后(见文末分期)。
+> **状态:第一阶段(预览 + 确认)+ 第二阶段 drop / fold / keep 编辑 + 死重清单喂闸门 + drop 残值信号(detector 建议预填 fold/drop)均已建成并实测通过**,见 [built.md](built.md)。
+> 两暗礁被"编辑随应答带回、作用于本地 messages"的架构**消解**(非打补丁);keep-as-pin、纠正 focus、自动护主线中段留后(见文末分期)。
 
 > **动机**:Hermes 现在到阈值(默认 50%)就**静默** auto-compress——用户看不到改了什么、
 > 无从干预。这违背 CLAUDE.md 第 6 条「干预必须透明,永不静默改动上下文」。压缩闸门:
@@ -115,7 +115,13 @@ if agent.compression_enabled and _compressor.should_compress(_real_tokens):
   - **点 1/3 兑现**:够首尾(死重位置无关)+ 标注来由(banner「N 个已完成支线」+ band 悬浮「已完成支线 / 位置式中段」,前端用既有 chunk_topics 派生)。
   - **决策:死重建议 fold 不 drop**(用户认可):误判代价不对称(错 drop 不可逆;`done` 会错)、`done` 分不开"废料 vs 已结但有料"、可一键升 drop。
     想要 drop 智能 → 用更窄的**残值信号**(失败 tool_result / 被取代的旧 read / 闲聊)单独触发,而非 done→drop。
-  - **剩**:自动**护住主线中段轮**(语义反折 keep)、drop 残值信号。
+- **横切:drop 残值信号 — ✅ 已建成实测**。死重旁的另一条预填:`regime.residual_drop_map` 三类(被取代旧 read〔结构,同 path 全量重读则旧读删〕/
+  失败 tool〔起始命中错误标记/非零退出〕/ 窄闲聊〔`!mainline∧done∧无产物∧短`〕)→ `system_fate[cid]="drop"`,**优先级 drop>fold>keep**(覆盖死重 fold/位置式;窄闲聊从死重折计数剔除)。
+  payload 加 `residual_drops`+`fate_reasons`;env `HERMES_CONTEXTVIS_RESIDUAL`。**`apply_plan` 可见性放宽** `canApplyPlan = userEdited || systemSuggested`——
+  残值系统预填、用户可不编辑即一键落地(`gateDrops` 从 `effectiveFateMap` 早已带残值 drop,只改可见性+计数,未动 send)。
+  - **轮次版 chunk 级 drop 指示**(turn=单块,少量 drop 藏 fold 轮里):`aggregateCellFate` 返 `dropCount` → drop 优先命运沟 + 右下角红角标 `✕N` + tooltip 来由;量级走 tooltip。
+  - **决策:残值 drop vs 死重 fold 的精度分界**——`!mainline ≠ 残值`(含已完成有料支线〔fold〕/ 未完成并行任务 / focus 漂移误孤立的奠基轮),故不能 `!mainline→drop`;残值是结构/高精度窄信号才配 drop。
+  - **剩**:自动**护住主线中段轮**(语义反折 keep)、keep-as-pin、纠正 focus;残值留后(行区间精细取代 / 结构化 is_error / 主动路 / 森林态)。
 
 ---
 
