@@ -229,16 +229,16 @@ ContextVis 的**脑**:压缩闸门从"逢阈值就弹"升级为**自适应**—�
   web build+lint 干净。**实测**:opencode 主线 + 末尾闲聊支线顶阈值弹闸门 → 首尾死重也带暗橙命运沟、banner 标已完成支线数、悬浮显来由、编辑+应用计划落地。
 - **边界**:自动**护住主线中段轮**(语义反折 keep)、drop 残值信号、keep-as-pin、纠正 focus 留后。
 
-### 持久主题着色 · 同主题同色(前端注册表,零后端)
-「主题着色」/ 闸门着色时**同一主题每次换色**,用户不满。**根因**:`buildTopicColorMap` 按 topic 串**排序下标**分色 +
-每 render 从零重建无记忆 → 主题集合一变即**整排重洗**。
-- **痛点收缩(用户敲定)**:不要增量评估/启发式/常驻检测,**只要同主题跨多次着色同色**。检测频率、LLM 着色照旧。
-- **方案 = 前端持久「主题→色」注册表**(`assignTopicColors` 替换 `buildTopicColorMap`):首见分下一空闲色并记下、复用、**只增不洗**;
-  存 **localStorage 按 sessionId**(浮层折叠会重挂载 panel → 内存 ref 会丢,故必须持久化);**归一化键**(trim/小写/压空格)吸收 LLM 琐碎改名。
-  `colorData` 携 `colorMap`(抽 `buildColorData` 统一三处加载点),TurnBand 改用 `topicColors` prop。**零后端 / 零 Hermes / 零检测器改动**。
-- **决策痕迹**:否决旧 roadmap §6 的「启发式连通分量聚类(经验效果差)+ LLM 增量着色(不要求每轮检测,无需此基建)」。
-  残留:LLM **显著**改名仍可能跳色 → 留白,实测确有再加保守模糊匹配(token 重叠复用旧色)。
-- **验证**:web build+lint 干净。**待 dashboard 实测**:重复着色色一致 / 新轮不重洗老色 / 折叠浮层重挂载后仍一致(localStorage)/ 闸门与按钮同色。
+### 持久主题着色 + 按线程定色(前端,零后端)
+「主题着色」/ 闸门着色时 ① **同一主题每次换色**、② 压缩后**回退中性**、③ **粒度太细**(一条主线被 LLM 拆成 8 色),用户三连不满。
+- **① 同色 = 持久注册表**:`resolveCellColors` 取代 `buildTopicColorMap`(旧版按 topic 串**排序下标**分色 + 每 render 从零重建无记忆 → 一加键就整排重洗)。
+  色按**归一化字符串键**存 **localStorage `cv-topics:${sid}`**(浮层折叠会重挂载 panel → 内存 ref 会丢,必须持久化)、**只增不洗**。`colorData` 携 `cellColors`(抽 `buildColorData` 统一三处加载点)。
+- **② 压缩后不回退 = 显示放宽 + 结构变更重取**(踩坑修正):**根因不是 colorOn,是 `colorsFresh` 把显示钉死在精确 hv 相等**,而压缩后 hv **二次跳动**(`emit_post_compaction_snapshot` 不带 hv → 着色暂活;本轮末常规快照才把 hv 推到 N+1 → 失效回中性),"按 `compressionCount` 重取"只抓到第一拍 → 永久中性。
+  改为:**(a) 显示不再要求 colorsFresh**(着色一旦点亮就持续,跨普通新轮 / 压缩 hv 二次跳动都不回退;`colorsFresh` 仅留作按钮"重新着色"文案);**(b) 结构变更才重取**——仅当"**此前着过色的某 chunkId 在当前 chunks 中消失**"(= 压缩 / 删除 / 折叠重构了 id,**纯追加不会**)才重取一次贴合新历史。此判据比 compressionCount 更稳,且**顺带覆盖手动 drop/fold 与闸门 apply_plan**;追加零成本。粘滞 `setColorOn(true)`(闸门着色后)保留。
+- **③ 按线程定色(方案 A)**:色键 = `(mainline && focus) ? focus : topic` —— **主线轮全收 `focus` 一色、支线轮各自 topic 一色**;逐轮 topic 仅留作 tooltip 标签。逻辑收进 `resolveCellColors`(返回 chunkId→色),TurnBand 退为按 `cell.repId` 直查;透明度(mainline 饱和/offthread 压暗)不变。键变少 → 顺带解撞色。
+- **决策痕迹**:**① 色键用 `focus` 不用 `session_title`**——title agent(`agent/title_generator.py`,Hermes 自带、对应 opencode 的 session 主题总结)是**首轮一次定**的,而 ContextVis 初衷少切 session → 一个 session 内主题**必然漂移**,title 跟不上;`focus` 每次着色反映当下主线。否决旧 roadmap §6 的「启发式聚类(经验效果差)+ LLM 增量着色(不要求每轮检测,无需此基建)」。**② 两拍着色(闸门期按压缩前、落地后按压缩后)**——闸门挡在 `_compress_context` 前,压缩后 context 此刻不存在且模拟它有副作用;新 turn 几乎必活过压缩(保护尾窗),故闸门期按压缩前如实标成当下主线(正确且唯一无副作用),压缩后的视角由结构变更重取的第二拍补上。焦点漂移(如 "learning opencode internals"→"opencode agent loop")是**白盒该有的忠实**,非 bug。
+- **v1 局限(已接受)**:`mainline` 始终指**当下**主线 → 只收当下主线为一色;**已完成的旧主任务**退为非主线后仍按其逐轮 topic 上色(可能多色)。回溯把每条历史线程各收一色需"线程 id"(detector 新字段/聚类),留后。残留:focus/topic **显著**改名仍可能跳色(漂移时主线色会换)→ 留白(实测确碍眼再加保守模糊匹配,token 重叠复用旧色)。
+- **验证**:web build+lint 干净;**dashboard 实测通过**(用户截图:压缩 ×1/×2 均保持着色、opencode 全程一色 + tarot 单独色、压缩后焦点漂移如实跟随)。
 
 ---
 

@@ -14,7 +14,7 @@
 
 import { Card } from "@nous-research/ui/ui/components/card";
 import { ChevronUp } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { formatTokenCount } from "@/lib/format";
 import { squarify } from "@/lib/contextvis/treemap";
@@ -57,7 +57,6 @@ const TOPIC_PALETTE = [
   "#d98c5f", "#5fa8a0", "#8b7fd4", "#6fae7a",
   "#c97b9c", "#7d9cc4", "#c0a85f", "#9c7bc9",
 ];
-
 type ChunkTopicMap = RegimeColors["chunk_topics"];
 
 /** 主题键归一化:吸收 LLM 对同一主题的琐碎改名差异(trim / 小写 / 压空格)。 */
@@ -66,41 +65,45 @@ function normalizeTopic(t: string): string {
 }
 
 /**
- * 持久「主题→色」注册表:**只增不洗**——首次见某主题分下一个空闲色并记下,以后复用,
- * 永不重排(根治旧版"排序下标法"一加新主题就整排重洗 + 每次从零重建无记忆)。
+ * 按**线程**给每个 chunk 定色,返回 **chunkId → color**。色键 = `(mainline && focus) ? focus : topic`:
+ * **主线轮全部收 focus 一色**(粗、稳),**支线轮各自 topic 一色**;逐轮 topic 仅留作标签(tooltip)。
+ * 颜色经持久注册表分配——**只增不洗**:首见某色键分下一个空闲色并记下、以后复用、永不重排
+ * (根治旧版"排序下标法"一加键就整排重洗 + 每次从零重建无记忆)。
  *
- * 存 localStorage 按 sessionId(浮层折叠/展开会重挂载 panel,内存 ref 会丢 → 必须持久化;
- * 顺带扛页面重载)。归一化键吸收 LLM 改名。返回 **原始 topic 串 → color**(供按 `ct.topic` 原串查)。
+ * 注册表存 localStorage 按 sessionId(浮层折叠/展开会重挂载 panel,内存 ref 会丢 → 必须持久化;
+ * 顺带扛页面重载),按**归一化字符串键**(focus / topic)存色,吸收 LLM 琐碎改名。
+ * `focus` 空(启发式回退)时主线轮回退按 topic 上色(= 旧行为,不退化为无色)。
  * localStorage 失败(隐私模式/配额)→ 退化为本次内存分配(仍比旧版稳)。
  */
-function assignTopicColors(
+function resolveCellColors(
   ct: ChunkTopicMap,
+  focus: string,
   sessionId: string | undefined,
 ): Record<string, string> {
-  const key = sessionId ? `cv-topics:${sessionId}` : "";
+  const storeKey = sessionId ? `cv-topics:${sessionId}` : "";
   let reg: Record<string, string> = {};
-  if (key) {
+  if (storeKey) {
     try {
-      reg = JSON.parse(localStorage.getItem(key) || "{}") || {};
+      reg = JSON.parse(localStorage.getItem(storeKey) || "{}") || {};
     } catch {
       reg = {};
     }
   }
   const out: Record<string, string> = {};
   let dirty = false;
-  for (const v of Object.values(ct)) {
-    const topic = v.topic;
-    if (!topic) continue;
-    const norm = normalizeTopic(topic);
+  for (const [chunkId, v] of Object.entries(ct)) {
+    const colorKey = v.mainline && focus ? focus : v.topic;
+    if (!colorKey) continue; // 无 focus 且无 topic → 该格中性
+    const norm = normalizeTopic(colorKey);
     if (!reg[norm]) {
       reg[norm] = TOPIC_PALETTE[Object.keys(reg).length % TOPIC_PALETTE.length];
       dirty = true;
     }
-    out[topic] = reg[norm];
+    out[chunkId] = reg[norm];
   }
-  if (dirty && key) {
+  if (dirty && storeKey) {
     try {
-      localStorage.setItem(key, JSON.stringify(reg));
+      localStorage.setItem(storeKey, JSON.stringify(reg));
     } catch {
       /* 配额/隐私模式:退化为本次内存分配,out 已填好 */
     }
@@ -120,7 +123,7 @@ function buildColorData(
     regime: r.regime,
     focus: r.focus,
     engine: r.engine,
-    colorMap: assignTopicColors(r.chunk_topics, sid),
+    cellColors: resolveCellColors(r.chunk_topics, r.focus, sid),
   };
 }
 /** turn 格最小高度(保证极小轮仍可点;轻微破「高∝token」严格比例,见 doc §10)。 */
@@ -403,7 +406,7 @@ function TurnBand({
   selected,
   onSelect,
   chunkTopics,
-  topicColors,
+  cellColors,
   onActivateTurn,
   fateMap,
   gateActive = false,
@@ -412,10 +415,10 @@ function TurnBand({
   mode: TreemapMode;
   selected: string | null;
   onSelect: (id: string | null) => void;
-  /** 第二刀主题着色:chunkId → {topic, mainline};null=未着色(中性结构)。 */
+  /** 第二刀主题着色:chunkId → {topic, mainline};null=未着色(中性结构)。透明度/标签用它。 */
   chunkTopics: ChunkTopicMap | null;
-  /** 持久注册表解析出的 主题→色(原始 topic 串);null=未着色。同主题跨多次着色稳定同色。 */
-  topicColors: Record<string, string> | null;
+  /** 按线程定色的 chunkId→色(主线收 focus 一色 / 支线按 topic);null=未着色。持久、稳定同色。 */
+  cellColors: Record<string, string> | null;
   /** 第三刀:点对话轮 → 把 TUI 滚到该轮(底座/折叠块无锚点,不触发)。 */
   onActivateTurn?: (turn: number) => void;
   /** 第四刀:命运叠加(平时=用户标记;闸门时=systemFate 碰撞高亮)。逐格聚合成员命运。 */
@@ -522,18 +525,20 @@ function TurnBand({
       {laid.map(({ cell, y, h }) => {
         const isSel = selected !== null && cell.chunkIds.includes(selected);
         const showLabel = h > 18;
-        // 主题着色:对话轮(非底座/折叠)按 topic 取色;mainline 饱和、offthread 压暗。
+        // 主题着色:对话轮(非底座/折叠)按线程取色(主线收 focus 一色 / 支线按 topic);
+        // mainline 饱和、offthread 压暗(透明度仍读 ct)。
         const ct =
           chunkTopics && !cell.isBase && !cell.isFolded
             ? chunkTopics[cell.repId]
             : undefined;
-        const topicColor = ct && ct.topic ? topicColors?.[ct.topic] : undefined;
+        const cellColor =
+          !cell.isBase && !cell.isFolded ? cellColors?.[cell.repId] : undefined;
         const offthread = ct ? !ct.mainline : false;
         const fill = cell.isFolded
           ? TURN_FOLD_COLOR
           : cell.isBase
             ? TURN_BASE_COLOR
-            : topicColor ?? TURN_CELL_COLOR;
+            : cellColor ?? TURN_CELL_COLOR;
         const baseOpacity = cell.isFolded
           ? 0.55
           : offthread
@@ -799,8 +804,8 @@ export function ContextVisPanel({
     regime: string;
     focus: string;
     engine: string;
-    /** 持久注册表解析出的 主题→色(原始 topic 串);TurnBand 直接查,不再排序下标分色。 */
-    colorMap: Record<string, string>;
+    /** 按线程定色后的 chunkId→色(主线收 focus 一色 / 支线按 topic);TurnBand 按 cell.repId 直查。 */
+    cellColors: Record<string, string>;
   } | null>(null);
   // 阶段 3「应用」本地状态:确认/进行中、上次释放量(供撤销)、错误。
   // action 原子化:一次只 drop 或只 fold,applyKind 记当前确认/进行中的动作。
@@ -981,14 +986,14 @@ export function ContextVisPanel({
     };
   }, [sid]);
 
-  // 着色新鲜度:数据的 hv 与当前一致才有效(snapshot 推进 → 自动失效,band 回中性)。
-  // 闸门激活时**强制着色**(无须手点):压缩前的脑(assess)就是着色的脑,把关时
-  // 直接带上"主线/支线"语义画面,理解"为什么问我"。见 regime.md / turn-band.md §4。
+  // 着色新鲜度:仅用于按钮文案(hv 推进 → 提示"重新着色"可纳入最新轮);**不再门控显示**。
+  // 显示一旦着色就**持续**(跨普通新轮/压缩后的 hv 二次跳动都不回退);chunkId 重构(压缩/删/折)
+  // 由下方"结构变更重取"effect 兜底贴合新历史。见 turn-band.md §4 / roadmap §6。
   const colorsFresh = !!colorData && colorData.hv === snapshot.historyVersion;
   const wantColor = colorOn || gateActive;
-  const activeTopics = wantColor && colorsFresh ? colorData!.topics : null;
-  const activeColorMap = wantColor && colorsFresh ? colorData!.colorMap : null;
-  const activeMeta = wantColor && colorsFresh ? colorData : null;
+  const activeTopics = wantColor && colorData ? colorData.topics : null;
+  const activeCellColors = wantColor && colorData ? colorData.cellColors : null;
+  const activeMeta = wantColor && colorData ? colorData : null;
 
   const loadColors = async () => {
     if (!sid) return;
@@ -1020,14 +1025,14 @@ export function ContextVisPanel({
     };
   }, [gateActive, sid, snapshot.historyVersion]);
 
-  // 压缩后自动重取着色:压缩重写历史(chunkId 变)→ colorsFresh 失效会打回中性。仅在
-  // **压缩次数增加**时重取一次(非每轮,无逐轮成本);注册表保证重取的颜色与闸门时一致。
-  const prevCompRef = useRef(snapshot.compressionCount ?? 0);
+  // 结构变更自动重取着色:仅当**此前着过色的某个 chunkId 在当前 chunks 中消失**(= 压缩 / 删除 /
+  // 折叠重构了 chunkId,**纯追加新轮不会**)才重取一次,贴合新历史。追加 → 旧 id 仍在 → 不取(零逐轮成本)。
+  // 这比"按压缩次数"更稳:压缩后 hv 会二次跳动,而结构判据只认 chunkId 实际变化。注册表保证重取颜色一致。
   useEffect(() => {
-    const cc = snapshot.compressionCount ?? 0;
-    const grew = cc > prevCompRef.current;
-    prevCompRef.current = cc;
-    if (!grew || !colorOn || !sid) return;
+    if (!colorOn || !sid || !colorData) return;
+    const currentIds = new Set(snapshot.chunks.map((c) => c.id));
+    const structural = Object.keys(colorData.topics).some((id) => !currentIds.has(id));
+    if (!structural) return;
     let cancelled = false;
     fetchRegimeColors(sid)
       .then((r) => {
@@ -1038,7 +1043,7 @@ export function ContextVisPanel({
     return () => {
       cancelled = true;
     };
-  }, [snapshot.compressionCount, colorOn, sid, snapshot.historyVersion]);
+  }, [snapshot.chunks, colorData, colorOn, sid, snapshot.historyVersion]);
 
   const toggleColor = () => {
     if (colorOn && colorsFresh) {
@@ -1432,7 +1437,7 @@ export function ContextVisPanel({
                 selected={selected}
                 onSelect={onSelect}
                 chunkTopics={activeTopics}
-                topicColors={activeColorMap}
+                cellColors={activeCellColors}
                 onActivateTurn={onActivateTurn}
                 fateMap={effectiveFateMap}
                 gateActive={gateActive}
