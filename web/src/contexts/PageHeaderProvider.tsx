@@ -58,6 +58,9 @@ export function PageHeaderProvider({
             "bg-background-base/40 backdrop-blur-sm",
             // Mobile stacks title + toolbar — fixed h-14 clips content; desktop stays one row.
             "min-h-0 overflow-x-hidden overflow-y-visible py-3 sm:h-14 sm:min-h-[3.5rem] sm:overflow-hidden sm:py-0",
+            // ContextVis 实验:桌面聊天页隐藏顶栏「Chat」,给 TUI + 面板更多纵向空间。
+            // 移动端保留——窄屏时该栏的 end 槽托管「打开面板」开关。
+            isChatRoute && "lg:hidden",
           )}
           role="banner"
         >

@@ -961,8 +961,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         <div
           className={cn(
             "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg",
-            // ContextVis 实验布局:TUI 占左 60%,右 40% 留给 inspector(grow 3:2,自动扣 gap)。
-            "lg:basis-0 lg:grow-[3]",
+            // ContextVis 实验布局:TUI 占左 1/3,右 2/3 留给 inspector(grow 1:2,自动扣 gap)。
+            "lg:basis-0 lg:grow",
             "p-2 sm:p-3",
           )}
           style={{
@@ -1016,7 +1016,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             id="chat-side-panel"
             role="complementary"
             aria-label={modelToolsLabel}
-            // ContextVis 实验布局:inspector 占右 40%(与 TUI 60% 按 grow 3:2 分)。
+            // ContextVis 实验布局:inspector 占右 2/3(与 TUI 1/3 按 grow 1:2 分)。
             className="flex min-h-0 flex-col overflow-hidden lg:h-full lg:min-w-0 lg:basis-0 lg:grow-[2]"
           >
             <div className="min-h-0 flex-1 overflow-hidden">
