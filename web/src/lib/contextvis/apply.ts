@@ -107,6 +107,32 @@ export interface RegimeColors {
     string,
     { topic: string; mainline: boolean; done?: boolean }
   >;
+  /** v2 引用图(层① 工具溯源边):read 连其前最近一次同路径 write。后端可能不带(旧版)→ 可选。 */
+  reference_graph?: ReferenceGraph;
+}
+
+/** v2 引用图。层① = 工具溯源(write→read 同路径,有向、高精度);后续叠层②文字/层③LLM。 */
+export interface ReferenceEdge {
+  src: string | null; // 源 chunkId(messageIndex 解析不到为 null)
+  dst: string | null; // 目标 chunkId
+  src_mi: number; // 源 messageIndex
+  dst_mi: number; // 目标 messageIndex
+  kind: string; // "tool"(层①) | 后续 "lexical" 等
+  rel?: string; // "read"(写后读=数据流) | "revision"(写后写=修订链)
+  via: string; // 这条边因何成立(如文件路径)——守不变量 #6:每条边可解释
+  weight: number;
+}
+export interface ReferenceArtifact {
+  key: string; // 产物标识(如文件路径)
+  kind: string; // "file" 等
+  messageIndices: number[];
+  chunks: string[];
+  n: number; // 被几条消息触及
+}
+export interface ReferenceGraph {
+  edges: ReferenceEdge[];
+  artifacts: ReferenceArtifact[];
+  layers: string[]; // 已建的层,如 ["tool"]
 }
 
 /**

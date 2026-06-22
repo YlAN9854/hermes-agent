@@ -4808,6 +4808,7 @@ def _(rid, params: dict) -> dict:
     try:
         from agent.contextvis.regime import get_regime_detector, chunk_topic_map
         from agent.contextvis.chunking import build_snapshot_chunks
+        from agent.contextvis.reference_graph import reference_graph
 
         agent = session["agent"]
         with session["history_lock"]:
@@ -4818,12 +4819,20 @@ def _(rid, params: dict) -> dict:
         # 逐 chunk topic/主线/完成态(done)——与压缩闸门死重建议共用同一映射,保证选择一致。
         chunk_topics = chunk_topic_map(history, a, payload.get("chunks", []))
 
+        # 引用图(v2 地基):层① 工具溯源边 write→read,与 chunk_topics 同源 chunks、零 LLM。
+        # 非致命:建图失败也不能拖垮着色,退回空图。见 agent/contextvis/reference_graph.py。
+        try:
+            ref_graph = reference_graph(history, payload.get("chunks", []))
+        except Exception:
+            ref_graph = {"edges": [], "artifacts": [], "layers": []}
+
         return _ok(rid, {
             "regime": a.regime,
             "focus": getattr(a, "focus", ""),
             "engine": "llm" if a.reason.startswith("llm") else "heuristic",
             "reason": a.reason,
             "chunk_topics": chunk_topics,
+            "reference_graph": ref_graph,
         })
     except Exception as e:
         return _err(rid, 5005, str(e))

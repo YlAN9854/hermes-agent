@@ -34,6 +34,7 @@ import {
   fetchRegimeColors,
   undoApply,
   type RegimeColors,
+  type ReferenceGraph,
 } from "@/lib/contextvis/apply";
 import { respondCompaction, type CompactionChoice } from "@/lib/contextvis/gate";
 import type {
@@ -124,6 +125,7 @@ function buildColorData(
     focus: r.focus,
     engine: r.engine,
     cellColors: resolveCellColors(r.chunk_topics, r.focus, sid),
+    referenceGraph: r.reference_graph ?? null, // v2 引用图(层① 工具溯源边);增量③消费
   };
 }
 /** turn 格最小高度(保证极小轮仍可点;轻微破「高∝token」严格比例,见 doc §10)。 */
@@ -196,6 +198,8 @@ const BANDS: { type: ChunkType; color: string }[] = [
 // 带来的文字横向拉伸。
 const VB_W = 408;
 const VB_H = 320;
+/** 引用图弧叠加:在 turn 带右侧预留一窄沟画弧(viewBox 单位),不挤占 turn 格。 */
+const ARC_GUTTER = 22;
 const LABEL_FS = 12;
 const TOKEN_FS = 10;
 
@@ -420,6 +424,7 @@ function TurnBand({
   fateMap,
   fateReasons,
   gateActive = false,
+  referenceGraph = null,
 }: {
   snapshot: ContextSnapshot;
   mode: TreemapMode;
@@ -437,6 +442,8 @@ function TurnBand({
   fateReasons?: Record<string, string>;
   /** 死重喂闸门(点 3):闸门激活时,fold 格悬浮标来由(已完成支线 / 位置式中段)。 */
   gateActive?: boolean;
+  /** v2 引用图(层① 工具溯源边):在右侧沟画弧;选中轮时上/下游高亮。null=不画。 */
+  referenceGraph?: ReferenceGraph | null;
 }) {
   const { percent, budget, compactAt } = snapshot;
   const cells = buildTurnCells(snapshot);
@@ -481,7 +488,7 @@ function TurnBand({
 
   return (
     <svg
-      viewBox={`0 0 ${VB_W} ${VB_H}`}
+      viewBox={`0 0 ${VB_W + ARC_GUTTER} ${VB_H}`}
       preserveAspectRatio="none"
       className="h-[300px] w-full"
       role="img"
@@ -720,6 +727,57 @@ function TurnBand({
           </g>
         );
       })}
+      {referenceGraph && referenceGraph.edges.length > 0 && (() => {
+        // 引用图弧叠加(层① 工具溯源):边两端 chunkId → 所在 turn 格中心 → 右沟画弧。
+        // 同源 chunks(后端 reference_graph 与 band 都来自 build_snapshot_chunks)→ id 一致。
+        const idToLaid = new Map<string, { cell: TurnCell; y: number; h: number }>();
+        for (const l of laid) for (const id of l.cell.chunkIds) idToLaid.set(id, l);
+        // 兜底:边端点 chunkId 对不上时(理论同源应一致),用 messageIndex → chunk → cell 再解析。
+        const miToLaid = new Map<number, { cell: TurnCell; y: number; h: number }>();
+        for (const c of snapshot.chunks)
+          for (const r of c.sourceRefs)
+            if (typeof r.messageIndex === "number") {
+              const l = idToLaid.get(c.id);
+              if (l) miToLaid.set(r.messageIndex, l);
+            }
+        const sel = selected ? idToLaid.get(selected) ?? null : null;
+        return (
+          <g>
+            {referenceGraph.edges.map((e, i) => {
+              const s = (e.src ? idToLaid.get(e.src) : undefined) ?? miToLaid.get(e.src_mi);
+              const d = (e.dst ? idToLaid.get(e.dst) : undefined) ?? miToLaid.get(e.dst_mi);
+              if (!s || !d || s === d) return null;
+              const y1 = s.y + s.h / 2;
+              const y2 = d.y + d.h / 2;
+              // 选中分类:src=本轮 → 下游(谁依赖我/爆炸半径);dst=本轮 → 上游(我依赖谁/provenance)。
+              const downstream = !!sel && s === sel;
+              const upstream = !!sel && d === sel;
+              const touches = downstream || upstream;
+              const cls = !sel
+                ? "stroke-current/20"
+                : downstream
+                  ? "stroke-rose-500"
+                  : upstream
+                    ? "stroke-sky-500"
+                    : "stroke-current/10";
+              return (
+                <path
+                  key={`arc-${i}`}
+                  d={`M ${VB_W} ${y1} Q ${VB_W + ARC_GUTTER} ${(y1 + y2) / 2} ${VB_W} ${y2}`}
+                  fill="none"
+                  className={cls}
+                  strokeWidth={touches ? 1.75 : 1}
+                  vectorEffect="non-scaling-stroke"
+                >
+                  <title>
+                    {`${e.via}${e.rel === "revision" ? "(修订)" : "(读取)"}${downstream ? " — 下游:被本轮产物驱动" : upstream ? " — 上游:本轮依赖的产物" : ""}`}
+                  </title>
+                </path>
+              );
+            })}
+          </g>
+        );
+      })()}
     </svg>
   );
 }
@@ -850,6 +908,8 @@ export function ContextVisPanel({
     engine: string;
     /** 按线程定色后的 chunkId→色(主线收 focus 一色 / 支线按 topic);TurnBand 按 cell.repId 直查。 */
     cellColors: Record<string, string>;
+    /** v2 引用图(层① 工具溯源边);后端旧版/建图失败 → null。增量③ TurnBand 弧叠加消费。 */
+    referenceGraph: ReferenceGraph | null;
   } | null>(null);
   // 阶段 3「应用」本地状态:确认/进行中、上次释放量(供撤销)、错误。
   // action 原子化:一次只 drop 或只 fold,applyKind 记当前确认/进行中的动作。
@@ -1046,6 +1106,8 @@ export function ContextVisPanel({
   const activeTopics = wantColor && colorData ? colorData.topics : null;
   const activeCellColors = wantColor && colorData ? colorData.cellColors : null;
   const activeMeta = wantColor && colorData ? colorData : null;
+  // 引用图随着色一并就绪(同一 regime_colors 往返);wantColor 关 → 不画弧。
+  const activeGraph = wantColor && colorData ? colorData.referenceGraph : null;
   // 着色是否已过期 = 此前着色的某 chunkId 在当前 chunks 中消失(= 压缩/删/折重构了 id)。
   // 与下方"结构变更重取"effect **同判据**:为真即后台正按新历史重检测着色(此刻仍显示旧色),
   // 据此给用户一个"主题检测中"的提示——纯 render 派生,无 effect 置态,lint 安全。
@@ -1522,6 +1584,7 @@ export function ContextVisPanel({
                 fateMap={effectiveFateMap}
                 fateReasons={gateActive ? pending?.fateReasons : undefined}
                 gateActive={gateActive}
+                referenceGraph={activeGraph}
               />
             ) : (
               <Treemap
