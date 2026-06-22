@@ -728,11 +728,10 @@ function TurnBand({
         );
       })}
       {referenceGraph && referenceGraph.edges.length > 0 && (() => {
-        // 引用图弧叠加(层① 工具溯源):边两端 chunkId → 所在 turn 格中心 → 右沟画弧。
-        // 同源 chunks(后端 reference_graph 与 band 都来自 build_snapshot_chunks)→ id 一致。
+        // 引用图弧叠加:边两端 chunkId → 所在 turn 格中心 → 右沟画弧。同源 chunks(后端
+        // reference_graph 与 band 都来自 build_snapshot_chunks)→ id 一致;兜底用 messageIndex 再解析。
         const idToLaid = new Map<string, { cell: TurnCell; y: number; h: number }>();
         for (const l of laid) for (const id of l.cell.chunkIds) idToLaid.set(id, l);
-        // 兜底:边端点 chunkId 对不上时(理论同源应一致),用 messageIndex → chunk → cell 再解析。
         const miToLaid = new Map<number, { cell: TurnCell; y: number; h: number }>();
         for (const c of snapshot.chunks)
           for (const r of c.sourceRefs)
@@ -740,13 +739,33 @@ function TurnBand({
               const l = idToLaid.get(c.id);
               if (l) miToLaid.set(r.messageIndex, l);
             }
+        const resolve = (id: string | null, mi: number) =>
+          (id ? idToLaid.get(id) : undefined) ?? miToLaid.get(mi);
         const sel = selected ? idToLaid.get(selected) ?? null : null;
+        // 工具边(铁证)已连的 cell 对:文字边遇同对跳过,不重复画淡线。
+        const pairKey = (
+          a: { cell: TurnCell; y: number; h: number },
+          b: { cell: TurnCell; y: number; h: number },
+        ) => {
+          const ai = laid.indexOf(a);
+          const bi = laid.indexOf(b);
+          return ai < bi ? `${ai}-${bi}` : `${bi}-${ai}`;
+        };
+        const toolPairs = new Set<string>();
+        for (const e of referenceGraph.edges) {
+          if (e.kind !== "tool") continue;
+          const s = resolve(e.src, e.src_mi);
+          const d = resolve(e.dst, e.dst_mi);
+          if (s && d && s !== d) toolPairs.add(pairKey(s, d));
+        }
         return (
           <g>
             {referenceGraph.edges.map((e, i) => {
-              const s = (e.src ? idToLaid.get(e.src) : undefined) ?? miToLaid.get(e.src_mi);
-              const d = (e.dst ? idToLaid.get(e.dst) : undefined) ?? miToLaid.get(e.dst_mi);
+              const s = resolve(e.src, e.src_mi);
+              const d = resolve(e.dst, e.dst_mi);
               if (!s || !d || s === d) return null;
+              const isLex = e.kind === "lexical";
+              if (isLex && toolPairs.has(pairKey(s, d))) return null; // 去重:铁证优先于文字线索
               const y1 = s.y + s.h / 2;
               const y2 = d.y + d.h / 2;
               // 选中分类:src=本轮 → 下游(谁依赖我/爆炸半径);dst=本轮 → 上游(我依赖谁/provenance)。
@@ -754,7 +773,9 @@ function TurnBand({
               const upstream = !!sel && d === sel;
               const touches = downstream || upstream;
               const cls = !sel
-                ? "stroke-current/20"
+                ? isLex
+                  ? "stroke-current/10" // 文字线索:更淡
+                  : "stroke-current/20" // 工具铁证:更实
                 : downstream
                   ? "stroke-rose-500"
                   : upstream
@@ -766,11 +787,12 @@ function TurnBand({
                   d={`M ${VB_W} ${y1} Q ${VB_W + ARC_GUTTER} ${(y1 + y2) / 2} ${VB_W} ${y2}`}
                   fill="none"
                   className={cls}
-                  strokeWidth={touches ? 1.75 : 1}
+                  strokeWidth={touches ? (isLex ? 1.25 : 1.75) : isLex ? 0.75 : 1}
+                  strokeDasharray={isLex ? "3 2" : undefined} // 文字线索虚线、工具铁证实线
                   vectorEffect="non-scaling-stroke"
                 >
                   <title>
-                    {`${e.via}${e.rel === "revision" ? "(修订)" : "(读取)"}${downstream ? " — 下游:被本轮产物驱动" : upstream ? " — 上游:本轮依赖的产物" : ""}`}
+                    {`${e.via}${isLex ? "(共现)" : e.rel === "revision" ? "(修订)" : "(读取)"}${downstream ? " — 下游" : upstream ? " — 上游" : ""}`}
                   </title>
                 </path>
               );
@@ -1570,6 +1592,38 @@ export function ContextVisPanel({
           )}
           {suggestNote && (
             <div className="text-[10px] text-text-tertiary">{suggestNote}</div>
+          )}
+          {/* 引用图图例:白盒要求每条连线可解释(#6)。常驻说明实线/虚线/红蓝的含义,
+              具体共享来由(文件/token)悬停弧看。仅 turn 带 + 有边时显示。 */}
+          {view === "turn" && activeGraph && activeGraph.edges.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-tertiary">
+              <span className="text-text-secondary">引用图</span>
+              <span className="inline-flex items-center gap-1">
+                <svg width={16} height={6} aria-hidden="true">
+                  <line x1={1} y1={3} x2={15} y2={3} className="stroke-current/70" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                </svg>
+                工具(写→读/修订)
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <svg width={16} height={6} aria-hidden="true">
+                  <line x1={1} y1={3} x2={15} y2={3} className="stroke-current/70" strokeWidth={1.5} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" />
+                </svg>
+                文字共现
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <svg width={16} height={6} aria-hidden="true">
+                  <line x1={1} y1={3} x2={15} y2={3} className="stroke-rose-500" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                </svg>
+                下游
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <svg width={16} height={6} aria-hidden="true">
+                  <line x1={1} y1={3} x2={15} y2={3} className="stroke-sky-500" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+                </svg>
+                上游
+              </span>
+              <span className="text-text-tertiary/70">选中轮高亮 · 悬停弧看共享来由</span>
+            </div>
           )}
           {hasChunks &&
             (view === "turn" ? (

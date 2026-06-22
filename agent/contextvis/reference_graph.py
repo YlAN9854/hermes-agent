@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List
 
 from agent.contextvis.chunking import (
@@ -21,6 +22,7 @@ from agent.contextvis.chunking import (
     _path_from_args,
     _tool_call_index,
 )
+from agent.contextvis.regime import _salient_tokens, _segment_turns
 
 try:
     from agent.tool_result_classification import FILE_MUTATING_TOOL_NAMES as _WRITE_TOOLS
@@ -28,6 +30,19 @@ except Exception:  # pragma: no cover - 防御:分类模块缺失时退回已知
     _WRITE_TOOLS = frozenset({"write_file", "patch"})
 
 _READ_TOOLS = frozenset(_FILE_TOOLS)  # {"read_file"}
+
+
+def _lex_enabled() -> bool:
+    """层② 文字共现总开关(env HERMES_CONTEXTVIS_LEX,默认开)。"""
+    return os.environ.get("HERMES_CONTEXTVIS_LEX", "1") not in ("0", "false", "False", "")
+
+
+def _lex_hubfrac() -> float:
+    """hub 抑制:token 出现轮数 > n_turns*frac → 视作环境词、不连边(默认 0.6,env 可调)。"""
+    try:
+        return float(os.environ.get("HERMES_CONTEXTVIS_LEX_HUBFRAC", "0.6"))
+    except (TypeError, ValueError):
+        return 0.6
 
 
 def _mi_to_chunk(chunks: List[Dict[str, Any]]) -> Dict[int, str]:
@@ -41,6 +56,70 @@ def _mi_to_chunk(chunks: List[Dict[str, Any]]) -> Dict[int, str]:
             if isinstance(ref, dict) and isinstance(ref.get("messageIndex"), int):
                 out.setdefault(ref["messageIndex"], cid)
     return out
+
+
+def _lexical_edges(
+    messages: List[Dict[str, Any]],
+    mi2c: Dict[int, str],
+) -> List[Dict[str, Any]]:
+    """层② 文字共现边(复用 regime 的 salient 抽取,= 被扔掉的 token_turns 宝藏)。
+
+    防毛球三件套:**链不成团**(token 出现的轮按序相邻连,不连成全团)、**特异度权重**
+    (边权 = Σ 1/df,罕见 token 强)、**hub 抑制**(df > n_turns*frac 的环境词不连边)。
+    方向按时间(早→晚,启发式)。端点取每轮首个 user 消息的 messageIndex → mi2c 解析回
+    chunk(用 messageIndex 而非 turn 号,规避 regime 0-indexed vs chunking 1-indexed)。
+    """
+    turn_of, n_turns, boiler, raw = _segment_turns(messages)
+    if n_turns <= 1:
+        return []
+
+    turn_salient: List[set] = [set() for _ in range(n_turns)]
+    turn_first_mi: Dict[int, int] = {}
+    for i, msg in enumerate(messages):
+        if boiler[i] or msg.get("role") == "system":
+            continue  # 系统底座不算对话轮,跳过免造 turn0 假 hub
+        t = turn_of[i]
+        turn_salient[t] |= _salient_tokens(raw[i])
+        if msg.get("role") == "user" and t not in turn_first_mi:
+            turn_first_mi[t] = i
+
+    token_turns: Dict[str, set] = {}
+    for t, s in enumerate(turn_salient):
+        for tok in s:
+            token_turns.setdefault(tok, set()).add(t)
+
+    hub_cap = max(3, round(n_turns * _lex_hubfrac()))
+    pair_weight: Dict[tuple, float] = {}
+    pair_tokens: Dict[tuple, set] = {}
+    for tok, ts in token_turns.items():
+        df = len(ts)
+        if df < 2 or df > hub_cap:
+            continue  # df<2 不复现;df>hub_cap 环境词
+        w = 1.0 / df
+        order = sorted(ts)
+        for a, b in zip(order, order[1:]):  # 链:相邻出现轮,不连成团(防毛球)
+            key = (a, b)
+            pair_weight[key] = pair_weight.get(key, 0.0) + w
+            pair_tokens.setdefault(key, set()).add(tok)
+
+    edges: List[Dict[str, Any]] = []
+    for (a, b), w in pair_weight.items():
+        ra, rb = turn_first_mi.get(a), turn_first_mi.get(b)
+        if ra is None or rb is None:
+            continue
+        toks = sorted(pair_tokens[(a, b)], key=lambda x: len(token_turns[x]))  # 最罕见在前
+        via = toks[0] + (f" +{len(toks) - 1}" if len(toks) > 1 else "")
+        edges.append({
+            "src": mi2c.get(ra),
+            "dst": mi2c.get(rb),
+            "src_mi": ra,
+            "dst_mi": rb,
+            "kind": "lexical",
+            "rel": "cooccur",
+            "via": via,
+            "weight": round(w, 3),
+        })
+    return edges
 
 
 def reference_graph(
@@ -113,4 +192,9 @@ def reference_graph(
             "n": len(uniq),
         })
 
-    return {"edges": edges, "artifacts": artifacts, "layers": ["tool"]}
+    layers = ["tool"]
+    if _lex_enabled():
+        edges.extend(_lexical_edges(messages, mi2c))
+        layers.append("lexical")
+
+    return {"edges": edges, "artifacts": artifacts, "layers": layers}
