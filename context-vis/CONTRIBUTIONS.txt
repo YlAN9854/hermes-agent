@@ -1,0 +1,42 @@
+CONTEXTvis — Contributions (Paper-Style)
+=========================================
+
+This paper makes the following contributions:
+
+1.  **The Razor of Human Intervention.**  We formalize when human
+    intervention in context management is actually valuable: strictly
+    bounded by information structurally unavailable to the compressor
+    at decision time — future intent, external truth, and (conditionally)
+    user internal preferences with a memory verification gate.
+    Corollary: per-chunk fold/drop manipulation is low-value; leverage
+    concentrates in a few high-leverage operations.
+
+2.  **A Complete Operation Set (verb × placement).**  We identify and
+    implement two novel operations on top of the existing keep/fold/drop:
+    *add* (user as co-author, injecting machine-unreachable information)
+    and *invalidate* (mark content false without deleting, preserving
+    historical trace while revoking authority — impossible without
+    a citation graph revealing the blast radius).  We also extend
+    the placement axis to include system-prompt promotion, turning
+    the agent's "constitution" from read-only to writable.
+
+3.  **Impact-Aware Editing via the Citation Graph.**  We uncover that
+    the citation graph — already computed by the regime detector but
+    discarded — is exactly the structure that position-based compression
+    blindly approximates.  By rendering it as arc overlays on the turn
+    band, we enable impact-aware editing: every destructive operation
+    (drop/invalidate) shows its transitive blast radius before commit.
+    A single graph representation feeds all five operations (keep
+    recommendation via indegree, fold selection via connected components,
+    drop blast radius via out-edges, invalidation propagation via
+    transitive closure, orphan detection via zero out-degree).
+
+4.  **A Continuous Controller for Fold and a Measurable Efficiency
+    Metric.**  We replace the binary fold with a two-degree-of-freedom
+    steering wheel (angle = topic focus, radius = compression aggressiveness;
+    radius zero = semantic stitching, unifying fold and add as endpoints
+    of the same spectrum).  We further derive a testable metric —
+    *efficiency = user actions / irreducible bits injected* — that
+    quantifies how well a UI concentrates human effort on machine-
+    unknowable decisions rather than machine-knowable busywork
+    (locating, ranking, placing, stitching).
