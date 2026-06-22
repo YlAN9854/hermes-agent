@@ -32,7 +32,7 @@ import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 
 import { ChunkInspector } from "@/components/ChunkInspector";
-import { ContextVisOverlay } from "@/components/ContextVisOverlay";
+import { ContextVisPanel } from "@/components/ContextVisPanel";
 import { useContextSnapshot } from "@/lib/contextvis/adapter";
 import type { Fate, FateMap } from "@/lib/contextvis/plan";
 import { usePageHeader } from "@/contexts/usePageHeader";
@@ -961,8 +961,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         <div
           className={cn(
             "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg",
-            // ContextVis 实验布局:TUI 占左 1/3,右 2/3 留给 inspector(grow 1:2,自动扣 gap)。
-            "lg:basis-0 lg:grow",
+            // ContextVis 画布布局:TUI 占左 ~35%,右 ~65% 给 ContextVis 画布(grow 7:13,自动扣 gap)。
+            "lg:basis-0 lg:grow-7",
             "p-2 sm:p-3",
           )}
           style={{
@@ -975,15 +975,21 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             className="hermes-chat-xterm-host min-h-0 min-w-0 flex-1"
           />
 
-          <ContextVisOverlay
-            snapshot={contextSnapshot}
-            selected={selectedChunkId}
-            onSelect={setSelectedChunkId}
-            fateMap={fateMap}
-            onClearFates={() => setFateMap({})}
-            onActivateTurn={jumpToTurn}
-            onSetFates={setFates}
-          />
+          {/* 原文检视:选中 chunk 时临时叠加在 TUI 之上(可关,清选中即恢复 agent 可见)。 */}
+          {!narrow && selectedChunk && (
+            <div className="absolute inset-2 z-20 flex min-h-0 flex-col overflow-hidden rounded-lg border border-current/20 bg-background-base shadow-2xl sm:inset-3">
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <ChunkInspector
+                  chunk={selectedChunk}
+                  onClose={() => setSelectedChunkId(null)}
+                  turnChunks={turnChunks}
+                  onSelectChunk={setSelectedChunkId}
+                  fateMap={displayFateMap}
+                  onSetFates={setFates}
+                />
+              </div>
+            </div>
+          )}
 
           <Button
             ghost
@@ -1015,20 +1021,19 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
           <div
             id="chat-side-panel"
             role="complementary"
-            aria-label={modelToolsLabel}
-            // ContextVis 实验布局:inspector 占右 2/3(与 TUI 1/3 按 grow 1:2 分)。
-            className="flex min-h-0 flex-col overflow-hidden lg:h-full lg:min-w-0 lg:basis-0 lg:grow-[2]"
+            aria-label="ContextVis 上下文画布"
+            // ContextVis 画布布局:画布占右 ~65%(与 TUI ~35% 按 grow 7:13 分)。
+            className="flex min-h-0 flex-col overflow-hidden lg:h-full lg:min-w-0 lg:basis-0 lg:grow-13"
           >
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <ChunkInspector
-                chunk={selectedChunk}
-                onClose={() => setSelectedChunkId(null)}
-                turnChunks={turnChunks}
-                onSelectChunk={setSelectedChunkId}
-                fateMap={displayFateMap}
-                onSetFates={setFates}
-              />
-            </div>
+            <ContextVisPanel
+              snapshot={contextSnapshot}
+              selected={selectedChunkId}
+              onSelect={setSelectedChunkId}
+              fateMap={fateMap}
+              onClearFates={() => setFateMap({})}
+              onActivateTurn={jumpToTurn}
+              onSetFates={setFates}
+            />
           </div>
         )}
       </div>

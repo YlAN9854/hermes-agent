@@ -17,6 +17,7 @@ import { ChevronUp } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { formatTokenCount } from "@/lib/format";
+import { TurnCanvas } from "@/components/TurnCanvas";
 import { squarify } from "@/lib/contextvis/treemap";
 import { buildTurnCells, type TurnCell } from "@/lib/contextvis/turns";
 import {
@@ -194,12 +195,26 @@ const BANDS: { type: ChunkType; color: string }[] = [
   { type: "tool_result", color: "#d39a5c" },
 ];
 
+/** 类型→色 / 类型→中文标签(展开轮的子 chunk 子格复用类型版配色)。 */
+const TYPE_FILL: Record<string, string> = Object.fromEntries(
+  BANDS.map((b) => [b.type, b.color]),
+);
+const TYPE_LABEL: Record<string, string> = {
+  system: "系统",
+  tool_schema: "工具表",
+  history: "对话",
+  file: "文件",
+  tool_result: "工具结果",
+};
+
 // treemap 坐标系：viewBox 贴近浮层实际像素宽度，减少 preserveAspectRatio="none"
 // 带来的文字横向拉伸。
 const VB_W = 408;
 const VB_H = 320;
 /** 引用图弧叠加:在 turn 带右侧预留一窄沟画弧(viewBox 单位),不挤占 turn 格。 */
 const ARC_GUTTER = 22;
+/** Stage 2:轮次视图用 2D 画布(TurnCanvas);设 false 回退旧纵向带(TurnBand)。 */
+const USE_CANVAS = true;
 const LABEL_FS = 12;
 const TOKEN_FS = 10;
 
@@ -462,15 +477,70 @@ function TurnBand({
   // 绝不能丢掉"现在",这正是 resume + 多轮时第三轮在带里消失的根因)。格太多(n·保底 > fillH)
   // 时保底自动缩小到 fillH/n,保证仍全部可见(代价:极端时比例略失真,见 doc §10)。
   // for-of 而非 .map:避免在渲染期闭包里改累加量(react-hooks/immutability)。
+  // 路 A:选中轮就地展开——把该轮(≥2 个成员 chunk)撑高,内部按 chunk 细分(chunk 级粒度)。
+  const expandedCell =
+    selected
+      ? cells.find(
+          (c) =>
+            !c.isBase &&
+            !c.isFolded &&
+            c.chunkIds.length >= 2 &&
+            c.chunkIds.includes(selected),
+        ) ?? null
+      : null;
+  const EXPAND_H = 96; // 展开轮目标高度(viewBox 单位)
   const minH = Math.min(TURN_MIN_H, fillH / Math.max(1, cells.length));
-  const extra = Math.max(0, fillH - minH * cells.length);
+  const reserve = expandedCell ? Math.min(EXPAND_H, fillH * 0.7) : 0;
+  const otherCells = cells.filter((c) => c !== expandedCell);
+  const otherTokens = otherCells.reduce((s, c) => s + c.tokens, 0) || 1;
+  // 非展开格在 (fillH - reserve) 内按 token 占比分配(各自仍保底 minH);总和恒 = fillH,不丢"现在"。
+  const pool = Math.max(0, fillH - reserve - minH * otherCells.length);
   const laid: { cell: TurnCell; y: number; h: number }[] = [];
   let yCursor = 0;
   for (const cell of cells) {
-    const h = minH + (total > 0 ? (cell.tokens / total) * extra : 0);
+    const h =
+      cell === expandedCell ? reserve : minH + (cell.tokens / otherTokens) * pool;
     laid.push({ cell, y: yCursor, h });
     yCursor += h;
   }
+
+  // 展开轮的成员 chunk 子格布局([y,y+h] 内留顶部 header 给轮标签);记 chunkId→纵向中心(弧落子格)。
+  const chunkById = new Map<string, ContextChunk>(
+    snapshot.chunks.map((c) => [c.id, c] as [string, ContextChunk]),
+  );
+  const minMi = (c: ContextChunk) => {
+    let m = Infinity;
+    for (const r of c.sourceRefs)
+      if (typeof r.messageIndex === "number") m = Math.min(m, r.messageIndex);
+    return m;
+  };
+  const expandedSub: {
+    id: string;
+    y: number;
+    h: number;
+    type: ChunkType;
+    tokens: number;
+  }[] = [];
+  const exLaid = expandedCell ? laid.find((l) => l.cell === expandedCell) : null;
+  if (expandedCell && exLaid) {
+    const HEADER = 14;
+    const members = expandedCell.chunkIds
+      .map((id) => chunkById.get(id))
+      .filter((c): c is ContextChunk => !!c)
+      .sort((a, b) => minMi(a) - minMi(b));
+    const totTok = members.reduce((s, c) => s + Math.max(1, c.tokens), 0) || 1;
+    const avail = Math.max(0, exLaid.h - HEADER);
+    const subMin = Math.min(8, members.length ? avail / members.length : 0);
+    const subExtra = Math.max(0, avail - subMin * members.length);
+    let sy = exLaid.y + HEADER;
+    for (const c of members) {
+      const sh = subMin + (Math.max(1, c.tokens) / totTok) * subExtra;
+      expandedSub.push({ id: c.id, y: sy, h: sh, type: c.type, tokens: c.tokens });
+      sy += sh;
+    }
+  }
+  const chunkCenter = new Map<string, number>();
+  for (const s of expandedSub) chunkCenter.set(s.id, s.y + s.h / 2);
 
   // 占用模式:底部余量(headroom)+ 仅在余量区画 token 轴刻度 + compact 阈值线
   // (顶=0 token、底=budget;不让刻度线穿过上方的 turn 格)。
@@ -727,6 +797,41 @@ function TurnBand({
           </g>
         );
       })}
+      {/* 路 A:展开轮的子 chunk 子格(类型版配色),点子格 → 选中该 chunk(原文检视 + 弧落子格)。 */}
+      {expandedSub.length > 0 && (
+        <g>
+          {expandedSub.map((s) => {
+            const subSel = s.id === selected;
+            return (
+              <g key={`sub-${s.id}`}>
+                <rect
+                  x={6}
+                  y={s.y}
+                  width={VB_W - 8}
+                  height={Math.max(0, s.h - 0.5)}
+                  onClick={() => onSelect(subSel ? null : s.id)}
+                  className="cursor-pointer"
+                  fill={TYPE_FILL[s.type] ?? TURN_CELL_COLOR}
+                  fillOpacity={subSel ? 0.95 : 0.78}
+                  stroke={subSel ? "#ffffff" : "rgba(0,0,0,0.3)"}
+                  strokeWidth={subSel ? 1.5 : 0.5}
+                  vectorEffect="non-scaling-stroke"
+                />
+                {s.h > 9 && (
+                  <text
+                    x={10}
+                    y={s.y + s.h / 2 + 3}
+                    fontSize={TOKEN_FS}
+                    className="pointer-events-none fill-black/75"
+                  >
+                    {`${TYPE_LABEL[s.type] ?? s.type} · ${formatTokenCount(s.tokens)}`}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </g>
+      )}
       {referenceGraph && referenceGraph.edges.length > 0 && (() => {
         // 引用图弧叠加:边两端 chunkId → 所在 turn 格中心 → 右沟画弧。同源 chunks(后端
         // reference_graph 与 band 都来自 build_snapshot_chunks)→ id 一致;兜底用 messageIndex 再解析。
@@ -763,11 +868,13 @@ function TurnBand({
             {referenceGraph.edges.map((e, i) => {
               const s = resolve(e.src, e.src_mi);
               const d = resolve(e.dst, e.dst_mi);
-              if (!s || !d || s === d) return null;
+              if (!s || !d) return null;
               const isLex = e.kind === "lexical";
               if (isLex && toolPairs.has(pairKey(s, d))) return null; // 去重:铁证优先于文字线索
-              const y1 = s.y + s.h / 2;
-              const y2 = d.y + d.h / 2;
+              // 展开轮:端点落到具体子 chunk 的中心;否则落到所属 turn 格中心。
+              const y1 = chunkCenter.get(e.src ?? "") ?? s.y + s.h / 2;
+              const y2 = chunkCenter.get(e.dst ?? "") ?? d.y + d.h / 2;
+              if (y1 === y2) return null; // 同格未展开 / 重合 → 不画自环
               // 选中分类:src=本轮 → 下游(谁依赖我/爆炸半径);dst=本轮 → 上游(我依赖谁/provenance)。
               const downstream = !!sel && s === sel;
               const upstream = !!sel && d === sel;
@@ -1236,7 +1343,7 @@ export function ContextVisPanel({
   };
 
   return (
-    <Card className="flex flex-none flex-col gap-2 px-3 py-2">
+    <Card className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="text-display text-xs tracking-wider text-text-tertiary">context</div>
         <div className="flex items-center gap-2">
@@ -1625,21 +1732,34 @@ export function ContextVisPanel({
               <span className="text-text-tertiary/70">选中轮高亮 · 悬停弧看共享来由</span>
             </div>
           )}
+          <div className="min-h-0 flex-1">
           {hasChunks &&
             (view === "turn" ? (
-              <TurnBand
-                snapshot={snapshot}
-                mode={mode}
-                selected={selected}
-                onSelect={onSelect}
-                chunkTopics={activeTopics}
-                cellColors={activeCellColors}
-                onActivateTurn={onActivateTurn}
-                fateMap={effectiveFateMap}
-                fateReasons={gateActive ? pending?.fateReasons : undefined}
-                gateActive={gateActive}
-                referenceGraph={activeGraph}
-              />
+              USE_CANVAS ? (
+                <TurnCanvas
+                  snapshot={snapshot}
+                  selected={selected}
+                  onSelect={onSelect}
+                  chunkTopics={activeTopics}
+                  fateMap={effectiveFateMap}
+                  onActivateTurn={onActivateTurn}
+                  referenceGraph={activeGraph}
+                />
+              ) : (
+                <TurnBand
+                  snapshot={snapshot}
+                  mode={mode}
+                  selected={selected}
+                  onSelect={onSelect}
+                  chunkTopics={activeTopics}
+                  cellColors={activeCellColors}
+                  onActivateTurn={onActivateTurn}
+                  fateMap={effectiveFateMap}
+                  fateReasons={gateActive ? pending?.fateReasons : undefined}
+                  gateActive={gateActive}
+                  referenceGraph={activeGraph}
+                />
+              )
             ) : (
               <Treemap
                 snapshot={snapshot}
@@ -1649,6 +1769,7 @@ export function ContextVisPanel({
                 fateMap={effectiveFateMap}
               />
             ))}
+          </div>
 
           <Sparkline snapshot={snapshot} />
         </>
