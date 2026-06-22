@@ -1,12 +1,20 @@
-# CONTEXTVIS — 工程记录入口
+# CONTEXTVIS — 工程记录入口（v1）
 
 > ContextVis 的**工程记录索引**。这是 skill 式入口:本文件保持精简(使命 + 架构速览 +
 > 契约 + **文档地图**),细节按需读子文档。
 >
 > 与 [../CLAUDE.md](../CLAUDE.md) 分工:CLAUDE.md 是**设计理念**(使命/隐喻/不变量,
 > 与渲染无关);本目录是**落地决策 + 路线图**。
+
+> ## ⬛ v1（已建成工程）vs ⬜ v2（设计探索）
 >
-> 状态:分支 `feat/contextvis-occupancy-panel`。档1 / 档3 / resume 修复 / 原文检视器 /
+> - **本文件 + 本目录所有 `.md` = v1**:已建成、实测的工程(观察 + 治理基建)。
+> - **[v2/](v2/README.md) = v2**:一次长设计讨论的沉淀 + 论文骨架(剃刀理论 + 操作集 + 新交互
+>   轮盘/规则卡/画布)。**未建一行代码。** 想看"接下来往哪走 / 为什么"→ 读 **[v2/README.md](v2/README.md)**。
+
+---
+
+> **v1 状态(已建成)**:分支 `feat/contextvis-occupancy-panel`。档1 / 档3 / resume 修复 / 原文检视器 /
 > 方向 A 阶段 1+2(标记+预览)/ **阶段 3 应用 drop + A-v2 fold** / **压缩闸门第一阶段 + 第二阶段 drop/fold/keep 编辑 + 死重清单喂闸门** /
 > **任务态识别(自适应总开关:启发式 + LLM)+ 焦点压缩(focus→focus_topic,仅闸门路)
 > + 死重清单(主动「建议清理」+ 喂闸门:detector 已完成支线自动预填进 system_fate、含首尾、共用 chunk_topic_map)** /
@@ -17,8 +25,10 @@
 > **死重清单(主动清理 + 喂闸门:被迫压缩前自动建议折已完成支线、含首尾、banner/band 标来由;建议用 fold 不 drop)** + **drop 残值信号(被取代旧读/失败工具/窄闲聊精准预填 drop、优先级 drop>fold>keep、轮次版 chunk 级红角标 ✕N + drop 优先沟 + tooltip 来由;apply_plan 系统建议即可见)** + **闸门内 drop/fold/keep 编辑(被迫压缩前改写折叠计划:删垃圾/补折支线/护住中段轮,经应答落地、方案 A 直接落地、两暗礁消解)** +
 > **按 turn 看时间/主题、点轮跳对话、整轮主动 fold/drop 的语义 minimap / 主操作台(band 概览 + inspector 类型细节)** +
 > **主题着色升级(前端、零后端:① 持久注册表→同主题同色、只增不洗、localStorage 按 sessionId;② 显示放宽+结构变更才重取→压缩/删/折后不回退、纯追加零成本;③ 按线程定色——主线收 focus 一色/支线按 topic,topic 仅作标签;两拍着色=闸门期压缩前·落地后压缩后)** 均闭环。
-> **下一步:自动护主线中段 / keep-as-pin / 闸门内纠正 focus / ②→①完成自动触发(drop 残值信号已建成);
-> 视口高亮框、非闸门路喂 focus 延后。R 滚动增量已降级**(非活跃·留后根治:增量评估动机随持久着色改前端注册表而失,仅剩压缩前快照硬限,不紧迫且会动 Hermes)**,详见 [turn-band.md](turn-band.md) §9 / [roadmap.md](roadmap.md)。
+> **v1 剩余 backlog(均未做、非当前重心)**:自动护主线中段 / keep-as-pin / 闸门内纠正 focus / ②→①完成自动触发;
+> 视口高亮框、非闸门路喂 focus 延后;R 滚动增量已降级。详见 [roadmap.md](roadmap.md)。
+> **🧭 但设计的"下一步"已转向 v2** —— 不再是堆 v1 功能,而是补理论(剃刀:人工介入=注入机器不可知的信息)
+> + 视图/交互创新(add/invalidate/promote、轮盘、画布)。**见 [v2/README.md](v2/README.md)。**
 
 ---
 
@@ -68,11 +78,17 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 
 ## 文档地图(按状态分组)
 
-> 三类:🟢 **活跃**(当前在动 / 常查)· 📘 **参考**(已建成机制的设计 + 基线 + 理念,稳定、按需查)·
-> 🗄 **归档**([`archive/`](archive/),已废弃 / 调研完成,留作决策痕迹,平时不必读)。
+> 下方 🟢/📘/🗄 三组**全是 v1**(已建成工程)。**v2(设计探索)单列在最上**。
 > 文档**状态**以各文件顶部的「状态」行为准;本表是入口索引。
 
-### 🟢 活跃 — 当前在动 / 常查
+### ⬜ v2 — 设计探索(未建,论文骨架）
+| 文档 | 是什么 | 状态 |
+|---|---|---|
+| [v2/README.md](v2/README.md) | v2 入口 + TL;DR(剃刀 / 两轴 / add / invalidate / promote / 轮盘 / 画布) | 🧭 当前设计重心 |
+| [v2/principle.md](v2/principle.md) | 剃刀 + 瓶颈诊断 + 论文骨架(为什么) | 设计中 |
+| [v2/operations.md](v2/operations.md) | 操作集(动词轴 + 放置轴)+ 交互负担(二阶剃刀)+ 引用图弧叠加 + 新交互 + 驱动 case | 设计中 |
+
+### 🟢 v1 活跃 — 当前在动 / 常查
 | 文档 | 是什么 | 状态 |
 |---|---|---|
 | [turn-band.md](turn-band.md) | 主视图主轴翻转(turn 优先 + 逐轮主题 + 主动梳理,语义 minimap / 主操作台) | **第一~第四刀✅**(§9),视口高亮框延后 |
@@ -80,7 +96,7 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 | [built.md](built.md) | 做了什么 + 每个取舍为什么(里程碑日志) | 持续追加 |
 | [needs.md](needs.md) | 用户需求 → 解决方案地图(每条需求挂方案 + 状态) | 活跃 |
 
-### 📘 参考 — 已建成机制的设计 / 基线 / 理念(稳定,按需查)
+### 📘 v1 参考 — 已建成机制的设计 / 基线 / 理念(稳定,按需查)
 | 文档 | 是什么 | 状态 |
 |---|---|---|
 | [../CLAUDE.md](../CLAUDE.md) | 设计理念 / 不变量(渲染无关,最高纲领) | 纲领 |
@@ -90,7 +106,7 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 | [compression-baseline.md](compression-baseline.md) | Hermes 自动压缩基线(要接管/复用的引擎) | 参考 |
 | [dataflow.md](dataflow.md) | 真实数据怎么流 + 本地跑起来调试(踩坑必看) | 参考 |
 
-### 🗄 归档 — 已废弃 / 调研完成(决策痕迹,平时不必读)
+### 🗄 v1 归档 — 已废弃 / 调研完成(决策痕迹,平时不必读)
 | 文档 | 是什么 | 状态 |
 |---|---|---|
 | [archive/mutation-ledger.md](archive/mutation-ledger.md) | "结构突变账本"——曾想重建被压缩销毁的轮次拓扑 | ⛔ 已废弃(被"诚实显示压缩块"取代,见 [turn-band.md](turn-band.md) §4) |
