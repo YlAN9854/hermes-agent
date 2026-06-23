@@ -39,7 +39,6 @@ import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
 import { PluginSlot } from "@/plugins";
-import { useTheme } from "@/themes";
 
 function buildWsUrl(
   authParam: [string, string],
@@ -66,17 +65,21 @@ function generateChannelId(): string {
   return `chat-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
-// Colors for the terminal body.  Matches the dashboard's dark teal canvas
-// with cream foreground — we intentionally don't pick monokai or a loud
-// theme, because the TUI's skin engine already paints the content; the
-// terminal chrome just needs to sit quietly inside the dashboard.
-// `background` is omitted here — it's supplied dynamically from the active
-// theme's `terminalBackground` field so users can control it via YAML themes.
+// ContextVis 浅色纪元:TUI 同步纸白,与右侧浅色 Swiss 画布成一套(用户定:全浅色含 TUI)。
+// 终端 chrome 走纸白底 + 深墨前景 + 一套**白底可读的 16-ANSI**(Solarized-Light 派生),
+// 让 TUI skin 用默认 ANSI 时映射到深色变体。⚠ 若 skin 使用 24-bit truecolor(为深色调校),
+// 调色板对其无效、可能低对比 → 回退「深色 TUI」只需把下方 LIGHT 值换回原深青套(option B)。
+const TERMINAL_BG_LIGHT = "#fbfcfe";
 const TERMINAL_THEME_STATIC = {
-  foreground: "#f0e6d2",
-  cursor: "#f0e6d2",
-  cursorAccent: "#0d2626",
-  selectionBackground: "#f0e6d244",
+  foreground: "#1a2230",
+  cursor: "#1a2230",
+  cursorAccent: "#fbfcfe",
+  selectionBackground: "#1a22301f",
+  black: "#073642", red: "#c7322f", green: "#5a7a00", yellow: "#a87600",
+  blue: "#2176c7", magenta: "#c7308a", cyan: "#1f8a8a", white: "#5e6b82",
+  brightBlack: "#33414f", brightRed: "#cb4b16", brightGreen: "#3f5560",
+  brightYellow: "#657b83", brightBlue: "#3b6fb5", brightCyan: "#2aa198",
+  brightMagenta: "#6c5bc4", brightWhite: "#1a2230",
 };
 
 /**
@@ -162,8 +165,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       : false,
   );
 
-  const { theme } = useTheme();
-  const terminalBg = theme.terminalBackground ?? "#000000";
+  // TUI 背景固定纸白(ContextVis 浅色纪元;原 theme.terminalBackground 深青已弃,见上方注释)。
+  const terminalBg = TERMINAL_BG_LIGHT;
   const terminalTheme = useMemo(
     () => ({ ...TERMINAL_THEME_STATIC, background: terminalBg }),
     [terminalBg],
@@ -947,7 +950,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    // cv-scope:整个 /chat 视图走浅色 Swiss 仪器皮(纸白底盖掉宿主深青 Backdrop;栏间 gap、
+    // 内边距随之浅色)。不圆角、满铺,免四角露出深青底。两栏内各自的 cv-scope 嵌套幂等、无害。
+    <div className="cv-scope flex min-h-0 flex-1 flex-col gap-2">
       <PluginSlot name="chat:top" />
       {mobileModelToolsPortal}
 
@@ -961,13 +966,14 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         <div
           className={cn(
             "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg",
+            "border border-current/12", // 浅底上靠发丝边把 TUI 划成一块面板(Swiss:边而非重阴影)
             // ContextVis 画布布局:TUI 占左 ~35%,右 ~65% 给 ContextVis 画布(grow 7:13,自动扣 gap)。
             "lg:basis-0 lg:grow-7",
             "p-2 sm:p-3",
           )}
           style={{
             backgroundColor: terminalBg,
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
+            boxShadow: "0 1px 3px rgba(26, 34, 48, 0.08)",
           }}
         >
           <div
@@ -977,7 +983,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
 
           {/* 原文检视:选中 chunk 时临时叠加在 TUI 之上(可关,清选中即恢复 agent 可见)。 */}
           {!narrow && selectedChunk && (
-            <div className="absolute inset-2 z-20 flex min-h-0 flex-col overflow-hidden rounded-lg border border-current/20 bg-background-base shadow-2xl sm:inset-3">
+            <div className="cv-scope absolute inset-2 z-20 flex min-h-0 flex-col overflow-hidden rounded-lg border border-current/20 bg-background-base shadow-2xl sm:inset-3">
               <div className="min-h-0 flex-1 overflow-hidden">
                 <ChunkInspector
                   chunk={selectedChunk}
@@ -1023,7 +1029,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             role="complementary"
             aria-label="ContextVis 上下文画布"
             // ContextVis 画布布局:画布占右 ~65%(与 TUI ~35% 按 grow 7:13 分)。
-            className="flex min-h-0 flex-col overflow-hidden lg:h-full lg:min-w-0 lg:basis-0 lg:grow-13"
+            // cv-scope:浅色 Swiss 科学仪器皮(脱离宿主深色;翻 DS 令牌 + JetBrains Mono,见 index.css)。
+            className="cv-scope flex min-h-0 flex-col overflow-hidden lg:h-full lg:min-w-0 lg:basis-0 lg:grow-13"
           >
             <ContextVisPanel
               snapshot={contextSnapshot}

@@ -18,6 +18,14 @@ import { useEffect, useState } from "react";
 
 import { formatTokenCount } from "@/lib/format";
 import { TurnCanvas } from "@/components/TurnCanvas";
+import {
+  CV_ARC,
+  CV_BANDS,
+  CV_SURFACE,
+  CV_TOPIC_PALETTE,
+  CV_TYPE_FILL,
+  CV_TYPE_LABEL,
+} from "@/lib/contextvis/theme";
 import { squarify } from "@/lib/contextvis/treemap";
 import { buildTurnCells, type TurnCell } from "@/lib/contextvis/turns";
 import {
@@ -51,16 +59,13 @@ type TreemapMode = "proportional" | "actual";
 /** 主视图主轴:类型带(旧树图)⇄ 轮次带(纵向时间序)。见 context-vis/turn-band.md。 */
 type ViewKind = "type" | "turn";
 
-/** turn 带配色(本刀不按主题着色;仅区分系统底座 / 对话轮 / 折叠产物)。 */
-const TURN_BASE_COLOR = "#8b7fd4"; // 系统底座 = system 紫
-const TURN_CELL_COLOR = "#7d8aa3"; // 对话轮 = history 灰蓝
-const TURN_FOLD_COLOR = "#565d6b"; // 已折叠摘要 = 压暗灰(虚线边区分)
+/** turn 带配色(本刀不按主题着色;仅区分系统底座 / 对话轮 / 折叠产物)。浅色皮见 theme.ts。 */
+const TURN_BASE_COLOR = CV_SURFACE.rowBase; // 系统底座
+const TURN_CELL_COLOR = CV_SURFACE.rowTurn; // 对话轮
+const TURN_FOLD_COLOR = CV_SURFACE.rowFold; // 已折叠摘要
 
 /** 主题着色色板(第二刀):逐轮 topic 各分一色;mainline 饱和、offthread 靠透明度压暗。 */
-const TOPIC_PALETTE = [
-  "#d98c5f", "#5fa8a0", "#8b7fd4", "#6fae7a",
-  "#c97b9c", "#7d9cc4", "#c0a85f", "#9c7bc9",
-];
+const TOPIC_PALETTE = CV_TOPIC_PALETTE;
 type ChunkTopicMap = RegimeColors["chunk_topics"];
 
 /** 主题键归一化:吸收 LLM 对同一主题的琐碎改名差异(trim / 小写 / 压空格)。 */
@@ -188,26 +193,12 @@ const FATE_LABEL: Record<Fate, string> = {
   drop: "丢弃",
 };
 
-/** 渲染带的顺序与配色（自顶向下；紫/teal 顶、绿文件、橙结果）。 */
-const BANDS: { type: ChunkType; color: string }[] = [
-  { type: "system", color: "#8b7fd4" },
-  { type: "tool_schema", color: "#5fa8a0" },
-  { type: "history", color: "#7d8aa3" },
-  { type: "file", color: "#6fae7a" },
-  { type: "tool_result", color: "#d39a5c" },
-];
+/** 渲染带的顺序与配色（自顶向下；indigo/teal 顶、绿文件、橙结果）。浅色皮见 theme.ts。 */
+const BANDS = CV_BANDS as { type: ChunkType; color: string }[];
 
 /** 类型→色 / 类型→中文标签(展开轮的子 chunk 子格复用类型版配色)。 */
-const TYPE_FILL: Record<string, string> = Object.fromEntries(
-  BANDS.map((b) => [b.type, b.color]),
-);
-const TYPE_LABEL: Record<string, string> = {
-  system: "系统",
-  tool_schema: "工具表",
-  history: "对话",
-  file: "文件",
-  tool_result: "工具结果",
-};
+const TYPE_FILL = CV_TYPE_FILL;
+const TYPE_LABEL = CV_TYPE_LABEL;
 
 // treemap 坐标系：viewBox 贴近浮层实际像素宽度，减少 preserveAspectRatio="none"
 // 带来的文字横向拉伸。
@@ -358,7 +349,7 @@ function Treemap({
         // 选中环优先(stroke-background-base@2),命运仍靠 dim/strike/dash 可辨。
         const fillOpacity = fate === "drop" ? 0.3 : isSel ? 0.95 : 0.8;
         const strokeClass = isSel
-          ? "stroke-background-base"
+          ? "stroke-current" // 选中=深墨环(白底上 background-base 白描边会隐形)
           : fate
             ? FATE_STROKE[fate]
             : "stroke-background-base";
@@ -815,7 +806,7 @@ function TurnBand({
                   className="cursor-pointer"
                   fill={TYPE_FILL[s.type] ?? TURN_CELL_COLOR}
                   fillOpacity={subSel ? 0.95 : 0.78}
-                  stroke={subSel ? "#ffffff" : "rgba(0,0,0,0.3)"}
+                  stroke={subSel ? CV_SURFACE.ink : CV_SURFACE.cellStroke}
                   strokeWidth={subSel ? 1.5 : 0.5}
                   vectorEffect="non-scaling-stroke"
                 />
@@ -1000,7 +991,7 @@ function ViewToggle({
 }
 
 /** 关键词追踪色(与 TurnCanvas 的 TRACE_COLOR 一致):点关键词高亮其贯穿路径。 */
-const TRACE_COLOR = "#c678dd";
+const TRACE_COLOR = CV_ARC.trace;
 
 /** 路径取末段做窄列显示(完整路径进 tooltip)。 */
 function baseName(p: string): string {

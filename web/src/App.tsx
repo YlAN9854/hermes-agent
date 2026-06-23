@@ -722,6 +722,9 @@ export default function App() {
                   ? "pb-0 pt-1 sm:pt-2 lg:pt-4"
                   : "pt-2 sm:pt-4 lg:pt-6",
                 isDocsRoute && "min-h-0 flex-1",
+                // ContextVis 只用 /chat:把整块主内容区(含 px/pt 内边距)翻成浅色仪器皮,
+                // 盖掉宿主 bg-black + 深青 Backdrop 透出的外框。其它路由不受影响。
+                isChatRoute && "cv-scope",
               )}
             >
               <PluginSlot name="pre-main" />

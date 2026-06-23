@@ -14,26 +14,17 @@ import { buildTurnCells, type TurnCell } from "@/lib/contextvis/turns";
 import { squarify, type Rect } from "@/lib/contextvis/treemap";
 import type { ReferenceGraph, RegimeColors } from "@/lib/contextvis/apply";
 import type { Fate, FateMap } from "@/lib/contextvis/plan";
+import {
+  CV_ARC,
+  CV_FATE,
+  CV_SURFACE,
+  CV_TYPE_FILL as TYPE_FILL,
+  CV_TYPE_LABEL as TYPE_LABEL,
+} from "@/lib/contextvis/theme";
 import type { ContextChunk, ContextSnapshot } from "@/lib/contextvis/types";
 import { formatTokenCount } from "@/lib/format";
 
 type ChunkTopicMap = RegimeColors["chunk_topics"];
-
-/** 类型→色 / 中文标签（与类型版 treemap 同配色）。 */
-const TYPE_FILL: Record<string, string> = {
-  system: "#8b7fd4",
-  tool_schema: "#5fa8a0",
-  history: "#7d8aa3",
-  file: "#6fae7a",
-  tool_result: "#d39a5c",
-};
-const TYPE_LABEL: Record<string, string> = {
-  system: "系统",
-  tool_schema: "工具表",
-  history: "对话",
-  file: "文件",
-  tool_result: "工具结果",
-};
 
 const DEFAULT_W = 700; // 容器宽测出前的占位（随后 ResizeObserver 校正）
 const GAP = 3; // 行间隙
@@ -47,7 +38,7 @@ const DEFAULT_TH_FRAC = 0.8; // 无 compactAt 时的阈值占比兜底
 const LABEL_FS = 11;
 const TOKEN_FS = 9;
 /** 关键词追踪态:被追踪 token 出现的子格高亮 + 贯穿路径,用一个区别于下/上游(rose/sky)的色。 */
-const TRACE_COLOR = "#c678dd";
+const TRACE_COLOR = CV_ARC.trace;
 
 function fit(label: string, w: number, fs = LABEL_FS): string {
   // 可放字符数随字号变宽(≈0.56·fs px/字);故同一格放大字号会少放几个字、自动截断。
@@ -55,12 +46,12 @@ function fit(label: string, w: number, fs = LABEL_FS): string {
   return label.length > max ? label.slice(0, Math.max(1, max - 1)) + "…" : label;
 }
 
-/** 命运 → 子格描边色（drop 红 / fold 黄虚线 / keep 绿）；否则默认/选中色。 */
+/** 命运 → 子格描边色（drop 红 / fold 黄虚线 / keep 绿）；否则默认/选中(深墨)色。 */
 function fateStroke(fate: Fate | undefined, sel: boolean): string {
-  if (fate === "drop") return "#e5687a";
-  if (fate === "fold") return "#d9a441";
-  if (fate === "keep") return "#5fb88a";
-  return sel ? "#ffffff" : "rgba(0,0,0,0.3)";
+  if (fate === "drop") return CV_FATE.drop;
+  if (fate === "fold") return CV_FATE.fold;
+  if (fate === "keep") return CV_FATE.keep;
+  return sel ? CV_SURFACE.ink : CV_SURFACE.cellStroke;
 }
 
 type Sub = { chunk: ContextChunk; x: number; y: number; w: number; h: number };
@@ -191,7 +182,7 @@ export function TurnCanvas({
   const tracing = !!tracedChunks && tracedChunks.size > 0;
 
   return (
-    <div ref={wrapRef} className="h-full w-full overflow-y-auto">
+    <div ref={wrapRef} className="cv-grid h-full w-full overflow-y-auto">
       <svg
         viewBox={`0 0 ${vw} ${totalH}`}
         preserveAspectRatio="none"
@@ -231,18 +222,20 @@ export function TurnCanvas({
                   }
                 }}
                 className="cursor-pointer"
-                fill={r.cell.isBase ? TYPE_FILL.system : r.cell.isFolded ? "#565d6b" : "#2c333f"}
+                fill={
+                  r.cell.isBase
+                    ? CV_SURFACE.rowBase
+                    : r.cell.isFolded
+                      ? CV_SURFACE.rowFold
+                      : CV_SURFACE.rowTurn
+                }
                 fillOpacity={
                   tracing && r.subs.length === 0 && !rowTraced
-                    ? 0.18 // 追踪态:无子格且未命中的行(底座/无关折叠)退场
-                    : r.cell.isFolded
-                      ? 0.5
-                      : r.cell.isBase
-                        ? 0.5
-                        : 0.9
+                    ? 0.35 // 追踪态:无子格且未命中的行(底座/无关折叠)退场
+                    : 1
                 }
-                stroke={turnSel ? "#ffffff" : rowTraced ? TRACE_COLOR : "rgba(0,0,0,0.25)"}
-                strokeWidth={turnSel ? 1.25 : rowTraced ? 1.5 : 0.5}
+                stroke={turnSel ? CV_SURFACE.ink : rowTraced ? TRACE_COLOR : CV_SURFACE.hair}
+                strokeWidth={turnSel ? 1.5 : rowTraced ? 1.5 : 1}
                 vectorEffect="non-scaling-stroke"
               >
                 <title>{`${r.cell.label} · ${formatTokenCount(r.cell.tokens)}${!r.cell.isBase && !r.cell.isFolded ? " · 点击跳转到该轮对话" : ""}`}</title>
@@ -286,7 +279,7 @@ export function TurnCanvas({
                       height={Math.max(0, s.h - 0.5)}
                       onClick={() => onSelect(sel ? null : s.chunk.id)}
                       className="cursor-pointer"
-                      fill={TYPE_FILL[s.chunk.type] ?? "#7d8aa3"}
+                      fill={TYPE_FILL[s.chunk.type] ?? TYPE_FILL.history}
                       fillOpacity={
                         tracing ? (traced ? 0.95 : 0.16) : off ? 0.4 : sel ? 0.95 : 0.82
                       }

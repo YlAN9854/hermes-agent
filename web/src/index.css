@@ -193,6 +193,51 @@ code { font-size: 0.875rem; }
 }
 
 
+/* ------------------------------------------------------------------ */
+/* ContextVis — 浅色 Swiss 科学仪器皮肤(`.cv-scope`)。                 */
+/* ContextVis 要「完全脱离宿主深色风格」。宿主 Nous DS 的语义令牌几乎都从    */
+/* 两个根派生:--midground-base(墨,默认奶油)+ --background-base(画布,     */
+/* 默认深青),经 @theme inline 的 color-mix 计算 card/border/muted/text-*。 */
+/* 故只需在本作用域翻这两个根(墨→深石板、画布→纸白)+ 设 currentColor,所有  */
+/* DS 类(text-text-* 、border、bg-current 等)即自动浅色;再单独覆盖几个固定语义 */
+/* 色(warning/success/destructive 原为深色调,白底上需加深)。SVG 硬编码色另  */
+/* 由 lib/contextvis/theme.ts 管。字体走 JetBrains Mono(仪器感 + 表格数字)。 */
+/* ------------------------------------------------------------------ */
+.cv-scope {
+  /* 两个根:墨 = 深石板,画布 = 纸白 → 级联重算 text/card/border/muted。 */
+  --midground: #1a2230;
+  --midground-base: #1a2230;
+  --midground-alpha: 1;
+  --background: #fbfcfe;
+  --background-base: #fbfcfe;
+  --background-alpha: 1;
+  --foreground-base: #1a2230;
+
+  /* 固定语义色:白底校准(原值为深色调上的亮色,白底对比不足)。 */
+  --color-warning: #b87514;
+  --color-success: #1f9d57;
+  --color-destructive: #d83a3f;
+  --color-ring: #5b5bd6;
+
+  /* 字体:mono-forward(含 display),表格数字、刻度对齐天然到位。 */
+  --theme-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --theme-font-sans: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --theme-font-display: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  color: #1a2230;
+  background-color: #fbfcfe;
+  font-family: var(--theme-font-mono);
+  letter-spacing: -0.01em;
+}
+
+/* 科学纸 / 坐标纸的极淡网格 —— Swiss 仪器质感,非装饰噪音(很淡、可被数据盖过)。 */
+.cv-grid {
+  background-image:
+    linear-gradient(to right, rgba(26, 34, 48, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(26, 34, 48, 0.045) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
 /* Collapsed sidebar tooltip entrance — skipped when moving between items. */
 @keyframes sidebar-tooltip-in {
   from { opacity: 0; transform: translateY(-50%) translateX(-4px); }

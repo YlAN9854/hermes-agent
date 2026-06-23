@@ -22,17 +22,12 @@ import {
   type Fate,
   type FateMap,
 } from "@/lib/contextvis/plan";
+import { CV_TYPE_FILL } from "@/lib/contextvis/theme";
 import type { ContextChunk } from "@/lib/contextvis/types";
 import { cn } from "@/lib/utils";
 
-/** 类型徽章配色，与 treemap 带色呼应。 */
-const TYPE_COLOR: Record<string, string> = {
-  system: "#8b7fd4",
-  tool_schema: "#5fa8a0",
-  history: "#7d8aa3",
-  file: "#6fae7a",
-  tool_result: "#d39a5c",
-};
+/** 类型徽章配色，与 treemap 带色呼应(单一真相源 theme.ts)。 */
+const TYPE_COLOR = CV_TYPE_FILL;
 
 /** 命运动作配置:标签 + 选中态配色（呼应 treemap 叠加色）。 */
 const FATE_ACTIONS: { fate: Fate; label: string; active: string }[] = [
@@ -252,11 +247,11 @@ function RawView({ chunk }: { chunk: ContextChunk }) {
         <span>~{formatTokenCount(chunk.tokens)} tok</span>
         {chunk.raw != null && <span>{chunk.raw.length.toLocaleString()} 字符</span>}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto rounded border border-current/10 bg-black/20">
+      <div className="min-h-0 flex-1 overflow-auto rounded border border-current/10 bg-current/5">
         {chunk.raw ? (
           <pre
             className={cn(
-              "min-w-0 whitespace-pre-wrap break-words p-2",
+              "min-w-0 whitespace-pre-wrap wrap-break-word p-2",
               "font-mono text-[11px] leading-relaxed text-text-secondary",
             )}
           >
