@@ -19,6 +19,7 @@ import {
   CV_FATE,
   CV_SURFACE,
   CV_TYPE_FILL as TYPE_FILL,
+  CV_TYPE_ICON,
   CV_TYPE_LABEL as TYPE_LABEL,
 } from "@/lib/contextvis/theme";
 import type { ContextChunk, ContextSnapshot } from "@/lib/contextvis/types";
@@ -28,8 +29,13 @@ type ChunkTopicMap = RegimeColors["chunk_topics"];
 
 const DEFAULT_W = 700; // 容器宽测出前的占位（随后 ResizeObserver 校正）
 const GAP = 3; // 行间隙
-const MIN_ROW = 6; // 每轮最小高（仅保证可点；占用保真，极小轮显薄条）
-const HEADER_MIN_H = 26; // 行高 ≥ 此才显标签条，否则薄条（标签进 hover）
+// 每轮**保底高**:抬到能放下一行表头(图标+标签+token),让最小 turn 也可读可辨
+// （用户拍板:接受由此带来的最小 turn 轻微比例失真，换可读）。保底之上仍严格 ∝ token。
+const MIN_ROW = 28;
+// 「第N轮」标识移到每轮**左侧竖向 gutter**(不再占顶部窄条):turn 号有整轮高度可读,chunk 右移
+// 拿回那条高度更可读;代价=完整 prompt 在 gutter 放不下 → 进 hover(tooltip)。
+const GUTTER_MIN = 50;
+const GUTTER_MAX = 78;
 // 画布高度**锚定压缩阈值**：自适应面板可用高（vh，ResizeObserver 实测）代表「阈值占比 × 1.2」
 // 那么多 token，所有 turn 按真实 budget 占比铺。近阈值时填满、远低时显空余（合「将满才看」理念）。
 const DEFAULT_H = 600; // 容器高测出前的占位（随后 ResizeObserver 校正）
@@ -46,6 +52,49 @@ function fit(label: string, w: number, fs = LABEL_FS): string {
   return label.length > max ? label.slice(0, Math.max(1, max - 1)) + "…" : label;
 }
 
+/** 类型专属显示名:文件→**文件名**(basename)、工具结果→工具名/描述、其余→类型中文名。 */
+function cellName(chunk: ContextChunk): string {
+  if (chunk.type === "file") {
+    const parts = chunk.label.split(/[\\/]/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : chunk.label;
+  }
+  if (chunk.type === "tool_result" && chunk.label) return chunk.label;
+  return TYPE_LABEL[chunk.type] ?? chunk.type;
+}
+
+/** 内联 Lucide 图标(SVG path,scale 自 24×24)。微格只画它即可辨识身份。 */
+function Glyph({
+  icon,
+  x,
+  y,
+  size,
+  color = CV_SURFACE.ink,
+  opacity = 0.72,
+}: {
+  icon: string;
+  x: number;
+  y: number;
+  size: number;
+  color?: string;
+  opacity?: number;
+}) {
+  const path = CV_TYPE_ICON[icon];
+  if (!path) return null;
+  return (
+    <g
+      transform={`translate(${x} ${y}) scale(${size / 24})`}
+      stroke={color}
+      strokeOpacity={opacity}
+      fill="none"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      pointerEvents="none" // 纯装饰:点击穿透到下方 rect(否则 icon 描边截住整轮/选块的点击)
+      dangerouslySetInnerHTML={{ __html: path }}
+    />
+  );
+}
+
 /** 命运 → 子格描边色（drop 红 / fold 黄虚线 / keep 绿）；否则默认/选中(深墨)色。 */
 function fateStroke(fate: Fate | undefined, sel: boolean): string {
   if (fate === "drop") return CV_FATE.drop;
@@ -55,14 +104,7 @@ function fateStroke(fate: Fate | undefined, sel: boolean): string {
 }
 
 type Sub = { chunk: ContextChunk; x: number; y: number; w: number; h: number };
-type Row = {
-  cell: TurnCell;
-  y: number;
-  h: number;
-  subs: Sub[];
-  showHeader: boolean;
-  headerFs: number; // 行首标签字号(随该轮高度∝token 适度放大)
-};
+type Row = { cell: TurnCell; y: number; h: number; subs: Sub[] };
 
 export function TurnCanvas({
   snapshot,
@@ -119,33 +161,31 @@ export function TurnCanvas({
     budget > 0 && compactAt && compactAt > 0 ? compactAt / budget : DEFAULT_TH_FRAC;
   const refFrac = Math.min(1, thFrac * THRESHOLD_OVERSHOOT);
   const scale = vh / Math.max(1, refFrac * budget); // px per token（vh = 面板可用高，自适应）
+  // 左 gutter 宽:容纳「第N轮」+ icon,随画布宽轻微伸缩,夹在 [GUTTER_MIN, GUTTER_MAX]。
+  const gutterW = Math.min(GUTTER_MAX, Math.max(GUTTER_MIN, Math.round(vw * 0.085)));
   const rows: Row[] = [];
   let yCur = 0;
   for (const cell of cells) {
     const h = Math.max(MIN_ROW, cell.tokens * scale);
-    const showHeader = h >= HEADER_MIN_H;
-    // 行首标签字号随该轮高度(∝token)适度放大(守「量级编码」);标签条高度随之撑开容纳。
-    const headerFs = showHeader
-      ? Math.min(17, Math.max(LABEL_FS, Math.round(LABEL_FS + (h - HEADER_MIN_H) / 90)))
-      : LABEL_FS;
-    const top = showHeader ? headerFs + 4 : 1;
     let subs: Sub[] = [];
-    if (!cell.isBase && !cell.isFolded) {
+    // 底座也铺子格(系统提示 + 工具表两类,按类型上色);折叠摘要仍原子(单块摘要无意义再分)。
+    // chunk 从 gutterW 起、占整轮高度(不再被顶部标签条切走):右移腾出左侧给 turn 标识。
+    if (!cell.isFolded) {
       const members = cell.chunkIds
         .map((id) => chunkById.get(id))
         .filter((c): c is ContextChunk => !!c);
       const rect: Rect = {
-        x: 2,
-        y: yCur + top,
-        w: vw - 4,
-        h: Math.max(0, h - top - GAP),
+        x: gutterW,
+        y: yCur + 1,
+        w: vw - gutterW - 1,
+        h: Math.max(0, h - 1 - GAP),
       };
       subs = squarify(
         members.map((c) => ({ value: Math.max(1, c.tokens), data: c })),
         rect,
       ).map((tc) => ({ chunk: tc.item, x: tc.x, y: tc.y, w: tc.w, h: tc.h }));
     }
-    rows.push({ cell, y: yCur, h, subs, showHeader, headerFs });
+    rows.push({ cell, y: yCur, h, subs });
     yCur += h;
   }
   // 总高 = max(面板高, 内容高):内容不及阈值×1.2 → 填满面板留空余;超出 → 加长滚动。
@@ -164,7 +204,7 @@ export function TurnCanvas({
           if (typeof ref.messageIndex === "number") miCenter.set(ref.messageIndex, c);
       }
     } else {
-      const c = { x: vw / 2, y: r.y + r.h / 2 };
+      const c = { x: gutterW + (vw - gutterW) / 2, y: r.y + r.h / 2 };
       for (const id of r.cell.chunkIds) center.set(id, c);
     }
   }
@@ -186,7 +226,8 @@ export function TurnCanvas({
       <svg
         viewBox={`0 0 ${vw} ${totalH}`}
         preserveAspectRatio="none"
-        style={{ width: "100%", height: `${totalH}px` }}
+        // display:block —— 否则 inline SVG 的基线下降空隙(~4px)撑出溢出,悬浮即冒垂直滚动条。
+        style={{ width: "100%", height: `${totalH}px`, display: "block" }}
         role="img"
         aria-label="context canvas"
       >
@@ -240,27 +281,75 @@ export function TurnCanvas({
               >
                 <title>{`${r.cell.label} · ${formatTokenCount(r.cell.tokens)}${!r.cell.isBase && !r.cell.isFolded ? " · 点击跳转到该轮对话" : ""}`}</title>
               </rect>
-              {r.showHeader && (
-                <>
-                  <text
-                    x={5}
-                    y={r.y + r.headerFs}
-                    fontSize={r.headerFs}
-                    className="pointer-events-none fill-black/80"
-                  >
-                    {fit(r.cell.label, vw - 72, r.headerFs)}
-                  </text>
-                  <text
-                    x={vw - 4}
-                    y={r.y + r.headerFs}
-                    fontSize={Math.max(TOKEN_FS, r.headerFs - 2)}
-                    textAnchor="end"
-                    className="pointer-events-none fill-black/55"
-                  >
-                    {formatTokenCount(r.cell.tokens)}
-                  </text>
-                </>
-              )}
+              {/* 左 gutter:turn 标识(icon + 第N轮 + token,有整轮高度)。完整 prompt 在 row rect 的 <title>。 */}
+              {(() => {
+                const rowH = Math.max(0, r.h - GAP);
+                if (rowH < 15) return null; // 太矮放不下任何字
+                const icon = r.cell.isBase
+                  ? "system"
+                  : r.cell.isFolded
+                    ? "folded"
+                    : "turn";
+                const short = r.cell.isBase
+                  ? "底座"
+                  : r.cell.isFolded
+                    ? "摘要"
+                    : `第${r.cell.turn}轮`;
+                const compact = rowH < 46;
+                if (compact) {
+                  // 矮轮:icon + 第N轮 单行、竖向居中(token 进 hover)。
+                  const cy = r.y + rowH / 2;
+                  const gIco = Math.min(15, Math.max(11, rowH - 12));
+                  const gFs = Math.min(12, Math.max(9, rowH - 14));
+                  return (
+                    <>
+                      <Glyph icon={icon} x={6} y={cy - gIco / 2} size={gIco} opacity={0.85} />
+                      <text
+                        x={6 + gIco + 4}
+                        y={cy + gFs * 0.36}
+                        fontSize={gFs}
+                        className="pointer-events-none fill-black/80"
+                      >
+                        {fit(short, gutterW - gIco - 12, gFs)}
+                      </text>
+                    </>
+                  );
+                }
+                // 高轮:icon / 第N轮 / token 竖排,顶部对齐。
+                return (
+                  <>
+                    <Glyph icon={icon} x={8} y={r.y + 9} size={16} opacity={0.85} />
+                    <text
+                      x={8}
+                      y={r.y + 9 + 16 + 13}
+                      fontSize={13}
+                      className="pointer-events-none fill-black/85"
+                    >
+                      {fit(short, gutterW - 12, 13)}
+                    </text>
+                    {rowH > 64 && (
+                      <text
+                        x={8}
+                        y={r.y + 9 + 16 + 13 + 13}
+                        fontSize={10}
+                        className="pointer-events-none fill-black/50"
+                      >
+                        {formatTokenCount(r.cell.tokens)}
+                      </text>
+                    )}
+                  </>
+                );
+              })()}
+              {/* gutter 与 chunk 区的分隔发丝线。 */}
+              <line
+                x1={gutterW}
+                y1={r.y + 1}
+                x2={gutterW}
+                y2={r.y + Math.max(0, r.h - GAP)}
+                stroke={CV_SURFACE.hair}
+                strokeWidth={1}
+                vectorEffect="non-scaling-stroke"
+              />
               {r.subs.map((s) => {
                 const sel = selScope.has(s.chunk.id);
                 const off = chunkTopics
@@ -268,8 +357,17 @@ export function TurnCanvas({
                   : false;
                 const fate = fateMap[s.chunk.id];
                 const traced = tracing && tracedChunks!.has(s.chunk.id);
-                // 子格标签字号随格子尺寸(∝token)缩放:大块的「文件 11.5K」明显大于小块,守「量级编码」。
-                const subFs = Math.max(8, Math.min(16, Math.floor(Math.min(s.h * 0.5, s.w / 4.5))));
+                // 子格标签字号随格子尺寸(∝token)缩放:大块明显大于小块,守「量级编码」。
+                const subFs = Math.max(9, Math.min(18, Math.floor(Math.min(s.h * 0.46, s.w / 4))));
+                const icoS = Math.min(16, Math.max(11, subFs));
+                // 渐进式信息:格越大显越多 —— 微格只图标 → 小格图标+名 → 大格图标+名+token(两行)。
+                const showIcon = s.w > 18 && s.h > 13;
+                const textX = s.x + 4 + (showIcon ? icoS + 4 : 0);
+                const textW = s.x + s.w - textX - 3;
+                const showName = textW > subFs * 1.4 && s.h > 13;
+                const tokFs = Math.max(8, subFs - 4);
+                const showTok = showName && s.h > subFs + tokFs + 12; // 够两行才显 token 行
+                const name = cellName(s.chunk);
                 return (
                   <g key={s.chunk.id}>
                     <rect
@@ -288,20 +386,35 @@ export function TurnCanvas({
                       strokeDasharray={fate === "fold" ? "3 2" : undefined}
                       vectorEffect="non-scaling-stroke"
                     >
-                      <title>{`${TYPE_LABEL[s.chunk.type] ?? s.chunk.type} · ${formatTokenCount(s.chunk.tokens)}${fate ? ` · 标记:${fate}` : ""}`}</title>
+                      <title>{`${name} · ${TYPE_LABEL[s.chunk.type] ?? s.chunk.type} · ${formatTokenCount(s.chunk.tokens)}${fate ? ` · 标记:${fate}` : ""}`}</title>
                     </rect>
-                    {s.w > 30 && s.h > 11 && (
+                    {showIcon && (
+                      <Glyph
+                        icon={s.chunk.type}
+                        x={s.x + 4}
+                        y={s.y + 4}
+                        size={icoS}
+                        opacity={traced ? 0.88 : 0.66}
+                      />
+                    )}
+                    {showName && (
                       <text
-                        x={s.x + 3}
-                        y={s.y + subFs + 1}
+                        x={textX}
+                        y={s.y + 4 + subFs}
                         fontSize={subFs}
-                        className="pointer-events-none fill-black/70"
+                        className="pointer-events-none fill-black/75"
                       >
-                        {fit(
-                          `${TYPE_LABEL[s.chunk.type] ?? s.chunk.type} ${formatTokenCount(s.chunk.tokens)}`,
-                          s.w - 5,
-                          subFs,
-                        )}
+                        {fit(name, textW, subFs)}
+                      </text>
+                    )}
+                    {showTok && (
+                      <text
+                        x={textX}
+                        y={s.y + 4 + subFs + tokFs + 2}
+                        fontSize={tokFs}
+                        className="pointer-events-none fill-black/55"
+                      >
+                        {formatTokenCount(s.chunk.tokens)}
                       </text>
                     )}
                   </g>

@@ -65,21 +65,16 @@ function generateChannelId(): string {
   return `chat-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
-// ContextVis 浅色纪元:TUI 同步纸白,与右侧浅色 Swiss 画布成一套(用户定:全浅色含 TUI)。
-// 终端 chrome 走纸白底 + 深墨前景 + 一套**白底可读的 16-ANSI**(Solarized-Light 派生),
-// 让 TUI skin 用默认 ANSI 时映射到深色变体。⚠ 若 skin 使用 24-bit truecolor(为深色调校),
-// 调色板对其无效、可能低对比 → 回退「深色 TUI」只需把下方 LIGHT 值换回原深青套(option B)。
-const TERMINAL_BG_LIGHT = "#fbfcfe";
+// ContextVis 浅色纪元 · option A(用户定):TUI 用 ContextVis **墨色底 + 浅前景** ——
+// 与右侧纸白成「反相同色」一套(左=墨底亮字控制台,右=纸底墨迹仪器,共用 #1a2230/#fbfcfe)。
+// 缘由:agent skin 用 24-bit truecolor 画 accent(淡黄/橙),是为深底调校的;xterm theme 改不动
+// truecolor → 浅底上必然淡到看不清(浅底+淡字物理矛盾)。放回深底即恢复 skin 全部可读。
+const TERMINAL_BG_DARK = "#1a2230";
 const TERMINAL_THEME_STATIC = {
-  foreground: "#1a2230",
-  cursor: "#1a2230",
-  cursorAccent: "#fbfcfe",
-  selectionBackground: "#1a22301f",
-  black: "#073642", red: "#c7322f", green: "#5a7a00", yellow: "#a87600",
-  blue: "#2176c7", magenta: "#c7308a", cyan: "#1f8a8a", white: "#5e6b82",
-  brightBlack: "#33414f", brightRed: "#cb4b16", brightGreen: "#3f5560",
-  brightYellow: "#657b83", brightBlue: "#3b6fb5", brightCyan: "#2aa198",
-  brightMagenta: "#6c5bc4", brightWhite: "#1a2230",
+  foreground: "#e7ecf3",
+  cursor: "#e7ecf3",
+  cursorAccent: "#1a2230",
+  selectionBackground: "#e7ecf333",
 };
 
 /**
@@ -165,8 +160,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       : false,
   );
 
-  // TUI 背景固定纸白(ContextVis 浅色纪元;原 theme.terminalBackground 深青已弃,见上方注释)。
-  const terminalBg = TERMINAL_BG_LIGHT;
+  // TUI 背景 = ContextVis 墨色(option A 反相;原 theme.terminalBackground 深青已弃,见上方注释)。
+  const terminalBg = TERMINAL_BG_DARK;
   const terminalTheme = useMemo(
     () => ({ ...TERMINAL_THEME_STATIC, background: terminalBg }),
     [terminalBg],

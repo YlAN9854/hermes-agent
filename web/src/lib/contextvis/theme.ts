@@ -54,6 +54,33 @@ export const CV_ARC = {
   trace: "#9333EA", // 关键词贯穿路径(violet)
 };
 
+/**
+ * 类型 → 图标(Lucide 内联 SVG 子标记,24×24 viewBox、stroke 描边)。
+ * 渲染:`<g transform=translate+scale stroke=ink fill=none strokeWidth=2 dangerouslySetInnerHTML>`,
+ * 子元素继承 stroke。微格只画图标即可辨识身份(解决"小 turn 难分辨"),不依赖塞进文字。
+ */
+export const CV_TYPE_ICON: Record<string, string> = {
+  // cpu —— 系统底座
+  system:
+    '<rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>',
+  // code —— 工具表(schema)
+  tool_schema: '<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+  // message-square —— 对话
+  history:
+    '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  // file-text —— 文件
+  file:
+    '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  // terminal —— 工具结果
+  tool_result: '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+  // layers —— 对话轮(turn 表头通用标)
+  turn:
+    '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
+  // archive —— 折叠摘要
+  folded:
+    '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+};
+
 /** 画布面 / 墨(白底 Swiss;SVG 里用,不走 currentColor 的地方)。 */
 export const CV_SURFACE = {
   ink: "#1A2230", // 主墨(标签 / 选中描边)
