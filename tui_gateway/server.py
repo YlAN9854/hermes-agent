@@ -4824,7 +4824,7 @@ def _(rid, params: dict) -> dict:
         try:
             ref_graph = reference_graph(history, payload.get("chunks", []))
         except Exception:
-            ref_graph = {"edges": [], "artifacts": [], "layers": []}
+            ref_graph = {"edges": [], "artifacts": [], "files": [], "keywords": [], "layers": []}
 
         return _ok(rid, {
             "regime": a.regime,

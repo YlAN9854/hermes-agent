@@ -36,7 +36,6 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 const DEFAULT_W = 700; // 容器宽测出前的占位（随后 ResizeObserver 校正）
-const HEADER = 15; // 行首标签条高
 const GAP = 3; // 行间隙
 const MIN_ROW = 6; // 每轮最小高（仅保证可点；占用保真，极小轮显薄条）
 const HEADER_MIN_H = 26; // 行高 ≥ 此才显标签条，否则薄条（标签进 hover）
@@ -47,9 +46,12 @@ const THRESHOLD_OVERSHOOT = 1.2; // 画布顶 = min(100%, 阈值占比 × 1.2)
 const DEFAULT_TH_FRAC = 0.8; // 无 compactAt 时的阈值占比兜底
 const LABEL_FS = 11;
 const TOKEN_FS = 9;
+/** 关键词追踪态:被追踪 token 出现的子格高亮 + 贯穿路径,用一个区别于下/上游(rose/sky)的色。 */
+const TRACE_COLOR = "#c678dd";
 
-function fit(label: string, w: number): string {
-  const max = Math.max(1, Math.floor(w / 6.2));
+function fit(label: string, w: number, fs = LABEL_FS): string {
+  // 可放字符数随字号变宽(≈0.56·fs px/字);故同一格放大字号会少放几个字、自动截断。
+  const max = Math.max(1, Math.floor(w / (fs * 0.56)));
   return label.length > max ? label.slice(0, Math.max(1, max - 1)) + "…" : label;
 }
 
@@ -62,7 +64,14 @@ function fateStroke(fate: Fate | undefined, sel: boolean): string {
 }
 
 type Sub = { chunk: ContextChunk; x: number; y: number; w: number; h: number };
-type Row = { cell: TurnCell; y: number; h: number; subs: Sub[]; showHeader: boolean };
+type Row = {
+  cell: TurnCell;
+  y: number;
+  h: number;
+  subs: Sub[];
+  showHeader: boolean;
+  headerFs: number; // 行首标签字号(随该轮高度∝token 适度放大)
+};
 
 export function TurnCanvas({
   snapshot,
@@ -72,6 +81,7 @@ export function TurnCanvas({
   fateMap,
   onActivateTurn,
   referenceGraph = null,
+  tracedChunks = null,
 }: {
   snapshot: ContextSnapshot;
   selected: string | null;
@@ -84,6 +94,8 @@ export function TurnCanvas({
   onActivateTurn?: (turn: number) => void;
   /** v2 引用图;弧落子格 2D 中心。null=不画。 */
   referenceGraph?: ReferenceGraph | null;
+  /** Stage 3 关键词追踪:某 token 出现的 chunkIds。非空 → 高亮这些子格 + 画贯穿路径、压暗其余、隐去引用弧。 */
+  tracedChunks?: Set<string> | null;
 }) {
   // 测容器实际像素宽 → 作 viewBox 宽,1:1 不拉伸(setState 在 observer 回调,lint 安全)。
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -121,7 +133,11 @@ export function TurnCanvas({
   for (const cell of cells) {
     const h = Math.max(MIN_ROW, cell.tokens * scale);
     const showHeader = h >= HEADER_MIN_H;
-    const top = showHeader ? HEADER : 1;
+    // 行首标签字号随该轮高度(∝token)适度放大(守「量级编码」);标签条高度随之撑开容纳。
+    const headerFs = showHeader
+      ? Math.min(17, Math.max(LABEL_FS, Math.round(LABEL_FS + (h - HEADER_MIN_H) / 90)))
+      : LABEL_FS;
+    const top = showHeader ? headerFs + 4 : 1;
     let subs: Sub[] = [];
     if (!cell.isBase && !cell.isFolded) {
       const members = cell.chunkIds
@@ -138,7 +154,7 @@ export function TurnCanvas({
         rect,
       ).map((tc) => ({ chunk: tc.item, x: tc.x, y: tc.y, w: tc.w, h: tc.h }));
     }
-    rows.push({ cell, y: yCur, h, subs, showHeader });
+    rows.push({ cell, y: yCur, h, subs, showHeader, headerFs });
     yCur += h;
   }
   // 总高 = max(面板高, 内容高):内容不及阈值×1.2 → 填满面板留空余;超出 → 加长滚动。
@@ -171,6 +187,9 @@ export function TurnCanvas({
     return new Set<string>(turn ? turn.cell.chunkIds : [selected]);
   })();
 
+  // 关键词追踪态:有被追踪块时,画布进入「聚焦该 token 路径」模式(高亮/压暗/隐弧/画线)。
+  const tracing = !!tracedChunks && tracedChunks.size > 0;
+
   return (
     <div ref={wrapRef} className="h-full w-full overflow-y-auto">
       <svg
@@ -192,6 +211,8 @@ export function TurnCanvas({
         {rows.map((r) => {
           const turnSel =
             selScope.size > 0 && r.cell.chunkIds.some((id) => selScope.has(id));
+          // 追踪态:无子格的行(底座/折叠)直接判其 chunkId 是否被追踪 → 描边高亮 / 否则压暗。
+          const rowTraced = tracing && r.cell.chunkIds.some((id) => tracedChunks!.has(id));
           return (
             <g key={r.cell.isFolded ? r.cell.repId : `turn-${r.cell.turn}-${r.y.toFixed(0)}`}>
               <rect
@@ -205,9 +226,17 @@ export function TurnCanvas({
                 }}
                 className="cursor-pointer"
                 fill={r.cell.isBase ? TYPE_FILL.system : r.cell.isFolded ? "#565d6b" : "#2c333f"}
-                fillOpacity={r.cell.isFolded ? 0.5 : r.cell.isBase ? 0.5 : 0.9}
-                stroke={turnSel ? "#ffffff" : "rgba(0,0,0,0.25)"}
-                strokeWidth={turnSel ? 1.25 : 0.5}
+                fillOpacity={
+                  tracing && r.subs.length === 0 && !rowTraced
+                    ? 0.18 // 追踪态:无子格且未命中的行(底座/无关折叠)退场
+                    : r.cell.isFolded
+                      ? 0.5
+                      : r.cell.isBase
+                        ? 0.5
+                        : 0.9
+                }
+                stroke={turnSel ? "#ffffff" : rowTraced ? TRACE_COLOR : "rgba(0,0,0,0.25)"}
+                strokeWidth={turnSel ? 1.25 : rowTraced ? 1.5 : 0.5}
                 vectorEffect="non-scaling-stroke"
               >
                 <title>{`${r.cell.label} · ${formatTokenCount(r.cell.tokens)}`}</title>
@@ -216,16 +245,16 @@ export function TurnCanvas({
                 <>
                   <text
                     x={5}
-                    y={r.y + LABEL_FS}
-                    fontSize={LABEL_FS}
+                    y={r.y + r.headerFs}
+                    fontSize={r.headerFs}
                     className="pointer-events-none fill-black/80"
                   >
-                    {fit(r.cell.label, vw - 64)}
+                    {fit(r.cell.label, vw - 72, r.headerFs)}
                   </text>
                   <text
                     x={vw - 4}
-                    y={r.y + LABEL_FS}
-                    fontSize={TOKEN_FS}
+                    y={r.y + r.headerFs}
+                    fontSize={Math.max(TOKEN_FS, r.headerFs - 2)}
                     textAnchor="end"
                     className="pointer-events-none fill-black/55"
                   >
@@ -239,6 +268,9 @@ export function TurnCanvas({
                   ? chunkTopics[s.chunk.id]?.mainline === false
                   : false;
                 const fate = fateMap[s.chunk.id];
+                const traced = tracing && tracedChunks!.has(s.chunk.id);
+                // 子格标签字号随格子尺寸(∝token)缩放:大块的「文件 11.5K」明显大于小块,守「量级编码」。
+                const subFs = Math.max(8, Math.min(16, Math.floor(Math.min(s.h * 0.5, s.w / 4.5))));
                 return (
                   <g key={s.chunk.id}>
                     <rect
@@ -249,24 +281,27 @@ export function TurnCanvas({
                       onClick={() => onSelect(sel ? null : s.chunk.id)}
                       className="cursor-pointer"
                       fill={TYPE_FILL[s.chunk.type] ?? "#7d8aa3"}
-                      fillOpacity={off ? 0.4 : sel ? 0.95 : 0.82}
-                      stroke={fateStroke(fate, sel)}
-                      strokeWidth={fate || sel ? 1.5 : 0.5}
+                      fillOpacity={
+                        tracing ? (traced ? 0.95 : 0.16) : off ? 0.4 : sel ? 0.95 : 0.82
+                      }
+                      stroke={traced ? TRACE_COLOR : fateStroke(fate, sel)}
+                      strokeWidth={traced ? 2 : fate || sel ? 1.5 : 0.5}
                       strokeDasharray={fate === "fold" ? "3 2" : undefined}
                       vectorEffect="non-scaling-stroke"
                     >
                       <title>{`${TYPE_LABEL[s.chunk.type] ?? s.chunk.type} · ${formatTokenCount(s.chunk.tokens)}${fate ? ` · 标记:${fate}` : ""}`}</title>
                     </rect>
-                    {s.w > 34 && s.h > 12 && (
+                    {s.w > 30 && s.h > 11 && (
                       <text
                         x={s.x + 3}
-                        y={s.y + 10}
-                        fontSize={TOKEN_FS}
+                        y={s.y + subFs + 1}
+                        fontSize={subFs}
                         className="pointer-events-none fill-black/70"
                       >
                         {fit(
                           `${TYPE_LABEL[s.chunk.type] ?? s.chunk.type} ${formatTokenCount(s.chunk.tokens)}`,
                           s.w - 5,
+                          subFs,
                         )}
                       </text>
                     )}
@@ -298,7 +333,7 @@ export function TurnCanvas({
             </text>
           </g>
         )}
-        {referenceGraph && referenceGraph.edges.length > 0 && (() => {
+        {!tracing && referenceGraph && referenceGraph.edges.length > 0 && (() => {
           const key = (a: { x: number; y: number }, b: { x: number; y: number }) =>
             a.y <= b.y ? `${a.x},${a.y}_${b.x},${b.y}` : `${b.x},${b.y}_${a.x},${a.y}`;
           const toolPairs = new Set<string>();
@@ -347,6 +382,41 @@ export function TurnCanvas({
                   </path>
                 );
               })}
+            </g>
+          );
+        })()}
+        {/* 关键词追踪:把该 token 出现的全部块中心按时间序(y 顶老→底新)串成贯穿路径 + 节点。 */}
+        {tracing && (() => {
+          const pts = [...tracedChunks!]
+            .map((id) => center.get(id))
+            .filter((p): p is { x: number; y: number } => !!p)
+            .sort((a, b) => a.y - b.y);
+          if (pts.length === 0) return null;
+          const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+          return (
+            <g>
+              {pts.length >= 2 && (
+                <path
+                  d={d}
+                  fill="none"
+                  stroke={TRACE_COLOR}
+                  strokeWidth={1.5}
+                  strokeDasharray="2 3"
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+              {pts.map((p, i) => (
+                <circle
+                  key={i}
+                  cx={p.x}
+                  cy={p.y}
+                  r={3}
+                  fill={TRACE_COLOR}
+                  stroke="#ffffff"
+                  strokeWidth={0.75}
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
             </g>
           );
         })()}

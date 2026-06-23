@@ -129,9 +129,24 @@ export interface ReferenceArtifact {
   chunks: string[];
   n: number; // 被几条消息触及
 }
+/** 产物索引项:工具触及过的文件路径(≥1)→ 它的 chunkIds(右栏「产物优先」+ 路径追踪)。 */
+export interface ReferenceFile {
+  key: string; // 文件路径
+  chunks: string[]; // 触及它的 chunkIds(tool_result/file 块)
+  n: number; // 触及块数
+  tokens: number; // 这些块的总 token(膨胀量级,降序排)
+}
+/** 关键词索引项:复现 salient token → 它出现的 chunkIds(token-中心路径追踪入口)。 */
+export interface ReferenceKeyword {
+  key: string; // salient token
+  chunks: string[]; // 出现它的 chunkIds(≥2)
+  n: number; // 出现块数
+}
 export interface ReferenceGraph {
   edges: ReferenceEdge[];
   artifacts: ReferenceArtifact[];
+  files?: ReferenceFile[]; // Stage 3 产物优先:全部触及文件 → 路径追踪
+  keywords?: ReferenceKeyword[]; // Stage 3:关键词索引列 + 路径追踪
   layers: string[]; // 已建的层,如 ["tool"]
 }
 

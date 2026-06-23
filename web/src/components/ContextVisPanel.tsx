@@ -36,6 +36,8 @@ import {
   undoApply,
   type RegimeColors,
   type ReferenceGraph,
+  type ReferenceKeyword,
+  type ReferenceFile,
 } from "@/lib/contextvis/apply";
 import { respondCompaction, type CompactionChoice } from "@/lib/contextvis/gate";
 import type {
@@ -997,6 +999,109 @@ function ViewToggle({
   );
 }
 
+/** 关键词追踪色(与 TurnCanvas 的 TRACE_COLOR 一致):点关键词高亮其贯穿路径。 */
+const TRACE_COLOR = "#c678dd";
+
+/** 路径取末段做窄列显示(完整路径进 tooltip)。 */
+function baseName(p: string): string {
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : p;
+}
+
+/** 索引列单行:产物(📄 文件)或关键词(token),统一点击 = 追踪其触及块。 */
+function IndexRow({
+  label,
+  title,
+  meta,
+  on,
+  onClick,
+}: {
+  label: string;
+  title: string;
+  meta: string;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      style={on ? { backgroundColor: `${TRACE_COLOR}33` } : undefined}
+      className={cn(
+        "flex items-center justify-between gap-1 rounded px-1.5 py-0.5 text-left text-[11px] transition-colors",
+        on ? "text-text-primary" : "text-text-secondary hover:bg-current/10",
+      )}
+    >
+      <span className="min-w-0 truncate">{label}</span>
+      <span className="shrink-0 tabular-nums text-text-tertiary">{meta}</span>
+    </button>
+  );
+}
+
+/**
+ * 产物/关键词索引列(Stage 3,方向2 产物优先)—— 画布右窄条,**实体-中心**路径追踪入口。
+ *
+ * **产物在前**(后端 `reference_graph.files`:工具触及过的全部文件路径,带 📄、按总 token 降序——
+ * file 是膨胀主因,最占地的顶上去,右侧数字=token 量级),**关键词在后**(`keywords`:复现 ≥2 块的
+ * salient token,右侧数字=出现块数)。点任一项 → 「追踪态」:画布高亮它触及的全部子格 + 串成贯穿路径
+ * (区别于点块看边的 chunk-中心)。再点同一项 → 取消。守白盒:只读、可解释(tooltip 说明完整路径/块数)。
+ */
+function KeywordIndex({
+  files,
+  keywords,
+  traced,
+  onTrace,
+}: {
+  files: ReferenceFile[];
+  keywords: ReferenceKeyword[];
+  traced: string | null;
+  onTrace: (key: string | null) => void;
+}) {
+  return (
+    <div className="flex w-32 shrink-0 flex-col overflow-hidden border-l border-current/10 pl-2">
+      <div className="flex items-center justify-between pb-1 text-[10px] tracking-wider text-text-tertiary">
+        <span className="text-display">产物/关键词</span>
+        {traced && (
+          <button
+            type="button"
+            onClick={() => onTrace(null)}
+            className="rounded px-1 text-text-tertiary hover:text-text-secondary"
+            title="退出追踪"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+        {files.map((f) => (
+          <IndexRow
+            key={`file:${f.key}`}
+            label={`📄 ${baseName(f.key)}`}
+            title={`文件 ${f.key} · ${f.n} 块 · ${formatTokenCount(f.tokens)} tok — 点击在画布追踪其路径`}
+            meta={formatTokenCount(f.tokens)}
+            on={f.key === traced}
+            onClick={() => onTrace(f.key === traced ? null : f.key)}
+          />
+        ))}
+        {files.length > 0 && keywords.length > 0 && (
+          <div className="my-0.5 border-t border-current/10" />
+        )}
+        {keywords.map((k) => (
+          <IndexRow
+            key={`kw:${k.key}`}
+            label={k.key}
+            title={`「${k.key}」出现在 ${k.n} 个块 — 点击在画布追踪其贯穿路径`}
+            meta={String(k.n)}
+            on={k.key === traced}
+            onClick={() => onTrace(k.key === traced ? null : k.key)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function ContextVisPanel({
   snapshot,
   selected,
@@ -1025,6 +1130,8 @@ export function ContextVisPanel({
   const [mode, setMode] = useState<TreemapMode>("proportional");
   // 主视图主轴:默认「轮次」(turn 优先,见 turn-band.md);「类型」一键回旧树图。
   const [view, setView] = useState<ViewKind>("turn");
+  // Stage 3 关键词追踪:被点选的 token(null=未追踪)。其出现块从 activeGraph.keywords 解析。
+  const [tracedKey, setTracedKey] = useState<string | null>(null);
   // 第二刀主题着色:按需拉取 regime 逐轮 topic。着色数据带上拉取时的 historyVersion,
   // 渲染时比对当前值判**新鲜度**(snapshot 推进则失效)——纯派生,无失效 effect。
   const [colorOn, setColorOn] = useState(false);
@@ -1237,6 +1344,21 @@ export function ContextVisPanel({
   const activeMeta = wantColor && colorData ? colorData : null;
   // 引用图随着色一并就绪(同一 regime_colors 往返);wantColor 关 → 不画弧。
   const activeGraph = wantColor && colorData ? colorData.referenceGraph : null;
+  // Stage 3 产物/关键词索引(随引用图一并就绪);点一项 → tracedChunks 喂 TurnCanvas 高亮+贯穿路径。
+  // 产物优先(文件路径,按 token 量级)在前、关键词(salient token)在后;tracedKey 在两者里找。
+  // 解析不到(着色关/会话推进)→ tracedChunks=null,画布自动退出追踪态。
+  const activeFiles = activeGraph?.files ?? [];
+  const activeKeywords = activeGraph?.keywords ?? [];
+  const tracedFile = tracedKey
+    ? activeFiles.find((f) => f.key === tracedKey) ?? null
+    : null;
+  const tracedKeyword = tracedKey
+    ? activeKeywords.find((k) => k.key === tracedKey) ?? null
+    : null;
+  const tracedEntry = tracedFile
+    ? { key: tracedFile.key, n: tracedFile.chunks.length, chunks: tracedFile.chunks }
+    : tracedKeyword;
+  const tracedChunks = tracedEntry ? new Set(tracedEntry.chunks) : null;
   // 着色是否已过期 = 此前着色的某 chunkId 在当前 chunks 中消失(= 压缩/删/折重构了 id)。
   // 与下方"结构变更重取"effect **同判据**:为真即后台正按新历史重检测着色(此刻仍显示旧色),
   // 据此给用户一个"主题检测中"的提示——纯 render 派生,无 effect 置态,lint 安全。
@@ -1732,43 +1854,70 @@ export function ContextVisPanel({
               <span className="text-text-tertiary/70">选中轮高亮 · 悬停弧看共享来由</span>
             </div>
           )}
-          <div className="min-h-0 flex-1">
-          {hasChunks &&
-            (view === "turn" ? (
-              USE_CANVAS ? (
-                <TurnCanvas
-                  snapshot={snapshot}
-                  selected={selected}
-                  onSelect={onSelect}
-                  chunkTopics={activeTopics}
-                  fateMap={effectiveFateMap}
-                  onActivateTurn={onActivateTurn}
-                  referenceGraph={activeGraph}
-                />
+          {/* 关键词追踪态提示:解释画布上的紫色贯穿路径来由(白盒 #6:每条连线可解释)。 */}
+          {view === "turn" && tracedEntry && (
+            <div
+              className="flex items-center gap-1.5 text-[10px]"
+              style={{ color: TRACE_COLOR }}
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: TRACE_COLOR }}
+              />
+              追踪「{tracedEntry.key}」· {tracedEntry.n} 块高亮 + 贯穿路径(紫线）· 右栏再点取消
+            </div>
+          )}
+          <div className="flex min-h-0 flex-1 gap-2">
+            <div className="min-h-0 flex-1">
+            {hasChunks &&
+              (view === "turn" ? (
+                USE_CANVAS ? (
+                  <TurnCanvas
+                    snapshot={snapshot}
+                    selected={selected}
+                    onSelect={onSelect}
+                    chunkTopics={activeTopics}
+                    fateMap={effectiveFateMap}
+                    onActivateTurn={onActivateTurn}
+                    referenceGraph={activeGraph}
+                    tracedChunks={tracedChunks}
+                  />
+                ) : (
+                  <TurnBand
+                    snapshot={snapshot}
+                    mode={mode}
+                    selected={selected}
+                    onSelect={onSelect}
+                    chunkTopics={activeTopics}
+                    cellColors={activeCellColors}
+                    onActivateTurn={onActivateTurn}
+                    fateMap={effectiveFateMap}
+                    fateReasons={gateActive ? pending?.fateReasons : undefined}
+                    gateActive={gateActive}
+                    referenceGraph={activeGraph}
+                  />
+                )
               ) : (
-                <TurnBand
+                <Treemap
                   snapshot={snapshot}
                   mode={mode}
                   selected={selected}
                   onSelect={onSelect}
-                  chunkTopics={activeTopics}
-                  cellColors={activeCellColors}
-                  onActivateTurn={onActivateTurn}
                   fateMap={effectiveFateMap}
-                  fateReasons={gateActive ? pending?.fateReasons : undefined}
-                  gateActive={gateActive}
-                  referenceGraph={activeGraph}
                 />
-              )
-            ) : (
-              <Treemap
-                snapshot={snapshot}
-                mode={mode}
-                selected={selected}
-                onSelect={onSelect}
-                fateMap={effectiveFateMap}
-              />
-            ))}
+              ))}
+            </div>
+            {hasChunks &&
+              view === "turn" &&
+              USE_CANVAS &&
+              (activeFiles.length > 0 || activeKeywords.length > 0) && (
+                <KeywordIndex
+                  files={activeFiles}
+                  keywords={activeKeywords}
+                  traced={tracedKey}
+                  onTrace={setTracedKey}
+                />
+              )}
           </div>
 
           <Sparkline snapshot={snapshot} />

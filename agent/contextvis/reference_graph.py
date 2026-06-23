@@ -122,6 +122,36 @@ def _lexical_edges(
     return edges
 
 
+def _keyword_index(
+    messages: List[Dict[str, Any]],
+    mi2c: Dict[int, str],
+) -> List[Dict[str, Any]]:
+    """关键词索引 = 复现 salient token → 它出现的 chunkIds(**token-中心**路径追踪入口)。
+
+    与层②文字共现**同源**(都吃 ``_segment_turns`` 的 raw + ``_salient_tokens``),但聚到
+    **chunk** 而非 turn:供右栏列出、点击某关键词后画布高亮其全部出现块 + 贯穿连线
+    (区别于 chunk-中心的"点块看边")。只留 ≥2 个 chunk 的**复现** token(单次出现无线索可追),
+    按出现块数降序取前 N。系统词/boilerplate 跳过,免造环境噪声。
+    """
+    _turn_of, _n_turns, boiler, raw = _segment_turns(messages)
+    kc: Dict[str, set] = {}
+    for i, msg in enumerate(messages):
+        if boiler[i] or msg.get("role") == "system":
+            continue
+        cid = mi2c.get(i)
+        if not cid:
+            continue
+        for tok in _salient_tokens(raw[i]):
+            kc.setdefault(tok, set()).add(cid)
+    out = [
+        {"key": tok, "chunks": sorted(cids), "n": len(cids)}
+        for tok, cids in kc.items()
+        if len(cids) >= 2
+    ]
+    out.sort(key=lambda k: (-k["n"], k["key"]))
+    return out[:40]
+
+
 def reference_graph(
     messages: List[Dict[str, Any]],
     chunks: List[Dict[str, Any]],
@@ -133,12 +163,15 @@ def reference_graph(
         {
           "edges": [ {src, dst, src_mi, dst_mi, kind:"tool", rel, via:<path>, weight} ],
           "artifacts": [ {key:<path>, kind:"file", messageIndices:[...], chunks:[...], n} ],
+          "files": [ {key:<path>, chunks:[...chunkId], n, tokens} ],
+          "keywords": [ {key:<token>, chunks:[...chunkId], n} ],
           "layers": ["tool"],
         }
 
     - **边**:每次读/写连其**前最近一次同路径 write**;``rel`` = ``"read"``(写后读=数据流)
       或 ``"revision"``(写后写=修订)。``src``/``dst`` 为 chunkId(messageIndex 解析不到 → ``None``)。
-    - **artifact**:被 ≥2 条消息触及的路径(= 形成线索/边的复现产物),喂符号表泳道。
+    - **artifact**:被 ≥2 条消息触及的路径(= 形成线索/边的复现产物)。
+    - **files**:工具触及过的**全部**文件路径(≥1)→ chunkIds,按总 token 降序;喂右栏「产物优先」索引/路径追踪。
     - 读一个本对话没写过的外部文件 → 无边(无前写);读↔读不成边(留给层②文字共现)。
     """
     messages = messages or []
@@ -192,9 +225,32 @@ def reference_graph(
             "n": len(uniq),
         })
 
+    # 产物索引(喂右栏「产物优先」+ 路径追踪):工具触及过的**全部**文件路径(≥1 次,区别于
+    # artifacts 的 ≥2「成线索」)→ 它的 chunkIds(tool_result/file 块)。按总 token 降序——
+    # file 是上下文膨胀主因,把最占地的产物顶上去,点它在画布追踪/高亮。
+    chunk_tok = {c.get("id"): c.get("tokens", 0) for c in (chunks or []) if c.get("id")}
+    files: List[Dict[str, Any]] = []
+    for p, mis in path_msgs.items():
+        cids = sorted({mi2c[m] for m in sorted(set(mis)) if m in mi2c})
+        if not cids:
+            continue
+        files.append({
+            "key": p,
+            "chunks": cids,
+            "n": len(cids),
+            "tokens": sum(chunk_tok.get(cid, 0) for cid in cids),
+        })
+    files.sort(key=lambda f: (-f["tokens"], -f["n"], f["key"]))
+
     layers = ["tool"]
     if _lex_enabled():
         edges.extend(_lexical_edges(messages, mi2c))
         layers.append("lexical")
 
-    return {"edges": edges, "artifacts": artifacts, "layers": layers}
+    return {
+        "edges": edges,
+        "artifacts": artifacts,
+        "files": files,
+        "keywords": _keyword_index(messages, mi2c),
+        "layers": layers,
+    }
