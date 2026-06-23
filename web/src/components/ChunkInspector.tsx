@@ -6,8 +6,8 @@
  * system/tools）在终端对话里**根本看不到**,检视器是唯一能读到的地方——把
  * 白盒的「可追溯」补全。
  *
- * 布局(对话轮):上=头部,中=「本轮构成」chip 区(约 50%,仅 chip 列表内滚),
- * 下=原文区(约 50%,仅原文内容内滚)。压缩折叠块=终点叶子:无 chip 区,原文占满。
+ * 布局(对话轮):上=头部,中=「本轮构成」chip 区(40%,仅 chip 列表内滚),
+ * 下=原文区(60%,仅原文内容内滚)。压缩折叠块=终点叶子:无 chip 区,原文占满。
  *
  * 原文随 `context.snapshot` 推送(后端 chunking.py，按 32KB 截断),挂在
  * `chunk.raw`；这里只负责展示。v1 纯原文 `<pre>`，仅 tool_schema 已是 JSON。
@@ -242,10 +242,11 @@ function FateControls({
   );
 }
 
-/** 原文区:小标题 + 内容（**只有内容区内滚**）。 */
+/** 原文区:小标题 + 内容（**只有内容区内滚**）。对话轮里占 60%(grow-3 vs 构成 grow-2);
+ *  折叠叶子里是唯一可伸长元素 → 占满余下。 */
 function RawView({ chunk }: { chunk: ContextChunk }) {
   return (
-    <section className="flex min-h-0 flex-1 basis-0 flex-col gap-1">
+    <section className="flex min-h-0 grow-3 basis-0 flex-col gap-1">
       <div className="flex shrink-0 items-center gap-2 px-0.5 text-[11px] tabular-nums text-text-tertiary">
         <span className="text-display tracking-wider">原文</span>
         <span>~{formatTokenCount(chunk.tokens)} tok</span>
@@ -306,7 +307,7 @@ export function ChunkInspector({
   }
 
   const color = TYPE_COLOR[chunk.type] ?? "#888";
-  // 对话轮(turnChunks 非空)→ 上下 50/50:chip 区 + 原文区;压缩折叠块=终点叶子(无 chip 区)。
+  // 对话轮(turnChunks 非空)→ 上下 40/60:chip 区 + 原文区;压缩折叠块=终点叶子(无 chip 区)。
   const hasComposition = !!turnChunks && turnChunks.length >= 1;
 
   return (
@@ -342,8 +343,8 @@ export function ChunkInspector({
 
       {hasComposition ? (
         <>
-          {/* chip 区(约 50%):本轮构成 + 命运控件。只有 chip 列表内滚。 */}
-          <section className="flex min-h-0 flex-1 basis-0 flex-col gap-1.5 rounded border border-current/10 px-2 py-1.5">
+          {/* chip 区(40%):本轮构成 + 命运控件。只有 chip 列表内滚。 */}
+          <section className="flex min-h-0 grow-2 basis-0 flex-col gap-1.5 rounded border border-current/10 px-2 py-1.5">
             <Composition
               members={turnChunks!}
               selectedId={chunk.id}

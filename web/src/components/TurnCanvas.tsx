@@ -221,8 +221,14 @@ export function TurnCanvas({
                 width={vw}
                 height={Math.max(0, r.h - GAP)}
                 onClick={() => {
-                  onSelect(r.cell.repId === selected ? null : r.cell.repId);
-                  if (!r.cell.isBase && !r.cell.isFolded) onActivateTurn?.(r.cell.turn);
+                  // 「第N轮」头部条(子格之上的留白带)= 导航,不开详情:关掉已开的检视器(它盖在 TUI 上,
+                  // 不关则看不到跳转)+ 把 TUI 滚到该轮(老版行为)。底座/折叠无 TUI 锚点 → 点它检视内容。
+                  if (r.cell.isBase || r.cell.isFolded) {
+                    onSelect(r.cell.repId === selected ? null : r.cell.repId);
+                  } else {
+                    onSelect(null);
+                    onActivateTurn?.(r.cell.turn);
+                  }
                 }}
                 className="cursor-pointer"
                 fill={r.cell.isBase ? TYPE_FILL.system : r.cell.isFolded ? "#565d6b" : "#2c333f"}
@@ -239,7 +245,7 @@ export function TurnCanvas({
                 strokeWidth={turnSel ? 1.25 : rowTraced ? 1.5 : 0.5}
                 vectorEffect="non-scaling-stroke"
               >
-                <title>{`${r.cell.label} · ${formatTokenCount(r.cell.tokens)}`}</title>
+                <title>{`${r.cell.label} · ${formatTokenCount(r.cell.tokens)}${!r.cell.isBase && !r.cell.isFolded ? " · 点击跳转到该轮对话" : ""}`}</title>
               </rect>
               {r.showHeader && (
                 <>
