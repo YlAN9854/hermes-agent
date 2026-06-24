@@ -13,6 +13,7 @@
  * drop（确定性、零 LLM）与 fold（A-v2,跑辅助模型摘要）共用这条命令路。
  */
 
+import { activeFixture } from "@/lib/contextvis/fixtures";
 import { GatewayClient } from "@/lib/gatewayClient";
 
 export interface ApplyResult {
@@ -155,6 +156,9 @@ export interface ReferenceGraph {
  * 已缓存)并 join 到 chunk。前端缓存结果,historyVersion 变才重取——故非每帧调用。
  */
 export async function fetchRegimeColors(sessionId: string): Promise<RegimeColors> {
+  // Fixture 重放（dev）:返回冻结的检测器判定（着色 + 引用图），不发 RPC、不跑 aux LLM。
+  const fx = activeFixture();
+  if (fx) return fx.regimeColors;
   const gw = await ensureClient();
   return gw.request<RegimeColors>("context.regime_colors", {
     session_id: sessionId,

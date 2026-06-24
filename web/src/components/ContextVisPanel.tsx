@@ -44,6 +44,7 @@ import {
   type ReferenceGraph,
 } from "@/lib/contextvis/apply";
 import { respondCompaction, type CompactionChoice } from "@/lib/contextvis/gate";
+import { downloadFixture } from "@/lib/contextvis/fixtures";
 import type {
   ContextSnapshot,
   TreemapMode,
@@ -555,11 +556,37 @@ export function ContextVisPanel({
     }
   };
 
+  // Dev-only 录制器:把此刻的 snapshot + 着色/引用图打包成 fixture 下载,供零-token 重放。
+  // 抓 fetchRegimeColors 的**原始**返回(非已转换的 colorData),让重放走 buildColorData 同一路径。
+  // 见 lib/contextvis/fixtures —— 放进该目录后 `?fixture=<name>` 即可重放。
+  const recordFixture = async () => {
+    const name = window.prompt("fixture 名(英文 slug，无扩展名):", "case");
+    if (!name) return;
+    const note = window.prompt("这个 case 想展示什么?(可空)", "") || undefined;
+    let rc: RegimeColors | null = null;
+    try {
+      if (sid) rc = await fetchRegimeColors(sid);
+    } catch {
+      /* 着色抓取失败仍导出快照(可只测占用/画布版图) */
+    }
+    downloadFixture(name.trim(), snapshot, rc, note);
+  };
+
   return (
     <Card className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="text-display text-xs tracking-wider text-text-tertiary">context</div>
         <div className="flex items-center gap-2">
+          {import.meta.env.DEV && hasChunks && (
+            <button
+              type="button"
+              onClick={recordFixture}
+              className="rounded border border-current/15 px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary transition-colors hover:text-text-secondary"
+              title="录制当前 context 为 fixture(dev)：下载 JSON 到 web/src/lib/contextvis/fixtures/，之后用 ?fixture=名 零-token 重放"
+            >
+              ⬇ fixture
+            </button>
+          )}
           {hasChunks && <ViewToggle view={view} onChange={setView} />}
           {hasChunks && view === "turn" && (
             <button

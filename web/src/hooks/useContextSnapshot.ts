@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { HERMES_BASE_PATH, buildWsAuthParam } from "@/lib/api";
+import { activeFixture } from "@/lib/contextvis/fixtures";
 import {
   EMPTY_SNAPSHOT,
   type CompactionEvent,
@@ -90,11 +91,17 @@ const DROP_FRACTION = 0.05;
  * @param channel ChatPage 生成、绑定本标签 PTY 子进程的通道 id。
  */
 export function useContextSnapshot(channel: string): ContextSnapshot {
-  const [snapshot, setSnapshot] = useState<ContextSnapshot>(EMPTY_SNAPSHOT);
+  // Fixture 重放（dev）:`?fixture=<name>` 命中即以冻结快照初始化、完全不开 WS。
+  // 守适配器边界:渲染层只见 ContextSnapshot,不知 fixture 存在。见 lib/contextvis/fixtures。
+  const [snapshot, setSnapshot] = useState<ContextSnapshot>(
+    () => activeFixture()?.snapshot ?? EMPTY_SNAPSHOT,
+  );
   // 上一次见到的累计压缩计数，用来判定「这一帧发生了压缩」。-1 = 尚未见过。
   const lastCompressionsRef = useRef<number>(-1);
 
   useEffect(() => {
+    // Fixture 模式:状态已用冻结快照初始化,不订阅事件通道(零 token、完全确定)。
+    if (activeFixture()) return;
     if (!channel) return;
 
     let unmounting = false;

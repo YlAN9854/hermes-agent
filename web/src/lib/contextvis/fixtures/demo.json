@@ -1,0 +1,61 @@
+{
+  "name": "demo",
+  "capturedAt": 0,
+  "note": "手写占位样例:认证重构会话(主线=auth refactor + 一条已完成支线 setup)。chunk 合计=used=84000(42%),compactAt=100000(50%阈值),故画布填到阈值线下方。验证管路用,随时删。注:fixture 只喂右侧 ContextVis 面板,不驱动左侧 TUI(真实 PTY 子进程),故 TUI 占比为 0% 属预期。",
+  "snapshot": {
+    "budget": 200000,
+    "used": 84000,
+    "percent": 42,
+    "turn": 7,
+    "history": [
+      { "turn": 1, "used": 16000, "percent": 8 },
+      { "turn": 3, "used": 45000, "percent": 23 },
+      { "turn": 5, "used": 63000, "percent": 32 },
+      { "turn": 7, "used": 84000, "percent": 42 }
+    ],
+    "compactions": [],
+    "compressionCount": 0,
+    "chunks": [
+      { "id": "sys:0", "type": "system", "tokens": 3600, "turn": 0, "label": "系统提示", "sourceRefs": [] },
+      { "id": "schema:0", "type": "tool_schema", "tokens": 9200, "turn": 0, "label": "工具定义", "sourceRefs": [] },
+      { "id": "hist:1", "type": "history", "tokens": 4200, "turn": 1, "label": "第1轮", "sourceRefs": [{ "messageIndex": 2 }] },
+      { "id": "file:msg:8", "type": "file", "tokens": 28000, "turn": 3, "label": "auth/session.py", "sourceRefs": [{ "messageIndex": 8 }] },
+      { "id": "tool:msg:12", "type": "tool_result", "tokens": 9800, "turn": 4, "label": "grep session", "sourceRefs": [{ "messageIndex": 12 }] },
+      { "id": "hist:5", "type": "history", "tokens": 5200, "turn": 5, "label": "第5轮", "sourceRefs": [{ "messageIndex": 15 }] },
+      { "id": "file:msg:18", "type": "file", "tokens": 24000, "turn": 7, "label": "auth/tokens.py", "sourceRefs": [{ "messageIndex": 18 }] }
+    ],
+    "compactAt": 100000,
+    "sessionId": "fixture-demo",
+    "historyVersion": 7
+  },
+  "regimeColors": {
+    "regime": "task",
+    "focus": "refactor auth session handling",
+    "engine": "llm",
+    "reason": "llm: mainline=auth refactor",
+    "chunk_topics": {
+      "hist:1": { "topic": "project setup", "mainline": false, "done": true },
+      "file:msg:8": { "topic": "auth refactor", "mainline": true, "done": false },
+      "tool:msg:12": { "topic": "auth refactor", "mainline": true, "done": false },
+      "hist:5": { "topic": "auth refactor", "mainline": true, "done": false },
+      "file:msg:18": { "topic": "auth refactor", "mainline": true, "done": false }
+    },
+    "reference_graph": {
+      "edges": [
+        { "src": "file:msg:8", "dst": "tool:msg:12", "src_mi": 8, "dst_mi": 12, "kind": "tool", "rel": "read", "via": "auth/session.py", "weight": 1 },
+        { "src": "file:msg:8", "dst": "file:msg:18", "src_mi": 8, "dst_mi": 18, "kind": "lexical", "via": "session", "weight": 1 }
+      ],
+      "artifacts": [
+        { "key": "auth/session.py", "kind": "file", "messageIndices": [8, 12], "chunks": ["file:msg:8", "tool:msg:12"], "n": 2 }
+      ],
+      "files": [
+        { "key": "auth/session.py", "chunks": ["file:msg:8", "tool:msg:12"], "n": 2, "tokens": 37800 },
+        { "key": "auth/tokens.py", "chunks": ["file:msg:18"], "n": 1, "tokens": 24000 }
+      ],
+      "keywords": [
+        { "key": "session", "chunks": ["file:msg:8", "tool:msg:12", "hist:5"], "n": 3 }
+      ],
+      "layers": ["tool", "lexical"]
+    }
+  }
+}
