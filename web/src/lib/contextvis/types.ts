@@ -125,6 +125,12 @@ export interface ContextSnapshot {
   pendingCompaction?: PendingCompaction;
 }
 
+/** treemap 展示模式：比例划分 vs 实际占用。 */
+export type TreemapMode = "proportional" | "actual";
+
+/** 主视图主轴：类型带 vs 轮次带。 */
+export type ViewKind = "type" | "turn";
+
 /** 空快照：尚未收到任何带真实窗口的 session.info 时的初始态。 */
 export const EMPTY_SNAPSHOT: ContextSnapshot = {
   budget: 0,

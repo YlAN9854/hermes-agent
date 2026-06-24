@@ -14,7 +14,8 @@
  * 与逐块绝对 token 一样,这是**比例真实、总量自洽**的投影,不冒充精确值。
  */
 
-import type { ContextChunk, ContextSnapshot } from "@/lib/contextvis/types";
+import type { ChunkType, ContextChunk, ContextSnapshot } from "@/lib/contextvis/types";
+import type { TurnCell } from "@/lib/contextvis/turns";
 
 /** 用户为单个 chunk 标记的命运。复用契约 union,不另造类型。 */
 export type Fate = NonNullable<ContextChunk["fate"]>;
@@ -112,4 +113,39 @@ export function projectFates(
     counts,
     hasMarks: counts.keep + counts.fold + counts.drop > 0,
   };
+}
+
+export interface AggregatedCellFate {
+  full: Fate | null;
+  partial: Fate | null;
+  mixed: boolean;
+  dropCount: number;
+}
+
+/**
+ * 逐格聚合成员 chunk 的命运（纯函数）。
+ *   · full    = 该轮全部 message-backed 成员同一命运（整轮已标）→ 强叠加。
+ *   · partial = 单一命运但未标全 → 弱提示。
+ *   · mixed   = 成员标了不同命运 → 弱提示（中性）。
+ * 底座/折叠块不参与（无可落地成员 / 已是压缩产物）。
+ */
+export function aggregateCellFate(
+  cell: TurnCell,
+  typeById: Map<string, ChunkType>,
+  fateMap: FateMap,
+): AggregatedCellFate {
+  const none: AggregatedCellFate = { full: null, partial: null, mixed: false, dropCount: 0 };
+  if (cell.isBase || cell.isFolded) return none;
+  const msgIds = cell.chunkIds.filter((id) => {
+    const t = typeById.get(id);
+    return t !== undefined && MESSAGE_BACKED_TYPES.has(t);
+  });
+  const marked = msgIds.map((id) => fateMap[id]).filter((f): f is Fate => !!f);
+  const dropCount = marked.filter((f) => f === "drop").length;
+  if (marked.length === 0) return none;
+  if (new Set(marked).size > 1) return { full: null, partial: null, mixed: true, dropCount };
+  const f = marked[0];
+  return marked.length === msgIds.length
+    ? { full: f, partial: null, mixed: false, dropCount }
+    : { full: null, partial: f, mixed: false, dropCount };
 }

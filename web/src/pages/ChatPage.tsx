@@ -33,7 +33,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { ChunkInspector } from "@/components/ChunkInspector";
 import { ContextVisPanel } from "@/components/ContextVisPanel";
-import { useContextSnapshot } from "@/lib/contextvis/adapter";
+import { useContextSnapshot } from "@/hooks/useContextSnapshot";
 import type { Fate, FateMap } from "@/lib/contextvis/plan";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
