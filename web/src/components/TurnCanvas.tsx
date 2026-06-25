@@ -15,6 +15,7 @@ import { squarify, type Rect } from "@/lib/contextvis/treemap";
 import type { ReferenceGraph, RegimeColors } from "@/lib/contextvis/apply";
 import type { Fate, FateMap } from "@/lib/contextvis/plan";
 import {
+  CV_ADD,
   CV_ARC,
   CV_FATE,
   CV_SURFACE,
@@ -356,6 +357,7 @@ export function TurnCanvas({
                   ? chunkTopics[s.chunk.id]?.mainline === false
                   : false;
                 const fate = fateMap[s.chunk.id];
+                const added = s.chunk.added === true; // v2 add：用户注入块
                 const traced = tracing && tracedChunks!.has(s.chunk.id);
                 // 子格标签字号随格子尺寸(∝token)缩放:大块明显大于小块,守「量级编码」。
                 const subFs = Math.max(9, Math.min(18, Math.floor(Math.min(s.h * 0.46, s.w / 4))));
@@ -377,17 +379,40 @@ export function TurnCanvas({
                       height={Math.max(0, s.h - 0.5)}
                       onClick={() => onSelect(sel ? null : s.chunk.id)}
                       className="cursor-pointer"
-                      fill={TYPE_FILL[s.chunk.type] ?? TYPE_FILL.history}
+                      fill={added ? CV_ADD : TYPE_FILL[s.chunk.type] ?? TYPE_FILL.history}
                       fillOpacity={
-                        tracing ? (traced ? 0.95 : 0.16) : off ? 0.4 : sel ? 0.95 : 0.82
+                        added
+                          ? 0.9
+                          : tracing
+                            ? traced
+                              ? 0.95
+                              : 0.16
+                            : off
+                              ? 0.4
+                              : sel
+                                ? 0.95
+                                : 0.82
                       }
-                      stroke={traced ? TRACE_COLOR : fateStroke(fate, sel)}
-                      strokeWidth={traced ? 2 : fate || sel ? 1.5 : 0.5}
-                      strokeDasharray={fate === "fold" ? "3 2" : undefined}
+                      stroke={
+                        added ? CV_ADD : traced ? TRACE_COLOR : fateStroke(fate, sel)
+                      }
+                      strokeWidth={added ? 1.5 : traced ? 2 : fate || sel ? 1.5 : 0.5}
+                      strokeDasharray={added ? "3 2" : fate === "fold" ? "3 2" : undefined}
                       vectorEffect="non-scaling-stroke"
                     >
-                      <title>{`${name} · ${TYPE_LABEL[s.chunk.type] ?? s.chunk.type} · ${formatTokenCount(s.chunk.tokens)}${fate ? ` · 标记:${fate}` : ""}`}</title>
+                      <title>{`${name} · ${added ? "你注入（add）" : TYPE_LABEL[s.chunk.type] ?? s.chunk.type}${s.chunk.pinned ? " · 📌 pin 免压缩" : ""} · ${formatTokenCount(s.chunk.tokens)}${fate ? ` · 标记:${fate}` : ""}`}</title>
                     </rect>
+                    {s.chunk.pinned && s.w > 12 && s.h > 12 && (
+                      <text
+                        x={s.x + s.w - 4}
+                        y={s.y + 4 + Math.min(13, s.h * 0.5)}
+                        textAnchor="end"
+                        fontSize={Math.min(13, Math.max(10, s.h * 0.5))}
+                        className="pointer-events-none"
+                      >
+                        📌
+                      </text>
+                    )}
                     {showIcon && (
                       <Glyph
                         icon={s.chunk.type}

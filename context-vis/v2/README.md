@@ -1,6 +1,6 @@
 # ContextVis v2 —— 设计探索入口
 
-> **状态:设计探索为主;**首个落地——**引用图层①(工具溯源边)已建成实测**(见 [operations.md](operations.md) §6 实现状态)。其余(操作集/promote/轮盘/画布/层②③)仍为设计。
+> **状态:设计探索为主;已落地——引用图层①②(工具溯源+文字共现)+ 画布化(TurnCanvas)+ `add` 首刀(预览:fixture 工坊 + `projectAdd` + composer/pin + inspector)**(见 [operations.md](operations.md) §2/§6 实现状态)。其余(invalidate / promote / 轮盘 / 层③ + **add 的 Layer 2 落地**)仍为设计 / 待建。
 > **v1(已建成工程)** 见上级 [../CONTEXTVIS.md](../CONTEXTVIS.md)。本目录(`v2/`)全部是 v2。
 
 ---

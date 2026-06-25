@@ -35,6 +35,7 @@ import { ChunkInspector } from "@/components/ChunkInspector";
 import { ContextVisPanel } from "@/components/ContextVisPanel";
 import { useContextSnapshot } from "@/hooks/useContextSnapshot";
 import type { Fate, FateMap } from "@/lib/contextvis/plan";
+import type { ContextChunk } from "@/lib/contextvis/types";
 import { usePageHeader } from "@/contexts/usePageHeader";
 import { useI18n } from "@/i18n";
 import { api } from "@/lib/api";
@@ -180,14 +181,18 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   // （chunk 原文检视器）共享——master-detail 联动。
   const contextSnapshot = useContextSnapshot(channel);
   const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
+  // v2 `add`：panel 持有草稿、把当前合成 chunk 通知上来，使选中它时 inspector 能读原文
+  // （注入块只在 panel 的 displaySnapshot 里，不在真实 contextSnapshot.chunks）。
+  const [addDraftChunk, setAddDraftChunk] = useState<ContextChunk | null>(null);
   const selectedChunk =
-    contextSnapshot.chunks.find((c) => c.id === selectedChunkId) ?? null;
+    contextSnapshot.chunks.find((c) => c.id === selectedChunkId) ??
+    (addDraftChunk && addDraftChunk.id === selectedChunkId ? addDraftChunk : null);
   // 第三刀:选中块所属轮的全部 chunk(同 turn)；inspector 在 >1 时显「本轮构成」。
   // 压缩折叠块是独立产物(原始轮已被销毁,见 turn-band.md §4)——与 band 的 buildTurnCells
   // 对齐:① 选中折叠块 = 终点叶子(turnChunks=undefined,只看摘要原文、不显本轮构成);
   // ② 某轮的构成也排除恰好落在同一 turn 号上的折叠块,免得压缩产物冒充该轮成员。
   const turnChunks =
-    selectedChunk && !selectedChunk.folded
+    selectedChunk && !selectedChunk.folded && !selectedChunk.added
       ? contextSnapshot.chunks.filter(
           (c) => c.turn === selectedChunk.turn && !c.folded,
         )
@@ -1035,6 +1040,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
               onClearFates={() => setFateMap({})}
               onActivateTurn={jumpToTurn}
               onSetFates={setFates}
+              onAddDraftChange={setAddDraftChunk}
             />
           </div>
         )}

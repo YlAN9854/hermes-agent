@@ -1,6 +1,6 @@
 # ContextVis v2 · 操作集 + 新交互 + 驱动 case
 
-> **状态:设计探索(未建)。** 理论依据(剃刀)见 [principle.md](principle.md)。
+> **状态:设计探索为主;已落地——引用图层①②(§6)+ 画布化(TurnCanvas)+ `add` 首刀(预览,见 §2 add 实现状态)。** 理论依据(剃刀)见 [principle.md](principle.md)。
 > 组织原则:**按"意图"而非"动词"组织**——动词会重复(merge 塌进 fold),意图不会。
 
 ---
@@ -24,6 +24,14 @@ keep/drop/fold/invalidate 都在治理"**机器写的内容**"(用户=审查员)
 - **是什么**:注入"忘了说的约束 / 临时纠正 / 指向",但**不值得单开一轮 turn**。
 - **与 turn 的本质区别(=必要性)**:turn 是**对话动作**(触发生成、agent 必须回应、占整轮、下次又变旧被压);add 是**非对话注入**(随行注解,看得见但不必回应;配钉死区穿越压缩永久承重)。今天你只能开一轮 → add 严格更优。
 - **剃刀**:注入外部真相 + 意图,机器结构上拿不到。强通过。
+
+> **实现状态(2026-06,A 首刀 = 预览,纯前端零后端)**:add 的**观察→预览**闭环已建成实测,**落地(写真实 session)留 Layer 2**。
+> - **fixture 工坊(建 case 的地基)**:`?fixture=<name>` 冻结渲染层两数据源(snapshot + regime_colors,**连检测器判定一并钉死**)→ 零-token、完全确定地重放一个 case;面板 `⬇ fixture`(dev)一键录制。注入点只在适配器边界(`useContextSnapshot` / `fetchRegimeColors`),渲染层不知情。见 `web/src/lib/contextvis/fixtures/`。**它解决项目瓶颈**——case 怎么设计 + 怎么幂等测(fork 会让 regime_colors 重跑 aux LLM、主线/弧每次抖;fixture 把那次判定冻住)。
+> - **`add.ts` 纯函数(对偶 plan.ts 的 `projectFates`)**:`AddDraft{text, placement}` + `projectAdd(snapshot, draft)→增广 snapshot`(追加合成 chunk + 抬占用)+ `addCost`(成本预览)。零副作用、可逆。
+> - **放置轴 pin/inline 已落地**(system-prompt=promote 另设,见 §3):composer(textarea + 📌pin/inline 段选 + 实时 `+Ntok·X%→Y%·免压缩`);增广 snapshot 喂三渲染器 → 画布**注入块自动作新一轮渲染**(violet 虚线格 + 📌pin,`CV_ADD` 单一色源),占用诚实抬高,`buildTurnCells` 零改。
+> - **inspector 接草稿**(挂载壳沿用 selection/fateMap 上提模式):panel 经 `onAddDraftChange` 上抛合成块 → ChatPage 并入选中候选 → 点注入格显「你注入(add)·📌pin」徽章 + 原文 +「落地见 Layer 2」,草稿不可标命运。
+> - **驱动 case**:`add-prod-readonly`(B1,外部真相缺口)—— agent 已读 models/db/services + 生成 migration、下一步将 `alembic upgrade head` 打 prod,"生产周五前只读"全程缺席 → 用户 add+pin 注入。
+> - **未建(= B)**:Layer 2 后端 `context.add` mutation(真写 session:inline 插 `messages` / pin 进免压区)+ `session.branch` 对照实验(带注入 vs 不带,证有效性);pin 的"永不被建议折/删"强制;promote(放置=system-prompt)。**开工前两决定**:① pin 存哪(独立免压区 vs 标记 message 永不压);② 真改 session vs 只在 branch 上验。
 
 ### invalidate —— 独立命运(被"作废 × 引用结构"逼出来)
 - **是什么**:标某块"**不再成立**",agent 别再据它行动、压缩器可降权——但**与 drop 不同,块留着当历史**。

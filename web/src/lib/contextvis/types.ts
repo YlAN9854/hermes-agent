@@ -50,6 +50,10 @@ export interface ContextChunk {
   raw?: string;
   /** 压缩折叠产物（摘要消息）：turn 带画成「已折叠」块，不计为对话轮。 */
   folded?: boolean;
+  /** v2 `add`：用户经 add 注入的块（co-author 的"写"，区别于机器写的历史）。v1 恒空。 */
+  added?: boolean;
+  /** v2 放置轴 = pin：持久免压缩区。渲染加 📌、压缩投影里不参与释放。v1 恒空。 */
+  pinned?: boolean;
 }
 
 /** 压缩事件：给历史块分配命运后，容器占用的一次骤降。 */

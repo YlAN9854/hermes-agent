@@ -22,7 +22,7 @@ import {
   type Fate,
   type FateMap,
 } from "@/lib/contextvis/plan";
-import { CV_TYPE_FILL } from "@/lib/contextvis/theme";
+import { CV_ADD, CV_TYPE_FILL } from "@/lib/contextvis/theme";
 import type { ContextChunk } from "@/lib/contextvis/types";
 import { cn } from "@/lib/utils";
 
@@ -297,6 +297,46 @@ export function ChunkInspector({
           <br />
           在此查看它的完整原文。
         </p>
+      </aside>
+    );
+  }
+
+  // v2 `add`：用户注入的草稿块 —— 专用简视图（add 徽章 + 原文；草稿不可标命运，无 chip 区）。
+  if (chunk.added) {
+    return (
+      <aside className="flex h-full w-full min-w-0 flex-col gap-2 overflow-hidden">
+        <div className="flex shrink-0 items-start justify-between gap-2 px-1">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span
+                className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm"
+                style={{ backgroundColor: CV_ADD }}
+              />
+              <span className="text-display text-xs tracking-wider text-text-tertiary">
+                你注入 (add){chunk.pinned ? " · 📌 pin" : ""}
+              </span>
+            </div>
+            <div
+              className="mt-0.5 wrap-break-word text-sm font-medium text-text-secondary"
+              title={chunk.label}
+            >
+              {chunk.label}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="close inspector"
+            className="-mr-1 shrink-0 rounded p-0.5 text-text-tertiary hover:text-text-secondary"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="shrink-0 rounded border border-current/10 px-2 py-1 text-[10px] text-text-tertiary">
+          草稿预览 · {chunk.pinned ? "pin 持久免压缩" : "inline 随历史、可被压缩"} ·
+          落地见 Layer 2（session.branch）
+        </div>
+        <RawView chunk={chunk} />
       </aside>
     );
   }

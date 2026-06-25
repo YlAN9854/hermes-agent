@@ -14,7 +14,7 @@
 
 import { Card } from "@nous-research/ui/ui/components/card";
 import { ChevronUp } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { ContextVisTreemap } from "@/components/ContextVisTreemap";
 import { ContextVisTurnBand } from "@/components/ContextVisTurnBand";
@@ -45,7 +45,15 @@ import {
 } from "@/lib/contextvis/apply";
 import { respondCompaction, type CompactionChoice } from "@/lib/contextvis/gate";
 import { downloadFixture } from "@/lib/contextvis/fixtures";
+import {
+  addCost,
+  draftToChunk,
+  projectAdd,
+  type AddDraft,
+  type AddPlacement,
+} from "@/lib/contextvis/add";
 import type {
+  ContextChunk,
   ContextSnapshot,
   TreemapMode,
   ViewKind,
@@ -203,6 +211,7 @@ export function ContextVisPanel({
   onClearFates,
   onActivateTurn,
   onSetFates,
+  onAddDraftChange,
 }: {
   snapshot: ContextSnapshot;
   /** 受控选中：选中态上提到挂载壳，与右侧栏 inspector 共享。 */
@@ -218,6 +227,8 @@ export function ContextVisPanel({
   onActivateTurn?: (turn: number) => void;
   /** R 后续②:批量预填命运(「建议清理」按 regime 预填 fold)。 */
   onSetFates?: (ids: string[], fate: Fate | null) => void;
+  /** v2 `add`:把当前注入草稿的合成 chunk 通知挂载壳（供 inspector 解析选中、读原文）。 */
+  onAddDraftChange?: (chunk: ContextChunk | null) => void;
 }) {
   const [mode, setMode] = useState<TreemapMode>("proportional");
   // 主视图主轴:默认「轮次」(turn 优先,见 turn-band.md);「类型」一键回旧树图。
@@ -248,6 +259,10 @@ export function ContextVisPanel({
   const [foldPrompt, setFoldPrompt] = useState("");
   const [applyError, setApplyError] = useState<string | null>(null);
   const [lastFreed, setLastFreed] = useState<number | null>(null);
+  // v2 `add`（co-author 注入）：组合器开关 + 草稿文本 + 放置轴。预览-only，不落地。
+  const [addOpen, setAddOpen] = useState(false);
+  const [addText, setAddText] = useState("");
+  const [addPlacement, setAddPlacement] = useState<AddPlacement>("pin");
   const { budget, used, percent, compactions, chunks } = snapshot;
   // 「压缩 ×N」用真实累计次数(一轮多次压缩,推断的事件数组会少计)。
   const compactCount = snapshot.compressionCount ?? compactions.length;
@@ -255,6 +270,27 @@ export function ContextVisPanel({
   const tone = occupancyTone(percent);
   const hasChunks = chunks.length > 0;
   const lastDrop = compactions.length ? compactions[compactions.length - 1].removed : 0;
+
+  // v2 `add` 预览（纯函数，零副作用）：草稿非空 → 增广 snapshot 喂渲染层（注入块自动作为
+  // 新一轮渲染、占用抬高）。落地是另一条 mutation 路（Layer 2），此处只投影。
+  const addDraft: AddDraft | null = useMemo(
+    () =>
+      addOpen && addText.trim() ? { text: addText, placement: addPlacement } : null,
+    [addOpen, addText, addPlacement],
+  );
+  const displaySnapshot = useMemo(
+    () => projectAdd(snapshot, addDraft),
+    [snapshot, addDraft],
+  );
+  const addPreview = addDraft ? addCost(snapshot, addDraft) : null;
+  // 把当前注入草稿的合成 chunk 上抛挂载壳：选中它时 inspector 才能解析到、读原文。
+  const addDraftChunk = useMemo(
+    () => (addDraft ? draftToChunk(addDraft, snapshot) : null),
+    [addDraft, snapshot],
+  );
+  useEffect(() => {
+    onAddDraftChange?.(addDraftChunk);
+  }, [addDraftChunk, onAddDraftChange]);
 
   // 命运投影（纯函数,无副作用）:预计释放量 + 应用后占用。
   const projected = projectFates(snapshot, fateMap);
@@ -587,6 +623,21 @@ export function ContextVisPanel({
               ⬇ fixture
             </button>
           )}
+          {hasChunks && (
+            <button
+              type="button"
+              onClick={() => setAddOpen((v) => !v)}
+              className={cn(
+                "rounded border border-current/15 px-1.5 py-0.5 text-[10px] tracking-wide transition-colors",
+                addOpen
+                  ? "bg-current/15 text-text-secondary"
+                  : "text-text-tertiary hover:text-text-secondary",
+              )}
+              title="add：往上下文注入一条你写的信息（co-author）。用于注入机器拿不到的未来意图 / 外部真相；pin = 持久免压缩"
+            >
+              ＋ add
+            </button>
+          )}
           {hasChunks && <ViewToggle view={view} onChange={setView} />}
           {hasChunks && view === "turn" && (
             <button
@@ -640,6 +691,70 @@ export function ContextVisPanel({
         <div className="py-2 text-center text-xs text-text-secondary">等待上下文…</div>
       ) : (
         <>
+          {/* v2 `add`（co-author 注入）组合器：写内容 + 选放置轴；下方画布即时预览注入块 + 占用。 */}
+          {addOpen && (
+            <div className="flex flex-col gap-1.5 rounded border border-current/15 px-2 py-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-display text-[10px] tracking-wider text-text-tertiary">
+                  add · 注入一条你写的信息
+                </span>
+                <div className="flex overflow-hidden rounded border border-current/15 text-[10px]">
+                  {(["pin", "inline"] as const).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setAddPlacement(p)}
+                      className={cn(
+                        "px-1.5 py-0.5 tracking-wide transition-colors",
+                        addPlacement === p
+                          ? "bg-current/15 text-text-secondary"
+                          : "text-text-tertiary hover:text-text-secondary",
+                      )}
+                      title={
+                        p === "pin"
+                          ? "pin：持久免压缩区，扛过后续压缩（长期约束）"
+                          : "inline：随历史注入，会被正常压缩（短暂澄清）"
+                      }
+                    >
+                      {p === "pin" ? "📌 pin" : "inline"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <textarea
+                value={addText}
+                onChange={(e) => setAddText(e.target.value)}
+                rows={2}
+                placeholder="机器拿不到的信息：未来意图 / 外部真相（如「生产库周五前只读，别 alembic upgrade」）"
+                className="resize-none rounded border border-current/15 bg-transparent px-1.5 py-1 text-xs text-text-secondary placeholder:text-text-tertiary/60 focus:outline-none focus:ring-1 focus:ring-current/20"
+              />
+              <div className="flex items-center justify-between text-[10px] text-text-tertiary">
+                {addPreview ? (
+                  <span className="tabular-nums">
+                    注入 +{formatTokenCount(addPreview.tokens)} tok · 占用 {percent}%
+                    <span className="text-text-tertiary/60"> → </span>
+                    <span className={occupancyTone(addPreview.projectedPercent).text}>
+                      {addPreview.projectedPercent}%
+                    </span>
+                    {addPlacement === "pin" && (
+                      <span className="ml-1 text-success">· 📌 免压缩</span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="text-text-tertiary/60">写点内容，下方画布即时预览</span>
+                )}
+                {addText && (
+                  <button
+                    type="button"
+                    onClick={() => setAddText("")}
+                    className="text-text-tertiary hover:text-text-secondary"
+                  >
+                    清空
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {/* 压缩闸门：auto-compress 拦截预览。treemap 已画系统计划(中段折叠/首尾保留)。 */}
           {gateActive && (
             <div className="flex flex-col gap-1.5 rounded border border-warning/40 bg-warning/10 px-2 py-1.5">
@@ -991,7 +1106,7 @@ export function ContextVisPanel({
               (view === "turn" ? (
                 USE_CANVAS ? (
                   <TurnCanvas
-                    snapshot={snapshot}
+                    snapshot={displaySnapshot}
                     selected={selected}
                     onSelect={onSelect}
                     chunkTopics={activeTopics}
@@ -1002,7 +1117,7 @@ export function ContextVisPanel({
                   />
                 ) : (
                   <ContextVisTurnBand
-                    snapshot={snapshot}
+                    snapshot={displaySnapshot}
                     mode={mode}
                     selected={selected}
                     onSelect={onSelect}
@@ -1017,7 +1132,7 @@ export function ContextVisPanel({
                 )
               ) : (
                 <ContextVisTreemap
-                  snapshot={snapshot}
+                  snapshot={displaySnapshot}
                   mode={mode}
                   selected={selected}
                   onSelect={onSelect}

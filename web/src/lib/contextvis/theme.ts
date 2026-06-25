@@ -47,6 +47,9 @@ export const CV_FATE = {
   drop: "#E5484D",
 } as const;
 
+/** v2 `add`（用户 co-author 注入）的强调色 —— 区别于机器写的内容。 */
+export const CV_ADD = "#6D5AE6" as const; // violet-indigo，白底高分离
+
 /** 引用弧 / 关键词追踪色。 */
 export const CV_ARC = {
   downstream: "#E5397A", // 下游(谁依赖我 / 爆炸半径)
