@@ -25,13 +25,17 @@ keep/drop/fold/invalidate 都在治理"**机器写的内容**"(用户=审查员)
 - **与 turn 的本质区别(=必要性)**:turn 是**对话动作**(触发生成、agent 必须回应、占整轮、下次又变旧被压);add 是**非对话注入**(随行注解,看得见但不必回应;配钉死区穿越压缩永久承重)。今天你只能开一轮 → add 严格更优。
 - **剃刀**:注入外部真相 + 意图,机器结构上拿不到。强通过。
 
-> **实现状态(2026-06,A 首刀 = 预览,纯前端零后端)**:add 的**观察→预览**闭环已建成实测,**落地(写真实 session)留 Layer 2**。
+> **实现状态(2026-06):A 预览 + B 落地(inline/pin)均已建成实测。** add 的**观察→预览→落地→有效性对照**全闭环;**promote(放置=system-prompt)留下一刀**。
 > - **fixture 工坊(建 case 的地基)**:`?fixture=<name>` 冻结渲染层两数据源(snapshot + regime_colors,**连检测器判定一并钉死**)→ 零-token、完全确定地重放一个 case;面板 `⬇ fixture`(dev)一键录制。注入点只在适配器边界(`useContextSnapshot` / `fetchRegimeColors`),渲染层不知情。见 `web/src/lib/contextvis/fixtures/`。**它解决项目瓶颈**——case 怎么设计 + 怎么幂等测(fork 会让 regime_colors 重跑 aux LLM、主线/弧每次抖;fixture 把那次判定冻住)。
 > - **`add.ts` 纯函数(对偶 plan.ts 的 `projectFates`)**:`AddDraft{text, placement}` + `projectAdd(snapshot, draft)→增广 snapshot`(追加合成 chunk + 抬占用)+ `addCost`(成本预览)。零副作用、可逆。
 > - **放置轴 pin/inline 已落地**(system-prompt=promote 另设,见 §3):composer(textarea + 📌pin/inline 段选 + 实时 `+Ntok·X%→Y%·免压缩`);增广 snapshot 喂三渲染器 → 画布**注入块自动作新一轮渲染**(violet 虚线格 + 📌pin,`CV_ADD` 单一色源),占用诚实抬高,`buildTurnCells` 零改。
 > - **inspector 接草稿**(挂载壳沿用 selection/fateMap 上提模式):panel 经 `onAddDraftChange` 上抛合成块 → ChatPage 并入选中候选 → 点注入格显「你注入(add)·📌pin」徽章 + 原文 +「落地见 Layer 2」,草稿不可标命运。
 > - **驱动 case**:`add-prod-readonly`(B1,外部真相缺口)—— agent 已读 models/db/services + 生成 migration、下一步将 `alembic upgrade head` 打 prod,"生产周五前只读"全程缺席 → 用户 add+pin 注入。
-> - **未建(= B)**:Layer 2 后端 `context.add` mutation(真写 session:inline 插 `messages` / pin 进免压区)+ `session.branch` 对照实验(带注入 vs 不带,证有效性);pin 的"永不被建议折/删"强制;promote(放置=system-prompt)。**开工前两决定**:① pin 存哪(独立免压区 vs 标记 message 永不压);② 真改 session vs 只在 branch 上验。
+> - **B 落地 inline/pin 已建成实测(2026-06-25,真改 live session)**:`context.add` RPC([server.py](../../tui_gateway/server.py),对偶 apply/fold)——`running` 守卫 + `history_version` 陈旧校验 + `history_lock` 下追加带 `_contextvis_add` 标记的 user 消息(沿用 **personality-marker 注入先例**,alternation 安全)+ `_sanitize_tool_pairs` + `_commit_history_mutation` bump 版本 + re-emit。**pin 免压**:`ContextCompressor._is_pinned` → pin 从 `turns_to_summarize` 剔除 + carry-through 接回结果末尾(漂到 tail、下次仍受 token-budget 保护);inline 无标记照常受压。chunking 认 `_contextvis_add` → chunk 出 `added`/`pinned`(**单独成块、不顶增轮号**)。前端 `applyAdd` + composer「📌 注入并钉住」(fixture 模式禁用)。stub 全绿(chunking added/pinned + 压缩 83→42、pin 免压存活内容完好、inline 被摘要)。
+> - **有效性对照实测(2026-06-25,B1 live + `session.branch`)= 论文的存在性证据**:同一 brink、同一句"准备好了",**注入 pin「周五前别 upgrade」→ agent 收手**(把第3步 🔒 标"周五后执行");**不注入(对照分支)→ agent 直接 `alembic upgrade head` 并验证落库**。同点出发、仅因一条 pin 注入就分出"收手 vs 上生产" → 坐实"人注入了机器结构上拿不到的外部真相,可测地改了结果"。画布:注入支第7轮 violet + 📌、对照支蓝色 upgrade 轮;inspector 显「你注入(add)·📌pin」+ 原文。
+> - **观察(对论文有用):agent 把临时外部真相过度持久化进 memory**。实测中 agent 主动 `Memory("+memory", "生产数据库周五前只读…")`——把**会过期(周五)**的临时事实当**永久 memory** 存。这印证 **"让 agent 自己记" ≠ pin 的替代**:agent 不知它会过期、会在未来 session 永远提醒;**pin 的价值正是"用户控制的生命周期"**(撤 pin 即可,memory 做不到)= pin vs promote/memory 边界的真实展品。
+> - **决策痕迹(别重走)**:① **pin 存哪 = 插 history + `_contextvis_add="pin"` 免压标记**(非独立 store)——不碰 cache 神圣的 system prompt(add pin 不破 cache)、复用 `_commit_history_mutation`、有标记则免压不随 head/tail 漂移。② **落地 = 真改 live session**(对偶 apply/fold),对照实验在其上用 `session.branch` 薄层。③ **放置轴砍掉"末尾/tail"**(见 §3)。
+> - **剩**:promote(放置=system-prompt,骑压缩重建走);pin 的"永不被建议折/删"强制;多 pin 压缩时漂到末尾的相邻同 role(单 pin 无虞,观察);画布 gutter 对注入轮仍显泛化"对话"标签(细节,可后改显注记片段)。
 
 ### invalidate —— 独立命运(被"作废 × 引用结构"逼出来)
 - **是什么**:标某块"**不再成立**",agent 别再据它行动、压缩器可降权——但**与 drop 不同,块留着当历史**。
@@ -52,6 +56,8 @@ keep/drop/fold/invalidate 都在治理"**机器写的内容**"(用户=审查员)
 放置不是新价值类——"这条重要、放耐久处" = 外部真相(重要性)× 一个放置选择。但它**低负担、客观、有 Hermes 现成机制**,值得做成可见档位。
 
 耐久度梯度:`volatile-context < history < pin < system-prompt`。
+
+> **决策(2026-06-25,别重走):用户面只给 `inline / pin / promote` 三档,不给"末尾/tail"档。** tail 是压缩器按 token 预算的**滑动**保护、会随对话增长**静默失效**(违白盒 #6 透明 / #7),是实现产物非用户意图;它想够的"持久但临时"中间档由 **pin(免压标记)** 正确实现(持久 immune + 用户控制撤销 + 不破 cache)。映射:inline=随历史受压(短暂纠偏,如实警告"下次压缩收走)、pin=免压区(临时但须持久的外部真相,如 B1)、promote=system-prompt(永久规则)。
 
 ### promote → system prompt
 - **定位**:= `(add 或 move) × 放置=system-prompt` + 一步**蒸馏**。不破坏"动词 5 个",是**放置轴顶档被点亮**。

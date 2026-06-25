@@ -170,3 +170,33 @@ export async function undoApply(sessionId: string): Promise<UndoResult> {
   const gw = await ensureClient();
   return gw.request<UndoResult>("context.undo", { session_id: sessionId });
 }
+
+export interface AddResult {
+  status: string;
+  placement: "inline" | "pin";
+  added_tokens: number;
+  before_messages: number;
+  after_messages: number;
+  before_tokens: number;
+  after_tokens: number;
+}
+
+/**
+ * v2 `add`（落地）：把用户 co-author 注入的一条信息写进真实上下文。
+ * `placement` = inline（随历史、正常受压）/ pin（打免压标记，压缩器永不碰）。
+ * 成功后后端 re-emit `session.info` + `context.snapshot`，UI 自动刷新出真实注入块。
+ */
+export async function applyAdd(
+  sessionId: string,
+  historyVersion: number | undefined,
+  text: string,
+  placement: "inline" | "pin",
+): Promise<AddResult> {
+  const gw = await ensureClient();
+  return gw.request<AddResult>("context.add", {
+    session_id: sessionId,
+    history_version: historyVersion,
+    text,
+    placement,
+  });
+}

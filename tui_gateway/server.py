@@ -4766,6 +4766,92 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5005, str(e))
 
 
+@method("context.add")
+def _(rid, params: dict) -> dict:
+    """ContextVis v2 ``add``：把用户 co-author 注入的一条信息落地到真实上下文。
+
+    用于注入压缩器/agent 结构上拿不到的信息（未来意图 / 外部真相）。放置轴：
+      · ``inline`` —— 随历史注入，正常受压缩（短暂澄清/纠偏）；
+      · ``pin``    —— 打 ``_contextvis_add="pin"`` 免压标记，压缩器永不碰（持久免压区）。
+
+    机制对偶 ``context.apply``/``fold``：``history_lock`` 下追加一条 user 消息（沿用
+    personality-marker 注入先例，alternation 安全）→ ``_sanitize_tool_pairs`` 缝合 →
+    ``_commit_history_mutation`` bump 版本 + re-emit。门控 ``HERMES_CONTEXTVIS``。
+    pin 的免压由 ``ContextCompressor`` 认 ``_contextvis_add`` 标记实现（见 ``_is_pinned``）。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    if session.get("running"):
+        return _err(
+            rid, 4009, "session busy — /interrupt the current turn before adding"
+        )
+    text = (params.get("text") or "").strip()
+    if not text:
+        return _err(rid, 4000, "text must be a non-empty string")
+    placement = params.get("placement") or "inline"
+    if placement not in ("inline", "pin"):
+        return _err(rid, 4000, "placement must be 'inline' or 'pin'")
+    sid = params.get("session_id", "")
+    client_version = params.get("history_version")
+    try:
+        from agent.model_metadata import estimate_request_tokens_rough
+
+        agent = session["agent"]
+        with session["history_lock"]:
+            before = list(session.get("history", []))
+            v0 = int(session.get("history_version", 0) or 0)
+        if client_version is not None and int(client_version) != v0:
+            return _err(rid, 4409, "context snapshot is stale — refresh and retry")
+
+        _sys = getattr(agent, "_cached_system_prompt", "") or ""
+        _tools = getattr(agent, "tools", None) or None
+        before_tokens = estimate_request_tokens_rough(
+            before, system_prompt=_sys, tools=_tools
+        )
+
+        # 标注让模型分清这是用户注入的随行注解（pin = 长期生效约束、应持续遵守）。
+        marker = (
+            "[USER NOTE · standing — keep in mind for the rest of this session]"
+            if placement == "pin"
+            else "[USER NOTE]"
+        )
+        note = {
+            "role": "user",
+            "content": f"{marker}\n{text}",
+            "_contextvis_add": placement,
+        }
+        new_history = list(before)
+        new_history.append(note)
+        comp = getattr(agent, "context_compressor", None)
+        if comp is not None:
+            new_history = comp._sanitize_tool_pairs(new_history)
+
+        committed = _commit_history_mutation(
+            session, agent, before, new_history, v0, sid
+        )
+        if committed is None:
+            return _err(rid, 4409, "context changed during add — retry")
+        after_tokens, info = committed
+        return _ok(
+            rid,
+            {
+                "status": "added",
+                "placement": placement,
+                "added_tokens": max(0, after_tokens - before_tokens),
+                "before_messages": len(before),
+                "after_messages": len(new_history),
+                "before_tokens": before_tokens,
+                "after_tokens": after_tokens,
+                "info": info,
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
 @method("context.regime")
 def _(rid, params: dict) -> dict:
     """ContextVis 调试(只读):对当前 session 跑任务态检测器,返回完整拆解。

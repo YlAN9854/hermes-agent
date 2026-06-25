@@ -115,6 +115,16 @@ _FALLBACK_TURN_MAX_CHARS = 700
 _PATH_MENTION_RE = re.compile(r"(?:/|~/?|[A-Za-z]:\\)[^\s`'\")\]}<>]+")
 
 
+def _is_pinned(msg: Any) -> bool:
+    """v2 add（放置=pin）：带 pin 标记的用户注入消息——压缩永不碰（持久免压区）。
+
+    单一真相源：``context.add`` 落地时给消息打 ``_contextvis_add="pin"``，压缩器据此
+    把它从待摘要集剔除并原样接回结果末尾（见 ``compress``）。inline 注入无此标记，
+    照常受压。
+    """
+    return isinstance(msg, dict) and msg.get("_contextvis_add") == "pin"
+
+
 def _dedupe_append(items: list[str], value: str, *, limit: int) -> None:
     value = value.strip()
     if value and value not in items and len(items) < limit:
@@ -2144,6 +2154,13 @@ The user has requested that this compaction PRIORITISE preserving all informatio
             # into the summarizer prompt via the iterative-update path.
             self._previous_summary = None
 
+        # v2 add（放置=pin）：免压块。把落在压缩窗口里的 pin 从待摘要集剔除，
+        # 稍后原样接回压缩结果末尾（Phase 4），持久免压；漂到 tail 末，下次压缩仍受保护。
+        # inline 注入无标记、照常进 turns_to_summarize 被摘要。守 add 的 pin 契约。
+        _middle_pins = [m for m in turns_to_summarize if _is_pinned(m)]
+        if _middle_pins:
+            turns_to_summarize = [m for m in turns_to_summarize if not _is_pinned(m)]
+
         if not self.quiet_mode:
             logger.info(
                 "Context compression triggered (%d tokens >= %d threshold)",
@@ -2246,6 +2263,11 @@ The user has requested that this compaction PRIORITISE preserving all informatio
                 )
                 _summary_merge_prefix = None
             compressed.append(msg)
+
+        # v2 add（放置=pin）：把压缩窗口里剔出的 pin 接回末尾——持久免压、且漂到 tail
+        # 末位下次压缩仍受 token-budget tail 保护。标记随消息保留 → 永远 immune。
+        for _pin in _middle_pins:
+            compressed.append(dict(_pin))
 
         self.compression_count += 1
 

@@ -35,6 +35,7 @@ import {
   type FateMap,
 } from "@/lib/contextvis/plan";
 import {
+  applyAdd,
   applyDrops,
   applyFold,
   debugRegime,
@@ -44,7 +45,7 @@ import {
   type ReferenceGraph,
 } from "@/lib/contextvis/apply";
 import { respondCompaction, type CompactionChoice } from "@/lib/contextvis/gate";
-import { downloadFixture } from "@/lib/contextvis/fixtures";
+import { downloadFixture, fixtureActive } from "@/lib/contextvis/fixtures";
 import {
   addCost,
   draftToChunk,
@@ -259,10 +260,12 @@ export function ContextVisPanel({
   const [foldPrompt, setFoldPrompt] = useState("");
   const [applyError, setApplyError] = useState<string | null>(null);
   const [lastFreed, setLastFreed] = useState<number | null>(null);
-  // v2 `add`（co-author 注入）：组合器开关 + 草稿文本 + 放置轴。预览-only，不落地。
+  // v2 `add`（co-author 注入）：组合器开关 + 草稿文本 + 放置轴 + 落地态。
   const [addOpen, setAddOpen] = useState(false);
   const [addText, setAddText] = useState("");
   const [addPlacement, setAddPlacement] = useState<AddPlacement>("pin");
+  const [addBusy, setAddBusy] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
   const { budget, used, percent, compactions, chunks } = snapshot;
   // 「压缩 ×N」用真实累计次数(一轮多次压缩,推断的事件数组会少计)。
   const compactCount = snapshot.compressionCount ?? compactions.length;
@@ -608,6 +611,24 @@ export function ContextVisPanel({
     downloadFixture(name.trim(), snapshot, rc, note);
   };
 
+  // v2 `add` 落地：把草稿写进真实上下文（context.add）。成功后端 re-emit → 真实注入块
+  // 替换草稿预览；清草稿 + 收起组合器。fixture 重放模式无活会话，禁用（预览-only）。
+  const inFixture = fixtureActive();
+  const submitAdd = async () => {
+    if (!sid || !addText.trim()) return;
+    setAddBusy(true);
+    setAddError(null);
+    try {
+      await applyAdd(sid, snapshot.historyVersion, addText, addPlacement);
+      setAddText("");
+      setAddOpen(false);
+    } catch (e) {
+      setAddError(humanizeApplyError(e));
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
   return (
     <Card className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-2">
       <div className="flex items-center justify-between gap-2">
@@ -753,6 +774,41 @@ export function ContextVisPanel({
                   </button>
                 )}
               </div>
+              {/* 落地行：注入按钮 + 警告/错误。inline 提示会被压、pin 提示免压。 */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-text-tertiary">
+                  {addPlacement === "pin"
+                    ? "📌 注入后免压缩，扛过后续压缩"
+                    : "随历史注入，下次压缩可能被收走"}
+                </span>
+                <button
+                  type="button"
+                  onClick={submitAdd}
+                  disabled={!addText.trim() || addBusy || !sid || inFixture}
+                  className={cn(
+                    "rounded border px-2 py-0.5 text-[10px] tracking-wide transition-colors",
+                    !addText.trim() || addBusy || !sid || inFixture
+                      ? "border-current/15 text-text-tertiary/50"
+                      : "border-current/30 text-text-secondary hover:bg-current/10",
+                  )}
+                  title={
+                    inFixture
+                      ? "fixture 重放模式无活会话，注入仅预览（落地需真实 session）"
+                      : "把这条写进真实上下文（co-author）"
+                  }
+                >
+                  {addBusy
+                    ? "注入中…"
+                    : inFixture
+                      ? "注入（需真实会话）"
+                      : addPlacement === "pin"
+                        ? "📌 注入并钉住"
+                        : "注入"}
+                </button>
+              </div>
+              {addError && (
+                <div className="text-[10px] text-destructive">{addError}</div>
+              )}
             </div>
           )}
           {/* 压缩闸门：auto-compress 拦截预览。treemap 已画系统计划(中段折叠/首尾保留)。 */}

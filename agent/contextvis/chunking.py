@@ -100,6 +100,8 @@ class Segment:
     group: Optional[str] = None  # tool_schema 的 toolset 名等
     raw: str = ""  # 原文，供右侧栏检视器显示
     folded: bool = False  # 压缩折叠产物（摘要消息），非对话轮
+    added: bool = False  # v2 add：用户 co-author 注入（非对话轮，单独成块）
+    pinned: bool = False  # v2 放置=pin：持久免压缩
 
 
 @dataclass
@@ -118,6 +120,8 @@ class Chunk:
     fate: Optional[str] = None  # 预留：未来交互式压缩用，v1 恒空
     raw: Optional[str] = None  # 成员原文拼接（截断），供检视器
     folded: bool = False  # 压缩折叠产物（摘要）：turn 带画成「已折叠」块
+    added: bool = False  # v2 add：用户注入块（画成 violet co-author 块）
+    pinned: bool = False  # v2 放置=pin：持久免压缩（画 📌）
 
 
 # ── token 估算（复用 Hermes 既有 chars//4 口径） ──────────────────────
@@ -259,7 +263,11 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
             role in ("user", "assistant")
             and _is_compression_artifact(_content_text(msg))
         )
-        if role == "user" and not is_artifact:
+        # v2 add：用户 co-author 注入的消息（带 _contextvis_add 标记）—— 不是对话轮，
+        # 单独成块（像 folded），故不顶增轮号；turn+1 让它落到最新轮之后、独立成格。
+        add_placement = msg.get("_contextvis_add")
+        is_added = add_placement in ("inline", "pin")
+        if role == "user" and not is_artifact and not is_added:
             turn += 1
         tokens = _est_msg(msg)
         ref = {"messageIndex": i}
@@ -267,6 +275,11 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
         if is_artifact:
             out.append(Segment(f"msg:{i}", SEG_ASSISTANT, turn, tokens,
                                "压缩 context", ref, raw=raw, folded=True))
+        elif is_added:
+            text = _content_text(msg)
+            out.append(Segment(f"msg:{i}", SEG_USER, turn + 1, tokens,
+                               _snippet(text) or "用户注入", ref, raw=raw,
+                               added=True, pinned=(add_placement == "pin")))
         elif role == "user":
             text = _content_text(msg)
             out.append(Segment(f"msg:{i}", SEG_USER, turn, tokens,
@@ -412,9 +425,28 @@ def _strat_group_by_turn(band: str, segs: List[Segment]) -> List[Chunk]:
                 raw=_cap_raw(s.raw, s.tokens),
             )
         )
+    # v2 add：用户注入块也单独成块（co-author，非对话轮），id 用 msg 序号。
+    for s in segs:
+        if not s.added:
+            continue
+        chunks.append(
+            Chunk(
+                id=f"{band}:{s.id}",
+                type=band,
+                tokens=s.tokens,
+                turn=s.turn,
+                label=s.label,
+                sourceRefs=[s.ref],
+                members=1,
+                turnSpan=[s.turn, s.turn],
+                added=True,
+                pinned=s.pinned,
+                raw=_cap_raw(s.raw, s.tokens),
+            )
+        )
     by_turn: Dict[int, List[Segment]] = {}
     for s in segs:
-        if s.folded:
+        if s.folded or s.added:
             continue
         by_turn.setdefault(s.turn, []).append(s)
     for turn in sorted(by_turn):
@@ -579,6 +611,10 @@ def _chunk_dict(c: Chunk) -> Dict[str, Any]:
         d["fate"] = c.fate
     if c.folded:
         d["folded"] = True
+    if c.added:
+        d["added"] = True
+    if c.pinned:
+        d["pinned"] = True
     if _raw_enabled() and c.raw:
         d["raw"] = c.raw
     return d
