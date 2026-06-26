@@ -34,7 +34,7 @@ import { useSearchParams } from "react-router-dom";
 import { ChunkInspector } from "@/components/ChunkInspector";
 import { ContextVisPanel } from "@/components/ContextVisPanel";
 import { useContextSnapshot } from "@/hooks/useContextSnapshot";
-import { applyPin, applyPromote } from "@/lib/contextvis/apply";
+import { applyInvalidate, applyPin, applyPromote } from "@/lib/contextvis/apply";
 import type { Fate, FateMap } from "@/lib/contextvis/plan";
 import type { ContextChunk } from "@/lib/contextvis/types";
 import { usePageHeader } from "@/contexts/usePageHeader";
@@ -235,8 +235,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       if (!sid) return;
       try {
         await applyPin(sid, contextSnapshot.historyVersion, chunkIds, pinned);
-      } catch {
-        /* 失败静默（后端无 re-emit → UI 不变） */
+      } catch (e) {
+        // 别静默吞 —— 否则后端拒绝(陈旧/守卫/异常)与"什么都没发生"无法区分。
+        console.error("[contextvis] context.pin failed:", e);
       }
     },
     [contextSnapshot.sessionId, contextSnapshot.historyVersion],
@@ -249,8 +250,29 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       if (!sid || !text.trim()) return;
       try {
         await applyPromote(sid, contextSnapshot.historyVersion, text, [chunkId]);
-      } catch {
-        /* 失败静默 */
+      } catch (e) {
+        console.error("[contextvis] context.promote failed:", e);
+      }
+    },
+    [contextSnapshot.sessionId, contextSnapshot.historyVersion],
+  );
+
+  // v2 invalidate：把现有 chunk 标"不再成立"(原文留作历史、追加 pin 作废说明)或恢复 →
+  // context.invalidate 落地。best-effort，成功后端 re-emit 自动刷出/撤琥珀删除线。
+  const invalidateChunk = useCallback(
+    async (chunkIds: string[], reason: string, invalid: boolean) => {
+      const sid = contextSnapshot.sessionId;
+      if (!sid || chunkIds.length === 0) return;
+      try {
+        await applyInvalidate(
+          sid,
+          contextSnapshot.historyVersion,
+          chunkIds,
+          reason,
+          invalid,
+        );
+      } catch (e) {
+        console.error("[contextvis] context.invalidate failed:", e);
       }
     },
     [contextSnapshot.sessionId, contextSnapshot.historyVersion],
@@ -974,6 +996,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
               onSetFates={setFates}
               onPin={pinChunk}
               onPromote={promoteChunk}
+              onInvalidate={invalidateChunk}
             />
           </div>
         </div>
@@ -1026,6 +1049,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                   onSetFates={setFates}
                   onPin={pinChunk}
                   onPromote={promoteChunk}
+                  onInvalidate={invalidateChunk}
                 />
               </div>
             </div>

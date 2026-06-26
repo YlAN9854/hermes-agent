@@ -54,6 +54,8 @@ export interface ContextChunk {
   added?: boolean;
   /** v2 放置轴 = pin：持久免压缩区。渲染加 📌、压缩投影里不参与释放。v1 恒空。 */
   pinned?: boolean;
+  /** v2 `invalidate`：用户标"不再成立"。原文留作历史（≠drop），渲染琥珀删除线。v1 恒空。 */
+  invalid?: boolean;
 }
 
 /** 压缩事件：给历史块分配命运后，容器占用的一次骤降。 */

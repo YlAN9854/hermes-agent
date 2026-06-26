@@ -1,6 +1,6 @@
 # ContextVis v2 · 操作集 + 新交互 + 驱动 case
 
-> **状态:设计探索为主;已落地——引用图层①②(§6)+ 画布化(TurnCanvas)+ `add`(预览/inline/pin/promote)+ 统一耐久度轴(keep-as-pin/promote/规则卡,见 §3)。** 理论依据(剃刀)见 [principle.md](principle.md)。
+> **状态:设计探索为主;已落地——引用图层①②(§6)+ 画布化(TurnCanvas)+ `add`(预览/inline/pin/promote)+ 统一耐久度轴(keep-as-pin/promote/规则卡,见 §3)+ `invalidate`(标记+pin 作废说明+恢复,见 §2)。** 理论依据(剃刀)见 [principle.md](principle.md)。
 > 组织原则:**按"意图"而非"动词"组织**——动词会重复(merge 塌进 fold),意图不会。
 
 ---
@@ -45,6 +45,18 @@ keep/drop/fold/invalidate 都在治理"**机器写的内容**"(用户=审查员)
 - **最强 case(砸不塌)**:turn 3 记下 `DB_URL=old`,turn 5–15 据它写了代码(全引用),turn 20 你迁库 `URL=new`。keep→用假值;drop→下游引用悬空(爆炸半径=Case 2);**只有 invalidate 同时满足"别用假值"+"别砸下游"**。
 - **会塌的 case(别用来论证)**:死路("别再试库 X")、撤回指令——这些 = fold + 一句负面 verdict(那 verdict 其实是 add)。
 - **论文价值**:invalidate **不是凭空第 5 个动词,是被"内容作废 × 引用结构"逼出来的**(没引用图你只会 drop;有了引用图 drop 有爆炸半径,才需"留着但剥夺权威")。它与 Case 2 **同根**;也是 v1 残值"被取代旧读"信号的**人工版**(机器靠"又读一次"判废,人不用再读就知道)。
+
+> **实现状态(2026-06-26,已建成,stub+build 全绿,live 测已捉 bug 修复)**:
+> - **落地 = 两个协同写、一次提交**(守铁律"action 直接影响下一轮";**纯元数据标记 LLM 看不到 → 不够**,故必须有一条 agent 读得到的写):
+>   - **① 标记目标**:`context.invalidate` RPC([server.py](../../tui_gateway/server.py),对偶 `context.pin` 翻标记)给目标消息打 `_contextvis_invalid=True`(+ `_contextvis_invalid_reason`)——**原文一字不动**(守住"曾真"+ 下游引用不悬空,这正是 vs drop 的命脉);供前端画琥珀删除线 + 压缩器降权候选。
+>   - **② 追加 pinned 作废说明**:一条 user note(对偶 `context.add`,沿用 personality-marker 注入先例)落在 **tail、近因权重高** → agent 真会读到"别再据此行动"(破 promote 必要性里点的"在场≠被遵守");**pinned 让作废信号活过压缩**、不被它折走。note 命名目标(原文 snippet)+ 注入新真相(`reason` = 用户独知的外部真相 = 剃刀的不可约比特),携 `_contextvis_invalidates`=目标 chunk_ids(供撤销按链移除 + 未来连弧)。
+> - **为什么两个都要**:标记给白盒视觉链接 + 压缩器信号(守 #6 显示改了什么),说明给 agent efficacy(近因)。缺一不可。
+> - **耐久语义(stub 证)**:作废目标 **非 pinned** → 位置式压缩可正常把它折走(其价值已只剩"历史曾真",摘要可保留);作废说明 **pinned** → 免压、信号活过压缩。**不改压缩器**(MVP:自然位置式折叠 + pin 说明保信号即够,"降权喂闸门建议"留作 §5 建议注册表集成)。
+> - **恢复(revalidate)**:`invalid=False` → 清目标标记 + **按 `_contextvis_invalidates` 链移除其作废说明**(误标可逆;`context.undo` 亦可一步撤)。
+> - **渲染**:chunking `_segment_history` 认 `_contextvis_invalid` → chunk `invalid`(file/tool_result 单块就地、turn 带轮内任一成员作废→整轮,与 pin 同粒度);`CV_INVALID`=琥珀(amber-700,区别于 drop 红=不可逆删) → TurnCanvas **褪色后退 + 琥珀对角删除线**、inspector 头部 **⊘ 作废/已作废 toggle**(非作废块→内联 reason 编辑器、作废块→一键恢复)+ 标题删除线徽章。`applyInvalidate`(apply.ts)、`invalidateChunk`(ChatPage)。
+> - **决策痕迹(别重走)**:① **机制 = 标记 + tail 说明**,不用"纯元数据"(LLM 看不到)也不用"原地改写目标内容"(同样近因被埋 + 改 tool_result 块状结构脆)——tail 说明近因强、复用 add 注入路、目标原文保真。② **目标不保护、反更可折**(作废后历史价值低,是 fold 候选;说明已保住"已排除")。③ MVP **不动压缩器**(降权 = 自然位置式 + pin 说明,非改优先级逻辑)。
+> - **live 测 bug(2026-06-26,已修,别重踩)**:作废后前端**毫无反应**。根因 = `drop_indices_for_chunks` 返回 **`set`**,RPC 里 `idxs[:3]`(命名目标用)**对 set 切片 → TypeError → RPC 抛 → 前端 `catch{}` 静默吞 → 看起来"啥也没发生"**。修:`idxs = sorted(drop_indices_for_chunks(...))`(`context.pin` 没踩因它只 `for i in idxs` 迭代、不切片;e2e stub 当初 `idxs=[..]` 硬编成 list 掩盖了)。**连带修**:三个 contextvis mutation handler(pin/promote/invalidate)的 `catch{}` 改 `console.error` —— 静默吞错误正是"无法确定 action 是否有效"的元凶。**教训**:stub 要用**真** `drop_indices_for_chunks`(返回 set)、别硬编 list。
+> - **剩**:与引用图集成的 **blast-radius**(drop 前显下游、逼改 invalidate)+ **失效传播**(下游传递闭包转琥珀,§6 表)+ **自动建议**(残值"被取代旧读"信号 → 推荐 invalidate,§5)+ `add→invalidate` 交叉入口(add 纠正 → 实体重叠检测旧块矛盾 → 顺手提"作废旧的?");多作废说明漂尾累积(同 add·pin 已记边)。
 
 ### keep / fold / drop —— v1 已建;keep 是"保护轴"最低档(见 §3 统一耐久度轴)
 `fold` / `drop` = **降耐久**(摘要 / 删除)的微操层(低价值,见剃刀推论)。**`keep` 不同——它是"保护"沿耐久轴的一次性档**,与 `pin` / `promote` 同族(`keep`=这次别折 / `pin`=永久免压 / `promote`=进 system-prompt 当规则);当前仅闸门内生效、**无独立落地路**(闸门外标 keep = no-op),统一后补 **keep-as-pin**。详见 **§3**。v2 的能量在 add / invalidate / **统一保护轴** / 操舵。

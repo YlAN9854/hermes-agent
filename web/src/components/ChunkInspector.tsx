@@ -23,7 +23,7 @@ import {
   type Fate,
   type FateMap,
 } from "@/lib/contextvis/plan";
-import { CV_ADD, CV_TYPE_FILL } from "@/lib/contextvis/theme";
+import { CV_ADD, CV_INVALID, CV_TYPE_FILL } from "@/lib/contextvis/theme";
 import type { ContextChunk } from "@/lib/contextvis/types";
 import { cn } from "@/lib/utils";
 
@@ -277,6 +277,7 @@ export function ChunkInspector({
   onSetFates,
   onPin,
   onPromote,
+  onInvalidate,
 }: {
   chunk: ContextChunk | null;
   onClose: () => void;
@@ -292,9 +293,13 @@ export function ChunkInspector({
   onPin?: (chunkIds: string[], pinned: boolean) => void;
   /** v2 move·promote:把现有 chunk 提升为 system-prompt 常驻规则（move，删源）→ context.promote。 */
   onPromote?: (chunkId: string, text: string) => void;
+  /** v2 invalidate:把现有 chunk 标"不再成立"(reason=新真相)或恢复(invalid=false)→ context.invalidate。 */
+  onInvalidate?: (chunkIds: string[], reason: string, invalid: boolean) => void;
 }) {
   // v2 move·promote 编辑态：null=未编辑；非 null=正在把本块蒸成一条规则（用户自编辑 distill）。
   const [promoteText, setPromoteText] = useState<string | null>(null);
+  // v2 invalidate 编辑态：null=未编辑；非 null=正在写作废原因（可空）。
+  const [invalidText, setInvalidText] = useState<string | null>(null);
 
   if (!chunk) {
     return (
@@ -380,9 +385,20 @@ export function ChunkInspector({
             <span className="text-display text-xs tracking-wider text-text-tertiary">
               {chunk.type}
             </span>
+            {chunk.invalid && (
+              <span
+                className="text-display text-[10px] tracking-wider"
+                style={{ color: CV_INVALID }}
+              >
+                ⊘ 已作废
+              </span>
+            )}
           </div>
           <div
-            className="mt-0.5 wrap-break-word text-sm font-medium text-text-secondary"
+            className={cn(
+              "mt-0.5 wrap-break-word text-sm font-medium text-text-secondary",
+              chunk.invalid && "line-through decoration-current/40",
+            )}
             title={chunk.label}
           >
             {chunk.label}
@@ -425,6 +441,31 @@ export function ChunkInspector({
               title="提升为 system-prompt 常驻规则（权威，下一轮即生效；编辑成一条精炼规则，提升后删除原块）"
             >
               ⬆ 提升
+            </button>
+          )}
+          {/* v2 invalidate：标本块"不再成立"（或恢复）。原文留作历史、≠drop 删除。 */}
+          {onInvalidate && MESSAGE_BACKED_TYPES.has(chunk.type) && (
+            <button
+              type="button"
+              onClick={() =>
+                chunk.invalid
+                  ? onInvalidate([chunk.id], "", false)
+                  : setInvalidText("")
+              }
+              className={cn(
+                "rounded border px-1.5 py-0.5 text-[10px] tracking-wide transition-colors",
+                chunk.invalid
+                  ? "border-current/30 bg-current/10"
+                  : "border-current/15 text-text-tertiary hover:text-text-secondary",
+              )}
+              style={chunk.invalid ? { color: CV_INVALID } : undefined}
+              title={
+                chunk.invalid
+                  ? "已作废（不再成立、留作历史）—— 点此恢复"
+                  : "作废：标记不再成立。原文留作历史（≠删除），并注入一条 pin 说明告诉 agent 别再据此行动"
+              }
+            >
+              {chunk.invalid ? "⊘ 已作废" : "⊘ 作废"}
             </button>
           )}
           <button
@@ -476,6 +517,44 @@ export function ChunkInspector({
               )}
             >
               ⬆ 提升为规则
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* v2 invalidate 编辑：写"为什么不再成立 / 新事实"（可空）→ 标作废 + 注入 pin 说明。 */}
+      {invalidText !== null && (
+        <div
+          className="flex shrink-0 flex-col gap-1.5 rounded border px-2 py-1.5"
+          style={{ borderColor: `${CV_INVALID}55` }}
+        >
+          <span className="text-[10px]" style={{ color: CV_INVALID }}>
+            ⊘ 作废本块 —— 原文留作历史（不删除）。说明为什么不再成立 / 新事实（可空，会注入给 agent）
+          </span>
+          <textarea
+            value={invalidText}
+            onChange={(e) => setInvalidText(e.target.value)}
+            rows={2}
+            placeholder="如：DB_URL 已从 old 迁到 new（第20轮），别再用旧值"
+            className="resize-none rounded border border-current/15 bg-transparent px-1.5 py-1 text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-current/20"
+          />
+          <div className="flex items-center justify-end gap-1.5 text-[10px]">
+            <button
+              type="button"
+              onClick={() => setInvalidText(null)}
+              className="rounded px-1.5 py-0.5 text-text-tertiary hover:text-text-secondary"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onInvalidate?.([chunk.id], invalidText.trim(), true);
+                setInvalidText(null);
+              }}
+              className="rounded border border-current/30 px-2 py-0.5 tracking-wide text-text-secondary transition-colors hover:bg-current/10"
+            >
+              ⊘ 标记作废
             </button>
           </div>
         </div>

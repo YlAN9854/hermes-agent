@@ -4947,6 +4947,144 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5005, str(e))
 
 
+@method("context.invalidate")
+def _(rid, params: dict) -> dict:
+    """ContextVis v2 ``invalidate``：把现有块标"不再成立"——原文留作历史、但告诉 agent 别再据它行动。
+
+    与 ``drop`` 的命脉区别：drop 删消息 → 下游引用悬空、agent 可能重蹈覆辙；invalidate **不删**
+    → "曾真/曾试"留作历史、下游引用不悬空（见 operations.md §2 必要性尺子 + DB_URL case）。
+
+    落地 = **两个协同写、一次提交**（守铁律"action 直接影响下一轮"；纯元数据标记 LLM 看不到 → 不够）：
+      ① 给目标消息打 ``_contextvis_invalid=True``（+ reason）—— 前端画琥珀删除线 + 压缩器降权候选；
+      ② 追加一条 **pinned 作废说明**（user note，对偶 ``context.add``）—— 落在 tail、近因权重高，
+         agent 真会读到"别再据此行动"（破"在场≠被遵守"）；pinned 让作废信号活过压缩、不被它折走。
+    note 携 ``_contextvis_invalidates``=目标 chunk_ids → 供撤销（revalidate）按链移除 + 未来连弧。
+
+    ``invalid=False`` = revalidate：清目标标记 + 按链移除其作废说明（误标可逆；context.undo 亦可一步撤）。
+    复用 ``drop_indices_for_chunks`` 解析 chunk→message + ``_commit_history_mutation``。门控 ``HERMES_CONTEXTVIS``。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    if session.get("running"):
+        return _err(
+            rid, 4009, "session busy — /interrupt the current turn before invalidating"
+        )
+    chunk_ids = params.get("chunk_ids") or []
+    if not isinstance(chunk_ids, list) or not chunk_ids:
+        return _err(rid, 4000, "chunk_ids must be a non-empty list")
+    invalid = bool(params.get("invalid", True))
+    reason = (params.get("reason") or "").strip()
+    sid = params.get("session_id", "")
+    client_version = params.get("history_version")
+    try:
+        from agent.contextvis import drop_indices_for_chunks
+        from agent.model_metadata import estimate_request_tokens_rough
+
+        def _snip(m) -> str:
+            c = m.get("content") if isinstance(m, dict) else None
+            if isinstance(c, str):
+                t = c
+            elif isinstance(c, list):
+                t = " ".join(
+                    str(b.get("text") or b.get("content") or "")
+                    for b in c
+                    if isinstance(b, dict)
+                )
+            else:
+                t = str(c or "")
+            t = " ".join(t.split())
+            return (t[:80] + "…") if len(t) > 80 else t
+
+        agent = session["agent"]
+        with session["history_lock"]:
+            before = list(session.get("history", []))
+            v0 = int(session.get("history_version", 0) or 0)
+        if client_version is not None and int(client_version) != v0:
+            return _err(rid, 4409, "context snapshot is stale — refresh and retry")
+
+        # 复用 chunk→message 解析（与 pin/drop/fold 同一套；system/tool_schema 无消息背书→排除）。
+        # 返回的是 set —— 排序成 list（下方 idxs[:3] 命名目标要切片，set 不可下标）。
+        idxs = sorted(drop_indices_for_chunks(agent, session, chunk_ids))
+        if not idxs:
+            return _err(rid, 4004, "no message-backed chunks resolved from those ids")
+
+        _sys = getattr(agent, "_cached_system_prompt", "") or ""
+        _tools = getattr(agent, "tools", None) or None
+        before_tokens = estimate_request_tokens_rough(
+            before, system_prompt=_sys, tools=_tools
+        )
+
+        targets = set(chunk_ids)
+        new_history = [dict(m) for m in before]
+        for i in idxs:
+            if invalid:
+                new_history[i]["_contextvis_invalid"] = True
+                if reason:
+                    new_history[i]["_contextvis_invalid_reason"] = reason
+                else:
+                    new_history[i].pop("_contextvis_invalid_reason", None)
+            else:
+                new_history[i].pop("_contextvis_invalid", None)
+                new_history[i].pop("_contextvis_invalid_reason", None)
+
+        if invalid:
+            # ② 作废说明：命名目标 + 注入新真相（reason）。pinned 让它活过压缩。
+            named = "\n".join(f"- “{s}”" for i in idxs[:3] if (s := _snip(before[i])))
+            marker = (
+                "[USER NOTE · INVALIDATED — the earlier information below no longer "
+                "holds; do not act on it. It is kept only as history.]"
+            )
+            if named:
+                marker += "\n" + named
+            if reason:
+                marker += f"\nCurrent truth / reason: {reason}"
+            new_history.append(
+                {
+                    "role": "user",
+                    "content": marker,
+                    "_contextvis_author": "user",  # 来源：co-author（violet 渲染）
+                    "_contextvis_pinned": True,  # 耐久：作废信号免压、活过压缩
+                    "_contextvis_invalidates": list(chunk_ids),  # 链到目标（撤销/连弧）
+                }
+            )
+        else:
+            # revalidate：按链移除指向这些目标的作废说明。
+            new_history = [
+                m
+                for m in new_history
+                if not (
+                    isinstance(m, dict)
+                    and targets.intersection(m.get("_contextvis_invalidates") or [])
+                )
+            ]
+
+        comp = getattr(agent, "context_compressor", None)
+        if comp is not None:
+            new_history = comp._sanitize_tool_pairs(new_history)
+
+        committed = _commit_history_mutation(
+            session, agent, before, new_history, v0, sid
+        )
+        if committed is None:
+            return _err(rid, 4409, "context changed during invalidate — retry")
+        after_tokens, info = committed
+        return _ok(
+            rid,
+            {
+                "status": "invalidated" if invalid else "revalidated",
+                "count": len(idxs),
+                "chunk_ids": list(chunk_ids),
+                "after_tokens": after_tokens,
+                "info": info,
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
 @method("context.promote")
 def _(rid, params: dict) -> dict:
     """ContextVis v2 ``promote``（统一耐久度轴**顶档**）：把一条文本提升为 system-prompt 常驻规则。

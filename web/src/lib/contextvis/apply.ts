@@ -278,3 +278,32 @@ export async function applyUnpromote(
     text,
   });
 }
+
+export interface InvalidateResult {
+  status: string;
+  count: number;
+  chunk_ids: string[];
+  after_tokens: number;
+}
+
+/**
+ * v2 `invalidate`：把现有 chunk 标"不再成立"——原文留作历史（≠drop 删除）、但追加一条 pinned
+ * 作废说明告诉 agent 别再据它行动（守"action 直接影响下一轮"）。`reason` = 用户独知的新真相。
+ * `invalid=false` = revalidate（清标记 + 按链移除作废说明）。成功后 re-emit、UI 刷出琥珀删除线。
+ */
+export async function applyInvalidate(
+  sessionId: string,
+  historyVersion: number | undefined,
+  chunkIds: string[],
+  reason: string,
+  invalid: boolean,
+): Promise<InvalidateResult> {
+  const gw = await ensureClient();
+  return gw.request<InvalidateResult>("context.invalidate", {
+    session_id: sessionId,
+    history_version: historyVersion,
+    chunk_ids: chunkIds,
+    reason,
+    invalid,
+  });
+}

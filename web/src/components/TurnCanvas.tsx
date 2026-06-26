@@ -18,6 +18,7 @@ import {
   CV_ADD,
   CV_ARC,
   CV_FATE,
+  CV_INVALID,
   CV_SURFACE,
   CV_TYPE_FILL as TYPE_FILL,
   CV_TYPE_ICON,
@@ -358,6 +359,7 @@ export function TurnCanvas({
                   : false;
                 const fate = fateMap[s.chunk.id];
                 const added = s.chunk.added === true; // v2 add：用户注入块
+                const invalid = s.chunk.invalid === true; // v2 invalidate：已作废（原文留作历史）
                 const traced = tracing && tracedChunks!.has(s.chunk.id);
                 // 子格标签字号随格子尺寸(∝token)缩放:大块明显大于小块,守「量级编码」。
                 const subFs = Math.max(9, Math.min(18, Math.floor(Math.min(s.h * 0.46, s.w / 4))));
@@ -381,7 +383,9 @@ export function TurnCanvas({
                       className="cursor-pointer"
                       fill={added ? CV_ADD : TYPE_FILL[s.chunk.type] ?? TYPE_FILL.history}
                       fillOpacity={
-                        added
+                        invalid
+                          ? 0.34
+                          : added
                           ? 0.9
                           : tracing
                             ? traced
@@ -394,14 +398,34 @@ export function TurnCanvas({
                                 : 0.82
                       }
                       stroke={
-                        added ? CV_ADD : traced ? TRACE_COLOR : fateStroke(fate, sel)
+                        invalid
+                          ? CV_INVALID
+                          : added
+                          ? CV_ADD
+                          : traced
+                          ? TRACE_COLOR
+                          : fateStroke(fate, sel)
                       }
-                      strokeWidth={added ? 1.5 : traced ? 2 : fate || sel ? 1.5 : 0.5}
+                      strokeWidth={invalid ? 1.5 : added ? 1.5 : traced ? 2 : fate || sel ? 1.5 : 0.5}
                       strokeDasharray={added ? "3 2" : fate === "fold" ? "3 2" : undefined}
                       vectorEffect="non-scaling-stroke"
                     >
-                      <title>{`${name} · ${added ? "你注入（add）" : TYPE_LABEL[s.chunk.type] ?? s.chunk.type}${s.chunk.pinned ? " · 📌 pin 免压缩" : ""} · ${formatTokenCount(s.chunk.tokens)}${fate ? ` · 标记:${fate}` : ""}`}</title>
+                      <title>{`${name} · ${added ? "你注入（add）" : TYPE_LABEL[s.chunk.type] ?? s.chunk.type}${s.chunk.pinned ? " · 📌 pin 免压缩" : ""}${invalid ? " · ⊘ 已作废（不再成立、留作历史）" : ""} · ${formatTokenCount(s.chunk.tokens)}${fate ? ` · 标记:${fate}` : ""}`}</title>
                     </rect>
+                    {/* invalidate：琥珀对角删除线 —— 一眼分清"已作废、原文留作历史"（≠drop 删除）。 */}
+                    {invalid && s.w > 8 && s.h > 8 && (
+                      <line
+                        x1={s.x + 1}
+                        y1={s.y + s.h - 1}
+                        x2={s.x + s.w - 1}
+                        y2={s.y + 1}
+                        stroke={CV_INVALID}
+                        strokeWidth={1.25}
+                        strokeOpacity={0.85}
+                        vectorEffect="non-scaling-stroke"
+                        className="pointer-events-none"
+                      />
+                    )}
                     {/* keep-as-pin/add·pin：📌 阈值放低，小格也显标记（守 #6：免压干预可见）。 */}
                     {s.chunk.pinned && s.w > 10 && s.h > 9 && (
                       <text

@@ -102,6 +102,7 @@ class Segment:
     folded: bool = False  # 压缩折叠产物（摘要消息），非对话轮
     added: bool = False  # v2 add：用户 co-author 注入（非对话轮，单独成块）
     pinned: bool = False  # v2 放置=pin：持久免压缩
+    invalid: bool = False  # v2 invalidate：用户标"不再成立"（原文留作历史、画琥珀删除线）
 
 
 @dataclass
@@ -122,6 +123,7 @@ class Chunk:
     folded: bool = False  # 压缩折叠产物（摘要）：turn 带画成「已折叠」块
     added: bool = False  # v2 add：用户注入块（画成 violet co-author 块）
     pinned: bool = False  # v2 放置=pin：持久免压缩（画 📌）
+    invalid: bool = False  # v2 invalidate：用户标"不再成立"（画琥珀删除线）
 
 
 # ── token 估算（复用 Hermes 既有 chars//4 口径） ──────────────────────
@@ -271,6 +273,9 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
         # pinned=耐久（持久免压，pin / keep-as-pin 共用 → 就地显 📌，不变型/轮）。
         is_added = msg.get("_contextvis_author") == "user"
         is_pinned = msg.get("_contextvis_pinned") is True
+        # invalid=内容作废（user 标"不再成立"）：原文留作历史、就地画琥珀删除线，与
+        # author/pinned 正交。与 drop 不同——块不删、下游引用不悬空（见 operations.md §2）。
+        is_invalid = msg.get("_contextvis_invalid") is True
         if role == "user" and not is_artifact and not is_added:
             turn += 1
         tokens = _est_msg(msg)
@@ -310,6 +315,9 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
             # （就地显 📌、保持原型/轮，与 add 注入块的 violet 正交）。
             if is_pinned and not is_added:
                 seg.pinned = True
+            # invalidate：标"不再成立"（与 author/pinned 正交，可与任意类型共存）。
+            if is_invalid:
+                seg.invalid = True
             out.append(seg)
         # 其它 role 忽略
     return out
@@ -411,6 +419,7 @@ def _strat_identity(band: str, segs: List[Segment]) -> List[Chunk]:
             # keep-as-pin：file/tool_result 单块被持久钉住 → 就地显 📌。
             added=s.added,
             pinned=s.pinned,
+            invalid=s.invalid,
             raw=_cap_raw(s.raw, s.tokens),
         )
         for s in segs
@@ -455,6 +464,7 @@ def _strat_group_by_turn(band: str, segs: List[Segment]) -> List[Chunk]:
                 turnSpan=[s.turn, s.turn],
                 added=True,
                 pinned=s.pinned,
+                invalid=s.invalid,
                 raw=_cap_raw(s.raw, s.tokens),
             )
         )
@@ -479,6 +489,8 @@ def _strat_group_by_turn(band: str, segs: List[Segment]) -> List[Chunk]:
                 turnSpan=[turn, turn],
                 # keep-as-pin：整轮被钉住 → 任一成员 pinned 即显 📌（钉轮=钉其全部消息）。
                 pinned=any(g.pinned for g in group),
+                # invalidate：轮内任一成员被标作废 → 整轮显琥珀（与 pin 同粒度，MVP）。
+                invalid=any(g.invalid for g in group),
                 raw=_cap_raw(_join_raw(group), sum(g.tokens for g in group)),
             )
         )
@@ -631,6 +643,8 @@ def _chunk_dict(c: Chunk) -> Dict[str, Any]:
         d["added"] = True
     if c.pinned:
         d["pinned"] = True
+    if c.invalid:
+        d["invalid"] = True
     if _raw_enabled() and c.raw:
         d["raw"] = c.raw
     return d
