@@ -254,3 +254,27 @@ export async function applyPromote(
     ...(chunkIds && chunkIds.length ? { chunk_ids: chunkIds } : {}),
   });
 }
+
+export interface UnpromoteResult {
+  status: string;
+  removed: number;
+  rules: number;
+  after_tokens: number;
+}
+
+/**
+ * v2 promote **删除**：从 system-prompt 常驻规则里移除一条（按文本精确匹配）。
+ * 立即重建 + 持久化 + re-emit → 下一轮规则消失、规则卡同步。
+ */
+export async function applyUnpromote(
+  sessionId: string,
+  historyVersion: number | undefined,
+  text: string,
+): Promise<UnpromoteResult> {
+  const gw = await ensureClient();
+  return gw.request<UnpromoteResult>("context.unpromote", {
+    session_id: sessionId,
+    history_version: historyVersion,
+    text,
+  });
+}

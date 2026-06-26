@@ -101,7 +101,8 @@ keep/drop/fold/invalidate 都在治理"**机器写的内容**"(用户=审查员)
 > - **落地 = 立即重建(反转"骑压缩"spec)**。理由:占用低时压缩永不触发 → "骑压缩"会**永不落地**;用户要 action 直接影响下一轮。`context.promote` RPC:写 `agent._contextvis_promotions` → `_invalidate_system_prompt()` + `_build_system_prompt()` + **`update_system_prompt` 持久化**(击穿 [conversation_loop.py](../agent/conversation_loop.py) 的 `stored_prompt` 缓存复用 → 下一轮即生效)。代价=一次 cache 重建(promote 罕用,值)。gateway agent `system_message=None` → `_build_system_prompt()` 重建安全。
 > - **两入口**:`add·promote`(composer 第三放置「⬆ 规则」→ `applyPromote(text)`)/ `move·promote`(inspector「⬆ 提升」→ 内联编辑器**用户自编辑 distill** → `applyPromote(text, [chunkId])` = 加规则 + **删源**)。
 > - **白盒可见(用户复测提出)**:规则**单列为第 4 个 `promoted` 段**(`build_system_prompt_parts` 返回 `promoted` key、`build_system_prompt` 拼接;模型照常拿到)→ `_segment_system` 出独立 violet「用户规则」chunk(`added`)→ 前端**「⬆ 用户规则」卡**(画布上方细条列表、移出量级树图、每条一行可点),inspector 区分草稿/已落地/已提升。**= v2「规则卡」的兑现。**
-> - **剩**:`_contextvis_promotions` 仍**在内存**(进程重启/会话轮转会丢 → 之后压缩重建可能丢规则)→ **持久化到 session_db 是下一刀**;LLM 自动蒸馏(现仅用户自编辑);move 的"保留原块"开关。
+> - **持久化 + 删除已建成(2026-06-25)**:promotions 存 `state_meta` 的 `cv:promotions:{session_id}`(`_cv_rebuild_promoted` 每次 promote/unpromote 时随 prompt 一并 persist)；`build_system_prompt_parts` **冷启时一次性 lazy-restore**(为 None → 从 db 读、回填,守持久承诺、重建也带上;不依赖 resume 路)。**删除** = `context.unpromote` RPC(按文本精确移除 → 立即重建+持久化+re-emit)+ 规则卡 chip 上的 **× 删除**。stub 全绿(set/get_meta JSON 保真 + 删除过滤 + 新句柄模拟重启读回)。
+> - **剩**:**会话轮转(压缩)后 + 重启** 的组合边(promotions 存在轮转前的 session_id 下;轮转后若无新 promote/unpromote 则不会 re-save 到新 id → 重启可能丢。stored_prompt 仍烤着规则、模型当下看得到,仅后续重建受影响,罕见);LLM 自动蒸馏(现仅用户自编辑);move 的"保留原块"开关。
 
 ---
 

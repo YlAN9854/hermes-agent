@@ -4691,6 +4691,30 @@ def _commit_history_mutation(session, agent, before, new_history, v0, sid):
     return after_tokens, info
 
 
+def _cv_rebuild_promoted(agent) -> None:
+    """v2 promote/unpromote 共用:吃当前 ``agent._contextvis_promotions`` **立即重建** system
+    prompt + 持久化(``update_system_prompt`` 覆盖 stored_prompt 复用 → 下一轮即生效)+ **把
+    promotions 存进 ``state_meta``**(跨进程重启/会话轮转存活;``build_system_prompt_parts`` 冷启时
+    据此恢复)。best-effort,不阻断落地。gateway agent ``system_message=None`` → 重建安全。
+    """
+    try:
+        import json as _json
+
+        agent._invalidate_system_prompt()
+        new_sp = agent._build_system_prompt()
+        agent._cached_system_prompt = new_sp
+        db = getattr(agent, "_session_db", None)
+        sid = getattr(agent, "session_id", None)
+        if db is not None and sid:
+            db.update_system_prompt(sid, new_sp)
+            db.set_meta(
+                f"cv:promotions:{sid}",
+                _json.dumps(getattr(agent, "_contextvis_promotions", []) or []),
+            )
+    except Exception as e:  # noqa: BLE001 — best-effort，不阻断
+        logger.debug("cv promote rebuild/persist skipped: %s", e)
+
+
 @method("context.apply")
 def _(rid, params: dict) -> dict:
     """ContextVis 方向 A 阶段 3:把用户标记的 drop 落地到真实上下文。
@@ -4977,16 +5001,9 @@ def _(rid, params: dict) -> dict:
                     new_history = comp._sanitize_tool_pairs(new_history)
                 moved = len(before) - len(new_history)
 
-        # 3. **立即重建** system prompt + 持久化 → 覆盖 stored_prompt 复用、下一轮即生效。
-        #    重建失败不致命：规则已入 promotions，下次自然重建（压缩/新轮）也会带上。
-        try:
-            agent._invalidate_system_prompt()
-            new_sp = agent._build_system_prompt()
-            agent._cached_system_prompt = new_sp
-            if getattr(agent, "_session_db", None) and getattr(agent, "session_id", None):
-                agent._session_db.update_system_prompt(agent.session_id, new_sp)
-        except Exception as e:  # noqa: BLE001 — best-effort，不阻断落地
-            logger.debug("context.promote rebuild skipped: %s", e)
+        # 3. **立即重建** system prompt + 持久化（promotions 存 state_meta、prompt 覆盖 stored_prompt）
+        #    → 跨重启存活、下一轮即生效。重建失败不致命：规则已入内存，下次自然重建也会带上。
+        _cv_rebuild_promoted(agent)
 
         # 4. commit：即便没 move 也 bump 版本 + re-emit，让 system chunk 刷新出新规则。
         committed = _commit_history_mutation(
@@ -5001,6 +5018,70 @@ def _(rid, params: dict) -> dict:
                 "status": "promoted",
                 "rules": len(proms),
                 "moved": moved,
+                "after_tokens": after_tokens,
+                "info": info,
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
+@method("context.unpromote")
+def _(rid, params: dict) -> dict:
+    """ContextVis v2 promote **删除**：从 system-prompt 常驻规则里移除一条（按文本精确匹配）。
+
+    立即重建 + 持久化（`_cv_rebuild_promoted` 覆盖 stored_prompt + 更新 state_meta）+ re-emit →
+    下一轮规则消失、规则卡同步。门控 `HERMES_CONTEXTVIS`。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    if session.get("running"):
+        return _err(
+            rid, 4009, "session busy — /interrupt the current turn before unpromoting"
+        )
+    text = (params.get("text") or "").strip()
+    if not text:
+        return _err(rid, 4000, "text must be a non-empty string")
+    sid = params.get("session_id", "")
+    client_version = params.get("history_version")
+    try:
+        agent = session["agent"]
+        with session["history_lock"]:
+            before = list(session.get("history", []))
+            v0 = int(session.get("history_version", 0) or 0)
+        if client_version is not None and int(client_version) != v0:
+            return _err(rid, 4409, "context snapshot is stale — refresh and retry")
+
+        # 确保 promotions 已加载（冷启后可能为 None → 触发 build 走 lazy-load 恢复）。
+        proms = getattr(agent, "_contextvis_promotions", None)
+        if proms is None:
+            try:
+                agent._build_system_prompt()
+            except Exception:
+                pass
+            proms = getattr(agent, "_contextvis_promotions", None) or []
+        new_proms = [p for p in proms if p != text]
+        removed = len(proms) - len(new_proms)
+        agent._contextvis_promotions = new_proms
+
+        _cv_rebuild_promoted(agent)
+
+        # 无结构变更（不删消息），但仍 bump 版本 + re-emit 让规则卡 / system chunk 同步。
+        committed = _commit_history_mutation(
+            session, agent, before, list(before), v0, sid
+        )
+        if committed is None:
+            return _err(rid, 4409, "context changed during unpromote — retry")
+        after_tokens, info = committed
+        return _ok(
+            rid,
+            {
+                "status": "unpromoted",
+                "removed": removed,
+                "rules": len(new_proms),
                 "after_tokens": after_tokens,
                 "info": info,
             },

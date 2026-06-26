@@ -347,7 +347,23 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # prompt（build_system_prompt 拼接 promoted、agent 当规则看），又在 ContextVis 里独立成
     # 「用户规则」块（白盒可见、不埋进巨大的 context 段，守不变量 #6 透明）。``context.promote``
     # 写入 ``agent._contextvis_promotions`` 后立即重建并持久化，使其在**下一轮**即生效。
+    # 内存优先；为 None（进程重启/冷启后 agent 重建）则**一次性从 session_db 恢复**
+    # （守持久承诺：规则跨重启存活、后续重建也带上）。失败退化为空、不阻断。
     promotions = getattr(agent, "_contextvis_promotions", None)
+    if promotions is None:
+        promotions = []
+        try:
+            _db = getattr(agent, "_session_db", None)
+            _sid = getattr(agent, "session_id", None)
+            if _db is not None and _sid:
+                _raw = _db.get_meta(f"cv:promotions:{_sid}")
+                if _raw:
+                    _loaded = json.loads(_raw)
+                    if isinstance(_loaded, list):
+                        promotions = [str(p) for p in _loaded if p]
+        except Exception:
+            promotions = []
+        agent._contextvis_promotions = promotions
     promoted_block = ""
     if promotions:
         _rules = "\n".join(f"- {p}" for p in promotions if p)

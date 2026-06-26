@@ -40,6 +40,7 @@ import {
   applyDrops,
   applyFold,
   applyPromote,
+  applyUnpromote,
   debugRegime,
   fetchRegimeColors,
   undoApply,
@@ -663,6 +664,16 @@ export function ContextVisPanel({
     }
   };
 
+  // v2 promote 删除：从规则卡移除一条常驻规则 → context.unpromote（立即重建 + 持久化）。
+  const unpromoteRule = async (text: string) => {
+    if (!sid) return;
+    try {
+      await applyUnpromote(sid, snapshot.historyVersion, text);
+    } catch {
+      /* 失败静默（后端无 re-emit → UI 不变） */
+    }
+  };
+
   return (
     <Card className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-3 py-2">
       <div className="flex items-center justify-between gap-2">
@@ -1215,20 +1226,32 @@ export function ContextVisPanel({
                 ⬆ 用户规则 ({promotedRules.length})
               </span>
               {promotedRules.map((r, i) => (
-                <button
+                <span
                   key={i}
-                  type="button"
-                  onClick={() => onSelect(selected === PROMOTED_ID ? null : PROMOTED_ID)}
-                  className="max-w-2xs truncate rounded border px-1.5 py-0.5 text-[10px] tracking-wide transition-colors hover:bg-current/5"
+                  className="inline-flex max-w-2xs items-center gap-0.5 rounded border px-1.5 py-0.5 text-[10px] tracking-wide transition-colors hover:bg-current/5"
                   style={{
                     borderColor: `${CV_ADD}55`,
                     color: CV_ADD,
                     ...(selected === PROMOTED_ID ? { backgroundColor: `${CV_ADD}1a` } : {}),
                   }}
-                  title={`${r}（system-prompt 常驻规则，点看原文）`}
                 >
-                  {r}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => onSelect(selected === PROMOTED_ID ? null : PROMOTED_ID)}
+                    className="min-w-0 truncate"
+                    title={`${r}（system-prompt 常驻规则，点看原文）`}
+                  >
+                    {r}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void unpromoteRule(r)}
+                    className="shrink-0 px-0.5 opacity-60 hover:opacity-100"
+                    title="删除这条规则（从 system prompt 移除，下一轮生效）"
+                  >
+                    ×
+                  </button>
+                </span>
               ))}
             </div>
           )}
