@@ -1,6 +1,6 @@
 # ContextVis v2 · 操作集 + 新交互 + 驱动 case
 
-> **状态:设计探索为主;已落地——引用图层①②(§6)+ 画布化(TurnCanvas)+ `add` 首刀(预览,见 §2 add 实现状态)。** 理论依据(剃刀)见 [principle.md](principle.md)。
+> **状态:设计探索为主;已落地——引用图层①②(§6)+ 画布化(TurnCanvas)+ `add`(预览/inline/pin/promote)+ 统一耐久度轴(keep-as-pin/promote/规则卡,见 §3)。** 理论依据(剃刀)见 [principle.md](principle.md)。
 > 组织原则:**按"意图"而非"动词"组织**——动词会重复(merge 塌进 fold),意图不会。
 
 ---
@@ -10,9 +10,9 @@
 v2 收紧后,整套操作 = **一根理论支柱(剃刀)+ 两根实用轴**:
 
 - **动词轴**:`keep` · `drop` · `fold` · **`add`** · **`invalidate`**(新增加粗两个;**merge 不立为动词**——它=fold+用户侧重)。
-- **放置/耐久轴**:`原位(inline)` · `钉死 context(pin)` · **`system-prompt`**(三档耐久度,Hermes 现成有)。
+- **放置/耐久轴**:`原位(inline)` · `钉死 context(pin)` · **`system-prompt`**(三档耐久度,Hermes 现成有)。**这根轴被两个入口共用**——`add`(写新内容)与"护现有块"(`keep→pin→promote`)沿同一根轴移动,见 **§3 统一耐久度轴**。
 
-任一操作 = 动词 × 放置。摇杆(steered fold)是 fold 的精装,不另立。
+任一操作 = 动词 × 放置;**且"护现有块"那一支(`keep`=一次性 / `pin`=持久 / `promote`=权威)= 同一"保护"沿耐久轴的三档,与 add 共用此轴**。摇杆(steered fold)是 fold 的精装,不另立。
 
 ---
 
@@ -25,7 +25,7 @@ keep/drop/fold/invalidate 都在治理"**机器写的内容**"(用户=审查员)
 - **与 turn 的本质区别(=必要性)**:turn 是**对话动作**(触发生成、agent 必须回应、占整轮、下次又变旧被压);add 是**非对话注入**(随行注解,看得见但不必回应;配钉死区穿越压缩永久承重)。今天你只能开一轮 → add 严格更优。
 - **剃刀**:注入外部真相 + 意图,机器结构上拿不到。强通过。
 
-> **实现状态(2026-06):A 预览 + B 落地(inline/pin)均已建成实测。** add 的**观察→预览→落地→有效性对照**全闭环;**promote(放置=system-prompt)留下一刀**。
+> **实现状态(2026-06):A 预览 + B 落地(inline/pin)+ 统一耐久度轴(keep-as-pin/add·promote/move·promote + 规则卡)均已建成实测。** add 的**观察→预览→落地→有效性对照**全闭环;放置轴三档(inline/pin/promote)齐全。统一轴细节见 §3「统一耐久度轴」实现状态。
 > - **fixture 工坊(建 case 的地基)**:`?fixture=<name>` 冻结渲染层两数据源(snapshot + regime_colors,**连检测器判定一并钉死**)→ 零-token、完全确定地重放一个 case;面板 `⬇ fixture`(dev)一键录制。注入点只在适配器边界(`useContextSnapshot` / `fetchRegimeColors`),渲染层不知情。见 `web/src/lib/contextvis/fixtures/`。**它解决项目瓶颈**——case 怎么设计 + 怎么幂等测(fork 会让 regime_colors 重跑 aux LLM、主线/弧每次抖;fixture 把那次判定冻住)。
 > - **`add.ts` 纯函数(对偶 plan.ts 的 `projectFates`)**:`AddDraft{text, placement}` + `projectAdd(snapshot, draft)→增广 snapshot`(追加合成 chunk + 抬占用)+ `addCost`(成本预览)。零副作用、可逆。
 > - **放置轴 pin/inline 已落地**(system-prompt=promote 另设,见 §3):composer(textarea + 📌pin/inline 段选 + 实时 `+Ntok·X%→Y%·免压缩`);增广 snapshot 喂三渲染器 → 画布**注入块自动作新一轮渲染**(violet 虚线格 + 📌pin,`CV_ADD` 单一色源),占用诚实抬高,`buildTurnCells` 零改。
@@ -46,8 +46,8 @@ keep/drop/fold/invalidate 都在治理"**机器写的内容**"(用户=审查员)
 - **会塌的 case(别用来论证)**:死路("别再试库 X")、撤回指令——这些 = fold + 一句负面 verdict(那 verdict 其实是 add)。
 - **论文价值**:invalidate **不是凭空第 5 个动词,是被"内容作废 × 引用结构"逼出来的**(没引用图你只会 drop;有了引用图 drop 有爆炸半径,才需"留着但剥夺权威")。它与 Case 2 **同根**;也是 v1 残值"被取代旧读"信号的**人工版**(机器靠"又读一次"判废,人不用再读就知道)。
 
-### keep / fold / drop —— v1 已建,微操层(低价值,见剃刀推论)
-保留,但**不是 v2 的重点**;v2 的能量在 add / invalidate / 放置 / 操舵。
+### keep / fold / drop —— v1 已建;keep 是"保护轴"最低档(见 §3 统一耐久度轴)
+`fold` / `drop` = **降耐久**(摘要 / 删除)的微操层(低价值,见剃刀推论)。**`keep` 不同——它是"保护"沿耐久轴的一次性档**,与 `pin` / `promote` 同族(`keep`=这次别折 / `pin`=永久免压 / `promote`=进 system-prompt 当规则);当前仅闸门内生效、**无独立落地路**(闸门外标 keep = no-op),统一后补 **keep-as-pin**。详见 **§3**。v2 的能量在 add / invalidate / **统一保护轴** / 操舵。
 
 ---
 
@@ -59,11 +59,49 @@ keep/drop/fold/invalidate 都在治理"**机器写的内容**"(用户=审查员)
 
 > **决策(2026-06-25,别重走):用户面只给 `inline / pin / promote` 三档,不给"末尾/tail"档。** tail 是压缩器按 token 预算的**滑动**保护、会随对话增长**静默失效**(违白盒 #6 透明 / #7),是实现产物非用户意图;它想够的"持久但临时"中间档由 **pin(免压标记)** 正确实现(持久 immune + 用户控制撤销 + 不破 cache)。映射:inline=随历史受压(短暂纠偏,如实警告"下次压缩收走)、pin=免压区(临时但须持久的外部真相,如 B1)、promote=system-prompt(永久规则)。
 
+### 统一耐久度轴:`keep` = 一次性 `pin`;`add`(写)与 `keep/pin/promote`(护)共用一根轴
+
+> **已建成实测(2026-06-25,用户提出)。** 拆标记 + keep-as-pin + promote(add·promote/move·promote)+ 规则卡全建成;实现状态见本节末。下方「现状/复用方案」是**决策痕迹**(为什么这么拆),保留备查。
+
+**洞察**:`keep / pin / promote` 不是三个孤立动作,而是**一根耐久度轴上的三个相邻档**——`pin` = **持久化的 keep**,`keep` = **一次性的 pin**。同一根轴,`add`(写新内容)与"护现有块"两个入口共用:
+
+**`drop < fold < (普通 history) < keep〔这次别折·一次性〕< pin〔永远免压·持久〕< promote〔进 system-prompt·权威〕`**
+
+| 耐久档 | 写新内容(`add`) | 护现有块 |
+|---|---|---|
+| 一次性 | —— | **`keep`**(闸门里否掉这次折) |
+| 持久免压 | **`add·pin`** | **`keep-as-pin`**(升级现有块) |
+| 权威规则 | **`add·promote`** | **`promote`**(升级现有块进 system-prompt) |
+
+**现状(检查所得,2026-06-25):keep 与 pin 当前零复用**——两套机制、两个层:
+- **`keep`** = 前端 `fateMap` + 压缩闸门:覆盖 `system_fate` 的 fold/drop。**一次性**(不写进消息、下次系统照样提议折)、**被动**(只在闸门弹时否掉)、**无独立落地路**(闸门外标 keep = no-op,`droppable/foldable` 都不收)。
+- **`pin`** = 后端消息标记 `_contextvis_add="pin"` + `ContextCompressor._is_pinned`:**持久**、**主动**、有独立落地(`context.add`)。
+
+**复用方案(让二者共用一套免压)**:pin 的底座(消息标记 + 压缩器 `_is_pinned`)**已是 keep-as-pin 所需**,只差**拆标记**——现 `_contextvis_add="pin"` 把「来源」与「耐久」揉一起,拆成正交两字段:
+- `_contextvis_pinned: true` = **耐久**(免压)→ 压缩器 `_is_pinned` **单一**认它;
+- `_contextvis_author: "user"` = **来源**(co-author)→ violet 渲染。
+
+于是:**`add·pin`** 打两个标记(violet + 📌);**`keep-as-pin`**(护机器块)**只打 `_contextvis_pinned`** → 白嫖压缩器同一套免压、**零新后端**;**渲染顺带变正交**(violet=作者性、📌=免压:被 keep-pin 的机器块显 📌 不 violet,add+pin 才两者都有)。**`promote`** 再叠一层 = pin(持久)+ 移进 system-prompt(权威),骑压缩重建走(见下节)。
+
+**复用与建造顺序**:① 拆 `_contextvis_pinned`/`_contextvis_author`(compressor / chunking / server / 前端渲染随之)+ **keep-as-pin 独立落地路**(补 keep 当前的 no-op 空白)→ ② `promote` 落在**统一底座**上(非第三套平行机制)。**先统一、再 promote。**
+
+> **实现状态(2026-06-25,①②按序建成,前端实测)**:
+> - **① 拆标记**:`_contextvis_pinned`(耐久)/`_contextvis_author`(来源)正交。`ContextCompressor._is_pinned` 改认 `_contextvis_pinned`(单一耐久真相,carry-through 免压);`chunking._segment_history` 拆 added(violet、单独成块、不顶轮)/ pinned(就地 📌、保型保轮),`_strat_identity`/`_strat_group_by_turn` 传播。stub 全绿(正交三态 + keep-as-pin 跨压缩存活、inline 受压)。
+> - **① keep-as-pin**:`context.pin` RPC(给现有消息打/去 `_contextvis_pinned`,零结构变更,复用 `drop_indices_for_chunks` + commit)+ inspector 头部「📌 钉住/已钉住」toggle。**白嫖压缩器同一套免压、零新后端**;渲染正交(violet=作者性 / 📌=免压,机器块 keep-pin 显 📌 不 violet)。
+> - **② promote**:见下「promote → system prompt」实现状态。
+> - **小格可读**(用户复测提出):一句话规则 26 tok 在树图里是 sliver → **规则移出量级树图**(见 promote 实现);timeline 小 pin 格 **📌 阈值放低**(`w>10&&h>9`),violet 填充本就不分大小。守 #3(量级)又守 #6(干预可见)。
+
 ### promote → system prompt
-- **定位**:= `(add 或 move) × 放置=system-prompt` + 一步**蒸馏**。不破坏"动词 5 个",是**放置轴顶档被点亮**。
+- **定位**:= `(add 或 move) × 放置=system-prompt` + 一步**蒸馏**。不破坏"动词 5 个",是**放置轴顶档被点亮**;**两个入口(`add·promote` / 现有块 `promote`)共用统一耐久度轴(见上),落在「拆标记」后的统一底座上、不另造平行机制**。建造顺序:**先统一(拆标记 + keep-as-pin)再 promote**。
 - **pin vs promote**:pin 保**在场**(presence);promote 给**权威**(authority,进 system prompt → 置顶、不被压、当**规则**看)。
 - **必要性 case**:约束 pin 着、agent 仍违反(作为 history 被近因偏置淹没,权重干不过近期 context)→ **在场 ≠ 被遵守** → promote 才解决。剃刀:"这是**规则**不是随口一说"=权威状态,机器看不出。
 - **payoff(论文亮点 = 支柱二)**:**白盒化 agent 最黑的盒子——system prompt**。使命从"白盒化对话历史"**延伸到 agent 的'宪法'**。Hermes system prompt 本就分 `stable/context/volatile` 三节(`build_system_prompt_parts`),v1 检视器**已只读露出**;promote = **把它变成可写**。基建已就位。
+
+> **实现状态(2026-06-25,已建成,前端实测;后端待 live 测)**:
+> - **落地 = 立即重建(反转"骑压缩"spec)**。理由:占用低时压缩永不触发 → "骑压缩"会**永不落地**;用户要 action 直接影响下一轮。`context.promote` RPC:写 `agent._contextvis_promotions` → `_invalidate_system_prompt()` + `_build_system_prompt()` + **`update_system_prompt` 持久化**(击穿 [conversation_loop.py](../agent/conversation_loop.py) 的 `stored_prompt` 缓存复用 → 下一轮即生效)。代价=一次 cache 重建(promote 罕用,值)。gateway agent `system_message=None` → `_build_system_prompt()` 重建安全。
+> - **两入口**:`add·promote`(composer 第三放置「⬆ 规则」→ `applyPromote(text)`)/ `move·promote`(inspector「⬆ 提升」→ 内联编辑器**用户自编辑 distill** → `applyPromote(text, [chunkId])` = 加规则 + **删源**)。
+> - **白盒可见(用户复测提出)**:规则**单列为第 4 个 `promoted` 段**(`build_system_prompt_parts` 返回 `promoted` key、`build_system_prompt` 拼接;模型照常拿到)→ `_segment_system` 出独立 violet「用户规则」chunk(`added`)→ 前端**「⬆ 用户规则」卡**(画布上方细条列表、移出量级树图、每条一行可点),inspector 区分草稿/已落地/已提升。**= v2「规则卡」的兑现。**
+> - **剩**:`_contextvis_promotions` 仍**在内存**(进程重启/会话轮转会丢 → 之后压缩重建可能丢规则)→ **持久化到 session_db 是下一刀**;LLM 自动蒸馏(现仅用户自编辑);move 的"保留原块"开关。
 
 ---
 

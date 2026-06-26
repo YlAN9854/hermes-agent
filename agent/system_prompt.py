@@ -343,9 +343,24 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         timestamp_line += f"\nProvider: {agent.provider}"
     volatile_parts.append(timestamp_line)
 
+    # v2 promote（统一耐久度轴顶档）：用户提升为"规则"的常驻文本，**单列一段**——既进系统
+    # prompt（build_system_prompt 拼接 promoted、agent 当规则看），又在 ContextVis 里独立成
+    # 「用户规则」块（白盒可见、不埋进巨大的 context 段，守不变量 #6 透明）。``context.promote``
+    # 写入 ``agent._contextvis_promotions`` 后立即重建并持久化，使其在**下一轮**即生效。
+    promotions = getattr(agent, "_contextvis_promotions", None)
+    promoted_block = ""
+    if promotions:
+        _rules = "\n".join(f"- {p}" for p in promotions if p)
+        if _rules:
+            promoted_block = (
+                "# User-promoted standing rules (authoritative — follow for the rest of this session)\n"
+                + _rules
+            )
+
     return {
         "stable":   "\n\n".join(p.strip() for p in stable_parts   if p and p.strip()),
         "context":  "\n\n".join(p.strip() for p in context_parts  if p and p.strip()),
+        "promoted": promoted_block,
         "volatile": "\n\n".join(p.strip() for p in volatile_parts if p and p.strip()),
     }
 
@@ -366,7 +381,12 @@ def build_system_prompt(agent: Any, system_message: Optional[str] = None) -> str
     warm across turns.
     """
     parts = build_system_prompt_parts(agent, system_message=system_message)
-    return "\n\n".join(p for p in (parts["stable"], parts["context"], parts["volatile"]) if p)
+    # 顺序保持 cache 友好：stable → context → promoted（用户规则）→ volatile。
+    return "\n\n".join(
+        p
+        for p in (parts["stable"], parts["context"], parts.get("promoted", ""), parts["volatile"])
+        if p
+    )
 
 
 def invalidate_system_prompt(agent: Any) -> None:

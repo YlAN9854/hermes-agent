@@ -116,13 +116,14 @@ _PATH_MENTION_RE = re.compile(r"(?:/|~/?|[A-Za-z]:\\)[^\s`'\")\]}<>]+")
 
 
 def _is_pinned(msg: Any) -> bool:
-    """v2 add（放置=pin）：带 pin 标记的用户注入消息——压缩永不碰（持久免压区）。
+    """v2 统一耐久度轴（pin / keep-as-pin）：带 ``_contextvis_pinned`` 的消息——压缩永不碰。
 
-    单一真相源：``context.add`` 落地时给消息打 ``_contextvis_add="pin"``，压缩器据此
-    把它从待摘要集剔除并原样接回结果末尾（见 ``compress``）。inline 注入无此标记，
-    照常受压。
+    **单一耐久真相源** = ``_contextvis_pinned``（与"来源"标记 ``_contextvis_author`` 正交）。
+    两条入口共用本机制：``context.add`` 的 ``add·pin``（用户注入 + 钉住）与 ``context.pin``
+    的 ``keep-as-pin``（把现有机器块升级为持久免压）。压缩器据此把它从待摘要集剔除并原样
+    接回结果末尾（见 ``compress``）。inline 注入 / 未钉块无此标记，照常受压。
     """
-    return isinstance(msg, dict) and msg.get("_contextvis_add") == "pin"
+    return isinstance(msg, dict) and msg.get("_contextvis_pinned") is True
 
 
 def _dedupe_append(items: list[str], value: str, *, limit: int) -> None:

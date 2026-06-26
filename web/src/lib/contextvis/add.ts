@@ -19,14 +19,14 @@
 
 import type { ContextChunk, ContextSnapshot } from "@/lib/contextvis/types";
 
-/** add 的放置轴（system-prompt = promote，另设）。 */
-export type AddPlacement = "inline" | "pin";
+/** add 的放置/耐久轴（统一耐久度轴：inline < pin < promote）。 */
+export type AddPlacement = "inline" | "pin" | "promote";
 
 /** 用户经 add 写的一条草稿（co-author 的"写"）。 */
 export interface AddDraft {
   /** 用户写的内容（原文）。 */
   text: string;
-  /** 放置：inline（随历史、可被压缩）/ pin（持久、免压缩）。 */
+  /** 放置：inline（随历史、可被压缩）/ pin（持久、免压缩）/ promote（进 system-prompt 当规则）。 */
   placement: AddPlacement;
 }
 
@@ -49,19 +49,23 @@ export function draftToChunk(
   draft: AddDraft,
   snapshot: ContextSnapshot,
 ): ContextChunk {
-  const turn =
-    snapshot.chunks.reduce((m, c) => Math.max(m, c.turn), 0) + 1;
   const firstLine = draft.text.trim().split("\n")[0] || "用户注入";
+  // promote → 进 system prompt（顶档），预览为 system 段的注入块（turn 0、免压）；
+  // inline/pin → 随历史，落到最新轮之后独立成格。
+  const isPromote = draft.placement === "promote";
+  const turn = isPromote
+    ? 0
+    : snapshot.chunks.reduce((m, c) => Math.max(m, c.turn), 0) + 1;
   return {
     id: `add:draft:${draft.placement}`,
-    type: "history",
+    type: isPromote ? "system" : "history",
     tokens: estimateTokens(draft.text),
     turn,
     label: firstLine.slice(0, 60),
     sourceRefs: [],
     raw: draft.text,
     added: true,
-    pinned: draft.placement === "pin",
+    pinned: draft.placement === "pin" || isPromote,
   };
 }
 

@@ -156,19 +156,23 @@ def _segment_system(agent: Any) -> List[Segment]:
             return [Segment("sys:all", SEG_SYSTEM, 0, _est_str(cached),
                             "system prompt", {"part": "system:all"}, raw=cached)]
         return out
-    for key in ("stable", "context", "volatile"):
+    for key in ("stable", "context", "promoted", "volatile"):
         text = parts.get(key) or ""
         if not text.strip():
             continue
+        # v2 promote：用户提升的常驻规则单列成块——标 added（violet「用户规则」、白盒可见，
+        # 不埋进巨大的 context 段），守不变量 #6 透明。其余 3 段照常。
+        is_promoted = key == "promoted"
         out.append(
             Segment(
                 id=f"sys:{key}",
                 type=SEG_SYSTEM,
                 turn=0,
                 tokens=_est_str(text),
-                label=key,
+                label="用户规则" if is_promoted else key,
                 ref={"part": f"system:{key}"},
                 raw=text,
+                added=is_promoted,
             )
         )
     return out
@@ -263,31 +267,32 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
             role in ("user", "assistant")
             and _is_compression_artifact(_content_text(msg))
         )
-        # v2 add：用户 co-author 注入的消息（带 _contextvis_add 标记）—— 不是对话轮，
-        # 单独成块（像 folded），故不顶增轮号；turn+1 让它落到最新轮之后、独立成格。
-        add_placement = msg.get("_contextvis_add")
-        is_added = add_placement in ("inline", "pin")
+        # v2 统一标记（正交两轴）：author=来源（用户 co-author 注入 → 单独成块、violet、不顶轮）；
+        # pinned=耐久（持久免压，pin / keep-as-pin 共用 → 就地显 📌，不变型/轮）。
+        is_added = msg.get("_contextvis_author") == "user"
+        is_pinned = msg.get("_contextvis_pinned") is True
         if role == "user" and not is_artifact and not is_added:
             turn += 1
         tokens = _est_msg(msg)
         ref = {"messageIndex": i}
         raw = _msg_raw(msg)
+        seg: Optional[Segment] = None
         if is_artifact:
-            out.append(Segment(f"msg:{i}", SEG_ASSISTANT, turn, tokens,
-                               "压缩 context", ref, raw=raw, folded=True))
+            seg = Segment(f"msg:{i}", SEG_ASSISTANT, turn, tokens,
+                          "压缩 context", ref, raw=raw, folded=True)
         elif is_added:
             text = _content_text(msg)
-            out.append(Segment(f"msg:{i}", SEG_USER, turn + 1, tokens,
-                               _snippet(text) or "用户注入", ref, raw=raw,
-                               added=True, pinned=(add_placement == "pin")))
+            seg = Segment(f"msg:{i}", SEG_USER, turn + 1, tokens,
+                          _snippet(text) or "用户注入", ref, raw=raw,
+                          added=True, pinned=is_pinned)
         elif role == "user":
             text = _content_text(msg)
-            out.append(Segment(f"msg:{i}", SEG_USER, turn, tokens,
-                               _snippet(text) or "user", ref, raw=raw))
+            seg = Segment(f"msg:{i}", SEG_USER, turn, tokens,
+                          _snippet(text) or "user", ref, raw=raw)
         elif role == "assistant":
             text = _content_text(msg)
             label = _snippet(text) or ("tool call" if msg.get("tool_calls") else "assistant")
-            out.append(Segment(f"msg:{i}", SEG_ASSISTANT, turn, tokens, label, ref, raw=raw))
+            seg = Segment(f"msg:{i}", SEG_ASSISTANT, turn, tokens, label, ref, raw=raw)
         elif role == "tool":
             cid = msg.get("tool_call_id") or ""
             paired = call_index.get(cid, {})
@@ -295,11 +300,17 @@ def _segment_history(history: List[Dict[str, Any]]) -> List[Segment]:
             args_json = paired.get("args") or ""
             content = _content_text(msg)
             if tool_name in _FILE_TOOLS:
-                out.append(Segment(f"msg:{i}", SEG_FILE, turn, tokens,
-                                   _path_from_args(args_json), ref, raw=raw))
+                seg = Segment(f"msg:{i}", SEG_FILE, turn, tokens,
+                              _path_from_args(args_json), ref, raw=raw)
             else:
-                out.append(Segment(f"msg:{i}", SEG_TOOL_RESULT, turn, tokens,
-                                   _summarize(tool_name, args_json, content), ref, raw=raw))
+                seg = Segment(f"msg:{i}", SEG_TOOL_RESULT, turn, tokens,
+                              _summarize(tool_name, args_json, content), ref, raw=raw)
+        if seg is not None:
+            # keep-as-pin：现有（非注入）消息被持久钉住 → 在原 segment 上标 pinned
+            # （就地显 📌、保持原型/轮，与 add 注入块的 violet 正交）。
+            if is_pinned and not is_added:
+                seg.pinned = True
+            out.append(seg)
         # 其它 role 忽略
     return out
 
@@ -397,6 +408,9 @@ def _strat_identity(band: str, segs: List[Segment]) -> List[Chunk]:
             group=s.group,
             members=1,
             turnSpan=[s.turn, s.turn],
+            # keep-as-pin：file/tool_result 单块被持久钉住 → 就地显 📌。
+            added=s.added,
+            pinned=s.pinned,
             raw=_cap_raw(s.raw, s.tokens),
         )
         for s in segs
@@ -463,6 +477,8 @@ def _strat_group_by_turn(band: str, segs: List[Segment]) -> List[Chunk]:
                 sourceRefs=[g.ref for g in group],
                 members=len(group),
                 turnSpan=[turn, turn],
+                # keep-as-pin：整轮被钉住 → 任一成员 pinned 即显 📌（钉轮=钉其全部消息）。
+                pinned=any(g.pinned for g in group),
                 raw=_cap_raw(_join_raw(group), sum(g.tokens for g in group)),
             )
         )

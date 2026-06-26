@@ -200,3 +200,57 @@ export async function applyAdd(
     placement,
   });
 }
+
+export interface PinResult {
+  status: string;
+  count: number;
+  chunk_ids: string[];
+  after_tokens: number;
+}
+
+/**
+ * v2 `keep-as-pin`（落地）：把**现有** chunk 升级为持久免压（或取消）。
+ * 统一耐久度轴的"护现有块"入口——给已有消息打/去免压标记，压缩器永不碰。
+ * 零结构变更(不删不折),成功后后端 re-emit、UI 刷新出 📌。
+ */
+export async function applyPin(
+  sessionId: string,
+  historyVersion: number | undefined,
+  chunkIds: string[],
+  pinned: boolean,
+): Promise<PinResult> {
+  const gw = await ensureClient();
+  return gw.request<PinResult>("context.pin", {
+    session_id: sessionId,
+    history_version: historyVersion,
+    chunk_ids: chunkIds,
+    pinned,
+  });
+}
+
+export interface PromoteResult {
+  status: string;
+  rules: number;
+  moved: number;
+  after_tokens: number;
+}
+
+/**
+ * v2 `promote`（统一耐久度轴顶档）：把一条文本提升为 system-prompt 常驻规则。
+ * **立即重建** system prompt + 持久化 → 下一轮即生效（权威，当规则看）。
+ * 给 `chunkIds` 则 move（删源消息免重复）；只给 text = add·promote。
+ */
+export async function applyPromote(
+  sessionId: string,
+  historyVersion: number | undefined,
+  text: string,
+  chunkIds?: string[],
+): Promise<PromoteResult> {
+  const gw = await ensureClient();
+  return gw.request<PromoteResult>("context.promote", {
+    session_id: sessionId,
+    history_version: historyVersion,
+    text,
+    ...(chunkIds && chunkIds.length ? { chunk_ids: chunkIds } : {}),
+  });
+}

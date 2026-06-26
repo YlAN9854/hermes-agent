@@ -23,6 +23,7 @@ import { ContextVisKeywordIndex } from "@/components/ContextVisKeywordIndex";
 import { formatTokenCount } from "@/lib/format";
 import { TurnCanvas } from "@/components/TurnCanvas";
 import {
+  CV_ADD,
   CV_ARC,
   CV_TOPIC_PALETTE,
 } from "@/lib/contextvis/theme";
@@ -38,6 +39,7 @@ import {
   applyAdd,
   applyDrops,
   applyFold,
+  applyPromote,
   debugRegime,
   fetchRegimeColors,
   undoApply,
@@ -62,6 +64,9 @@ import type {
 import { cn } from "@/lib/utils";
 
 type ChunkTopicMap = RegimeColors["chunk_topics"];
+
+/** 已提升规则所在的系统 chunk id（_segment_system 的 promoted 段）。 */
+const PROMOTED_ID = "system:sys:promoted";
 
 /** 主题键归一化:吸收 LLM 对同一主题的琐碎改名差异(trim / 小写 / 压空格)。 */
 function normalizeTopic(t: string): string {
@@ -286,6 +291,30 @@ export function ContextVisPanel({
     [snapshot, addDraft],
   );
   const addPreview = addDraft ? addCost(snapshot, addDraft) : null;
+
+  // v2 promote「用户规则」卡：把已提升的常驻规则**移出量级树图**（规则是 agent 的"宪法"，
+  // 不该跟 4.5K 系统块比面积，守 #3）→ 独立细条列表（白盒可见、与 token 多少无关，守 #6）。
+  const promotedChunk = snapshot.chunks.find((c) => c.id === PROMOTED_ID);
+  const promotedRules = useMemo(() => {
+    const raw = promotedChunk?.raw;
+    if (!raw) return [] as string[];
+    return raw
+      .split("\n")
+      .filter((l) => l.trimStart().startsWith("- "))
+      .map((l) => l.trimStart().slice(2).trim())
+      .filter(Boolean);
+  }, [promotedChunk?.raw]);
+  // 喂渲染器的快照排除 promoted chunk（它已在规则卡里；否则树图里又是一条 sliver）。
+  const canvasSnapshot = useMemo(
+    () =>
+      promotedChunk
+        ? {
+            ...displaySnapshot,
+            chunks: displaySnapshot.chunks.filter((c) => c.id !== PROMOTED_ID),
+          }
+        : displaySnapshot,
+    [displaySnapshot, promotedChunk],
+  );
   // 把当前注入草稿的合成 chunk 上抛挂载壳：选中它时 inspector 才能解析到、读原文。
   const addDraftChunk = useMemo(
     () => (addDraft ? draftToChunk(addDraft, snapshot) : null),
@@ -619,7 +648,12 @@ export function ContextVisPanel({
     setAddBusy(true);
     setAddError(null);
     try {
-      await applyAdd(sid, snapshot.historyVersion, addText, addPlacement);
+      // promote → 进 system prompt（立即重建）；inline/pin → 注入历史。
+      if (addPlacement === "promote") {
+        await applyPromote(sid, snapshot.historyVersion, addText);
+      } else {
+        await applyAdd(sid, snapshot.historyVersion, addText, addPlacement);
+      }
       setAddText("");
       setAddOpen(false);
     } catch (e) {
@@ -720,7 +754,7 @@ export function ContextVisPanel({
                   add · 注入一条你写的信息
                 </span>
                 <div className="flex overflow-hidden rounded border border-current/15 text-[10px]">
-                  {(["pin", "inline"] as const).map((p) => (
+                  {(["promote", "pin", "inline"] as const).map((p) => (
                     <button
                       key={p}
                       type="button"
@@ -732,12 +766,14 @@ export function ContextVisPanel({
                           : "text-text-tertiary hover:text-text-secondary",
                       )}
                       title={
-                        p === "pin"
-                          ? "pin：持久免压缩区，扛过后续压缩（长期约束）"
-                          : "inline：随历史注入，会被正常压缩（短暂澄清）"
+                        p === "promote"
+                          ? "promote：提升为 system-prompt 常驻规则（权威，立即重建、下一轮生效）"
+                          : p === "pin"
+                            ? "pin：持久免压缩区，扛过后续压缩（长期约束）"
+                            : "inline：随历史注入，会被正常压缩（短暂澄清）"
                       }
                     >
-                      {p === "pin" ? "📌 pin" : "inline"}
+                      {p === "promote" ? "⬆ 规则" : p === "pin" ? "📌 pin" : "inline"}
                     </button>
                   ))}
                 </div>
@@ -760,6 +796,9 @@ export function ContextVisPanel({
                     {addPlacement === "pin" && (
                       <span className="ml-1 text-success">· 📌 免压缩</span>
                     )}
+                    {addPlacement === "promote" && (
+                      <span className="ml-1 text-success">· ⬆ 进 system prompt（规则）</span>
+                    )}
                   </span>
                 ) : (
                   <span className="text-text-tertiary/60">写点内容，下方画布即时预览</span>
@@ -774,12 +813,14 @@ export function ContextVisPanel({
                   </button>
                 )}
               </div>
-              {/* 落地行：注入按钮 + 警告/错误。inline 提示会被压、pin 提示免压。 */}
+              {/* 落地行：注入按钮 + 警告/错误。inline 受压 / pin 免压 / promote 进 system prompt。 */}
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] text-text-tertiary">
-                  {addPlacement === "pin"
-                    ? "📌 注入后免压缩，扛过后续压缩"
-                    : "随历史注入，下次压缩可能被收走"}
+                  {addPlacement === "promote"
+                    ? "⬆ 提升为 system-prompt 规则，立即重建、下一轮生效"
+                    : addPlacement === "pin"
+                      ? "📌 注入后免压缩，扛过后续压缩"
+                      : "随历史注入，下次压缩可能被收走"}
                 </span>
                 <button
                   type="button"
@@ -794,16 +835,22 @@ export function ContextVisPanel({
                   title={
                     inFixture
                       ? "fixture 重放模式无活会话，注入仅预览（落地需真实 session）"
-                      : "把这条写进真实上下文（co-author）"
+                      : addPlacement === "promote"
+                        ? "提升为 system-prompt 常驻规则（立即重建、下一轮生效）"
+                        : "把这条写进真实上下文（co-author）"
                   }
                 >
                   {addBusy
-                    ? "注入中…"
+                    ? addPlacement === "promote"
+                      ? "提升中…"
+                      : "注入中…"
                     : inFixture
                       ? "注入（需真实会话）"
-                      : addPlacement === "pin"
-                        ? "📌 注入并钉住"
-                        : "注入"}
+                      : addPlacement === "promote"
+                        ? "⬆ 提升为规则"
+                        : addPlacement === "pin"
+                          ? "📌 注入并钉住"
+                          : "注入"}
                 </button>
               </div>
               {addError && (
@@ -1156,13 +1203,42 @@ export function ContextVisPanel({
               追踪「{tracedEntry.key}」· {tracedEntry.n} 块高亮 + 贯穿路径(紫线）· 右栏再点取消
             </div>
           )}
+          {/* v2 promote「用户规则」卡：已提升的常驻规则，移出量级树图、独立成列表（白盒可见、
+              与 token 多少无关）。点 chip → inspector 看原文。= v2 设计的「规则卡」。 */}
+          {promotedRules.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 rounded border px-2 py-1.5"
+              style={{ borderColor: `${CV_ADD}40` }}>
+              <span
+                className="text-display text-[10px] tracking-wider"
+                style={{ color: CV_ADD }}
+              >
+                ⬆ 用户规则 ({promotedRules.length})
+              </span>
+              {promotedRules.map((r, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onSelect(selected === PROMOTED_ID ? null : PROMOTED_ID)}
+                  className="max-w-2xs truncate rounded border px-1.5 py-0.5 text-[10px] tracking-wide transition-colors hover:bg-current/5"
+                  style={{
+                    borderColor: `${CV_ADD}55`,
+                    color: CV_ADD,
+                    ...(selected === PROMOTED_ID ? { backgroundColor: `${CV_ADD}1a` } : {}),
+                  }}
+                  title={`${r}（system-prompt 常驻规则，点看原文）`}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex min-h-0 flex-1 gap-2">
             <div className="min-h-0 flex-1">
             {hasChunks &&
               (view === "turn" ? (
                 USE_CANVAS ? (
                   <TurnCanvas
-                    snapshot={displaySnapshot}
+                    snapshot={canvasSnapshot}
                     selected={selected}
                     onSelect={onSelect}
                     chunkTopics={activeTopics}
@@ -1173,7 +1249,7 @@ export function ContextVisPanel({
                   />
                 ) : (
                   <ContextVisTurnBand
-                    snapshot={displaySnapshot}
+                    snapshot={canvasSnapshot}
                     mode={mode}
                     selected={selected}
                     onSelect={onSelect}
@@ -1188,7 +1264,7 @@ export function ContextVisPanel({
                 )
               ) : (
                 <ContextVisTreemap
-                  snapshot={displaySnapshot}
+                  snapshot={canvasSnapshot}
                   mode={mode}
                   selected={selected}
                   onSelect={onSelect}

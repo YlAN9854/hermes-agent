@@ -14,6 +14,7 @@
  */
 
 import { RotateCcw, X } from "lucide-react";
+import { useState } from "react";
 
 import { formatTokenCount } from "@/lib/format";
 import {
@@ -274,6 +275,8 @@ export function ChunkInspector({
   onSelectChunk,
   fateMap,
   onSetFates,
+  onPin,
+  onPromote,
 }: {
   chunk: ContextChunk | null;
   onClose: () => void;
@@ -285,7 +288,14 @@ export function ChunkInspector({
   fateMap?: FateMap;
   /** 命运批量预填(单块=传 [id],整轮=传该轮全部 message-backed id)。 */
   onSetFates?: (ids: string[], fate: Fate | null) => void;
+  /** v2 keep-as-pin:把现有 chunk 升级为持久免压(或取消)→ context.pin 落地。 */
+  onPin?: (chunkIds: string[], pinned: boolean) => void;
+  /** v2 move·promote:把现有 chunk 提升为 system-prompt 常驻规则（move，删源）→ context.promote。 */
+  onPromote?: (chunkId: string, text: string) => void;
 }) {
+  // v2 move·promote 编辑态：null=未编辑；非 null=正在把本块蒸成一条规则（用户自编辑 distill）。
+  const [promoteText, setPromoteText] = useState<string | null>(null);
+
   if (!chunk) {
     return (
       <aside className="flex h-full w-full flex-col items-center justify-center px-4 text-center">
@@ -301,8 +311,21 @@ export function ChunkInspector({
     );
   }
 
-  // v2 `add`：用户注入的草稿块 —— 专用简视图（add 徽章 + 原文；草稿不可标命运，无 chip 区）。
+  // v2 `add` / `promote`：用户 co-author 块 —— 专用简视图（徽章 + 原文）。区分草稿 / 已落地 /
+  // 已提升为规则，给准确提示（草稿不可标命运，无 chip 区）。
   if (chunk.added) {
+    const isDraft = chunk.id.startsWith("add:draft:");
+    const isPromoted = chunk.type === "system"; // system:sys:promoted = 已提升规则
+    const badge = isPromoted
+      ? "用户规则 · ⬆ 已提升"
+      : `你注入 (add)${chunk.pinned ? " · 📌 pin" : ""}`;
+    const hint = isDraft
+      ? `草稿预览 · ${chunk.pinned ? "pin 持久免压缩" : "inline 随历史、可被压缩"} · 点下方「注入」落地`
+      : isPromoted
+        ? "已提升为 system-prompt 常驻规则（权威，下一轮即生效）"
+        : chunk.pinned
+          ? "已注入上下文 · 📌 持久免压缩"
+          : "已注入上下文 · 随历史，会被压缩";
     return (
       <aside className="flex h-full w-full min-w-0 flex-col gap-2 overflow-hidden">
         <div className="flex shrink-0 items-start justify-between gap-2 px-1">
@@ -313,7 +336,7 @@ export function ChunkInspector({
                 style={{ backgroundColor: CV_ADD }}
               />
               <span className="text-display text-xs tracking-wider text-text-tertiary">
-                你注入 (add){chunk.pinned ? " · 📌 pin" : ""}
+                {badge}
               </span>
             </div>
             <div
@@ -333,8 +356,7 @@ export function ChunkInspector({
           </button>
         </div>
         <div className="shrink-0 rounded border border-current/10 px-2 py-1 text-[10px] text-text-tertiary">
-          草稿预览 · {chunk.pinned ? "pin 持久免压缩" : "inline 随历史、可被压缩"} ·
-          落地见 Layer 2（session.branch）
+          {hint}
         </div>
         <RawView chunk={chunk} />
       </aside>
@@ -366,15 +388,98 @@ export function ChunkInspector({
             {chunk.label}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="close inspector"
-          className="-mr-1 shrink-0 rounded p-0.5 text-text-tertiary hover:text-text-secondary"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {/* v2 keep-as-pin：现有 message-backed 块 → 持久免压 toggle（统一耐久度轴"护现有块"）。 */}
+          {onPin && MESSAGE_BACKED_TYPES.has(chunk.type) && (
+            <button
+              type="button"
+              onClick={() => onPin([chunk.id], !chunk.pinned)}
+              className={cn(
+                "rounded border px-1.5 py-0.5 text-[10px] tracking-wide transition-colors",
+                chunk.pinned
+                  ? "border-current/30 bg-current/10 text-text-secondary"
+                  : "border-current/15 text-text-tertiary hover:text-text-secondary",
+              )}
+              title={
+                chunk.pinned
+                  ? "已钉住（持久免压）—— 点此取消钉住"
+                  : "钉住：持久免压，扛过后续压缩（keep-as-pin）"
+              }
+            >
+              {chunk.pinned ? "📌 已钉住" : "📌 钉住"}
+            </button>
+          )}
+          {/* v2 move·promote：把本块提升为 system-prompt 常驻规则（统一耐久度轴顶档）。 */}
+          {onPromote && MESSAGE_BACKED_TYPES.has(chunk.type) && (
+            <button
+              type="button"
+              onClick={() =>
+                setPromoteText(
+                  (chunk.raw || chunk.label || "")
+                    .replace(/^\[USER NOTE[^\]]*\]\s*/i, "")
+                    .trim()
+                    .slice(0, 400),
+                )
+              }
+              className="rounded border border-current/15 px-1.5 py-0.5 text-[10px] tracking-wide text-text-tertiary transition-colors hover:text-text-secondary"
+              title="提升为 system-prompt 常驻规则（权威，下一轮即生效；编辑成一条精炼规则，提升后删除原块）"
+            >
+              ⬆ 提升
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="close inspector"
+            className="-mr-1 rounded p-0.5 text-text-tertiary hover:text-text-secondary"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
+
+      {/* v2 move·promote 编辑：把本块蒸成一条规则（用户自编辑 distill）→ 提升 + 删源。 */}
+      {promoteText !== null && (
+        <div
+          className="flex shrink-0 flex-col gap-1.5 rounded border px-2 py-1.5"
+          style={{ borderColor: `${CV_ADD}55` }}
+        >
+          <span className="text-[10px]" style={{ color: CV_ADD }}>
+            ⬆ 提升为 system-prompt 规则 —— 编辑成一条精炼规则（提升后删除原块、下一轮生效）
+          </span>
+          <textarea
+            value={promoteText}
+            onChange={(e) => setPromoteText(e.target.value)}
+            rows={2}
+            className="resize-none rounded border border-current/15 bg-transparent px-1.5 py-1 text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-current/20"
+          />
+          <div className="flex items-center justify-end gap-1.5 text-[10px]">
+            <button
+              type="button"
+              onClick={() => setPromoteText(null)}
+              className="rounded px-1.5 py-0.5 text-text-tertiary hover:text-text-secondary"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={!promoteText.trim()}
+              onClick={() => {
+                onPromote?.(chunk.id, promoteText.trim());
+                setPromoteText(null);
+              }}
+              className={cn(
+                "rounded border px-2 py-0.5 tracking-wide transition-colors",
+                promoteText.trim()
+                  ? "border-current/30 text-text-secondary hover:bg-current/10"
+                  : "border-current/15 text-text-tertiary/50",
+              )}
+            >
+              ⬆ 提升为规则
+            </button>
+          </div>
+        </div>
+      )}
 
       {hasComposition ? (
         <>

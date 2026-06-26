@@ -34,6 +34,7 @@ import { useSearchParams } from "react-router-dom";
 import { ChunkInspector } from "@/components/ChunkInspector";
 import { ContextVisPanel } from "@/components/ContextVisPanel";
 import { useContextSnapshot } from "@/hooks/useContextSnapshot";
+import { applyPin, applyPromote } from "@/lib/contextvis/apply";
 import type { Fate, FateMap } from "@/lib/contextvis/plan";
 import type { ContextChunk } from "@/lib/contextvis/types";
 import { usePageHeader } from "@/contexts/usePageHeader";
@@ -224,6 +225,35 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       }
     },
     [contextSnapshot.chunks],
+  );
+
+  // v2 keep-as-pin：把现有 chunk 升级为持久免压（或取消）→ context.pin 落地。
+  // 统一耐久度轴的"护现有块"入口；best-effort，成功后端 re-emit 自动刷出/撤 📌。
+  const pinChunk = useCallback(
+    async (chunkIds: string[], pinned: boolean) => {
+      const sid = contextSnapshot.sessionId;
+      if (!sid) return;
+      try {
+        await applyPin(sid, contextSnapshot.historyVersion, chunkIds, pinned);
+      } catch {
+        /* 失败静默（后端无 re-emit → UI 不变） */
+      }
+    },
+    [contextSnapshot.sessionId, contextSnapshot.historyVersion],
+  );
+
+  // v2 move·promote：把现有 chunk 提升为 system-prompt 常驻规则（move，删源）→ context.promote。
+  const promoteChunk = useCallback(
+    async (chunkId: string, text: string) => {
+      const sid = contextSnapshot.sessionId;
+      if (!sid || !text.trim()) return;
+      try {
+        await applyPromote(sid, contextSnapshot.historyVersion, text, [chunkId]);
+      } catch {
+        /* 失败静默 */
+      }
+    },
+    [contextSnapshot.sessionId, contextSnapshot.historyVersion],
   );
 
   // 方向 A：命运标记（用户意图）。与后端真值分离 —— 不写回 snapshot.chunks，
@@ -942,6 +972,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
               onSelectChunk={setSelectedChunkId}
               fateMap={displayFateMap}
               onSetFates={setFates}
+              onPin={pinChunk}
+              onPromote={promoteChunk}
             />
           </div>
         </div>
@@ -992,6 +1024,8 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
                   onSelectChunk={setSelectedChunkId}
                   fateMap={displayFateMap}
                   onSetFates={setFates}
+                  onPin={pinChunk}
+                  onPromote={promoteChunk}
                 />
               </div>
             </div>

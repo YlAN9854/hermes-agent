@@ -4777,7 +4777,10 @@ def _(rid, params: dict) -> dict:
     机制对偶 ``context.apply``/``fold``：``history_lock`` 下追加一条 user 消息（沿用
     personality-marker 注入先例，alternation 安全）→ ``_sanitize_tool_pairs`` 缝合 →
     ``_commit_history_mutation`` bump 版本 + re-emit。门控 ``HERMES_CONTEXTVIS``。
-    pin 的免压由 ``ContextCompressor`` 认 ``_contextvis_add`` 标记实现（见 ``_is_pinned``）。
+
+    **统一耐久度轴的正交标记**（与 ``context.pin`` keep-as-pin 共用）：
+    ``_contextvis_author="user"``=来源（co-author → violet 渲染）；``_contextvis_pinned=True``
+    =耐久（pin → 压缩器 ``_is_pinned`` 永不碰）。inline 只打 author、pin 两者都打。
     """
     if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
         return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
@@ -4821,8 +4824,10 @@ def _(rid, params: dict) -> dict:
         note = {
             "role": "user",
             "content": f"{marker}\n{text}",
-            "_contextvis_add": placement,
+            "_contextvis_author": "user",  # 来源：co-author（violet 渲染）
         }
+        if placement == "pin":
+            note["_contextvis_pinned"] = True  # 耐久：免压（_is_pinned 认它）
         new_history = list(before)
         new_history.append(note)
         comp = getattr(agent, "context_compressor", None)
@@ -4844,6 +4849,158 @@ def _(rid, params: dict) -> dict:
                 "before_messages": len(before),
                 "after_messages": len(new_history),
                 "before_tokens": before_tokens,
+                "after_tokens": after_tokens,
+                "info": info,
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
+@method("context.pin")
+def _(rid, params: dict) -> dict:
+    """ContextVis v2 ``keep-as-pin``：把**现有** chunk 升级为持久免压（或取消）。
+
+    统一耐久度轴的"护现有块"入口（对偶 ``context.add`` 的"写新内容→pin"）：给已有消息打/去
+    ``_contextvis_pinned`` 标记 → 压缩器 ``_is_pinned`` 认它、永不摘要（见 ``_compress`` carry-through）。
+    **零结构变更**（不删不折，只翻标记），复用 ``drop_indices_for_chunks`` 解析 chunk→message +
+    ``_commit_history_mutation`` bump 版本 + re-emit。门控 ``HERMES_CONTEXTVIS``。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    if session.get("running"):
+        return _err(
+            rid, 4009, "session busy — /interrupt the current turn before pinning"
+        )
+    chunk_ids = params.get("chunk_ids") or []
+    if not isinstance(chunk_ids, list) or not chunk_ids:
+        return _err(rid, 4000, "chunk_ids must be a non-empty list")
+    pinned = bool(params.get("pinned", True))
+    sid = params.get("session_id", "")
+    client_version = params.get("history_version")
+    try:
+        from agent.contextvis import drop_indices_for_chunks
+
+        agent = session["agent"]
+        with session["history_lock"]:
+            before = list(session.get("history", []))
+            v0 = int(session.get("history_version", 0) or 0)
+        if client_version is not None and int(client_version) != v0:
+            return _err(rid, 4409, "context snapshot is stale — refresh and retry")
+
+        # 复用 chunk→message 解析（与 drop/fold 同一套；system/tool_schema 无消息背书→排除）。
+        idxs = drop_indices_for_chunks(agent, session, chunk_ids)
+        if not idxs:
+            return _err(rid, 4004, "no message-backed chunks resolved from those ids")
+
+        new_history = [dict(m) for m in before]
+        for i in idxs:
+            if pinned:
+                new_history[i]["_contextvis_pinned"] = True
+            else:
+                new_history[i].pop("_contextvis_pinned", None)
+
+        committed = _commit_history_mutation(
+            session, agent, before, new_history, v0, sid
+        )
+        if committed is None:
+            return _err(rid, 4409, "context changed during pin — retry")
+        after_tokens, info = committed
+        return _ok(
+            rid,
+            {
+                "status": "pinned" if pinned else "unpinned",
+                "count": len(idxs),
+                "chunk_ids": list(chunk_ids),
+                "after_tokens": after_tokens,
+                "info": info,
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5005, str(e))
+
+
+@method("context.promote")
+def _(rid, params: dict) -> dict:
+    """ContextVis v2 ``promote``（统一耐久度轴**顶档**）：把一条文本提升为 system-prompt 常驻规则。
+
+    两入口共用（``add·promote`` / 现有块 ``move·promote``）：写 ``agent._contextvis_promotions``
+    （``build_system_prompt_parts`` 据此注入"User-promoted standing rules"块）→ **立即重建**
+    ``_cached_system_prompt`` + ``update_system_prompt`` 持久化（覆盖 stored_prompt 复用）→ **下一轮即
+    生效**（用户希望 action 直接影响下一次对话）。给了 ``chunk_ids`` 则 move（删源消息免重复）。
+    pin vs promote：pin 保在场、promote 给权威（进 system prompt、当规则看）。门控 ``HERMES_CONTEXTVIS``。
+    """
+    if not is_truthy_value(os.environ.get("HERMES_CONTEXTVIS", "1")):
+        return _err(rid, 4030, "ContextVis disabled (HERMES_CONTEXTVIS=0)")
+    session, err = _sess(params, rid)
+    if err:
+        return err
+    if session.get("running"):
+        return _err(
+            rid, 4009, "session busy — /interrupt the current turn before promoting"
+        )
+    text = (params.get("text") or "").strip()
+    if not text:
+        return _err(rid, 4000, "text must be a non-empty string")
+    chunk_ids = params.get("chunk_ids") or []  # 可选：move 的源块
+    sid = params.get("session_id", "")
+    client_version = params.get("history_version")
+    try:
+        from agent.contextvis import drop_indices_for_chunks
+
+        agent = session["agent"]
+        with session["history_lock"]:
+            before = list(session.get("history", []))
+            v0 = int(session.get("history_version", 0) or 0)
+        if client_version is not None and int(client_version) != v0:
+            return _err(rid, 4409, "context snapshot is stale — refresh and retry")
+
+        # 1. 追加常驻规则（build_system_prompt_parts 会注入到 context 段）。
+        proms = getattr(agent, "_contextvis_promotions", None)
+        if proms is None:
+            proms = []
+            agent._contextvis_promotions = proms
+        proms.append(text)
+
+        # 2. move：给了 chunk_ids 则删源消息（免规则与历史重复）。
+        new_history = list(before)
+        moved = 0
+        if isinstance(chunk_ids, list) and chunk_ids:
+            idxs = drop_indices_for_chunks(agent, session, chunk_ids)
+            if idxs:
+                new_history = [m for i, m in enumerate(before) if i not in idxs]
+                comp = getattr(agent, "context_compressor", None)
+                if comp is not None:
+                    new_history = comp._sanitize_tool_pairs(new_history)
+                moved = len(before) - len(new_history)
+
+        # 3. **立即重建** system prompt + 持久化 → 覆盖 stored_prompt 复用、下一轮即生效。
+        #    重建失败不致命：规则已入 promotions，下次自然重建（压缩/新轮）也会带上。
+        try:
+            agent._invalidate_system_prompt()
+            new_sp = agent._build_system_prompt()
+            agent._cached_system_prompt = new_sp
+            if getattr(agent, "_session_db", None) and getattr(agent, "session_id", None):
+                agent._session_db.update_system_prompt(agent.session_id, new_sp)
+        except Exception as e:  # noqa: BLE001 — best-effort，不阻断落地
+            logger.debug("context.promote rebuild skipped: %s", e)
+
+        # 4. commit：即便没 move 也 bump 版本 + re-emit，让 system chunk 刷新出新规则。
+        committed = _commit_history_mutation(
+            session, agent, before, new_history, v0, sid
+        )
+        if committed is None:
+            return _err(rid, 4409, "context changed during promote — retry")
+        after_tokens, info = committed
+        return _ok(
+            rid,
+            {
+                "status": "promoted",
+                "rules": len(proms),
+                "moved": moved,
                 "after_tokens": after_tokens,
                 "info": info,
             },

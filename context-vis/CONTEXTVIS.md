@@ -86,7 +86,7 @@ ContextSnapshot{ budget, used, percent, turn, history[],
 |---|---|---|
 | [v2/README.md](v2/README.md) | v2 入口 + TL;DR(剃刀 / 两轴 / add / invalidate / promote / 轮盘 / 画布) | 🧭 当前设计重心 |
 | [v2/principle.md](v2/principle.md) | 剃刀 + 瓶颈诊断 + 论文骨架(为什么) | 设计中 |
-| [v2/operations.md](v2/operations.md) | 操作集(动词轴 + 放置轴)+ 交互负担(二阶剃刀)+ 引用图(弧叠加/画布/产物索引)+ 新交互 + 驱动 case | 设计中;**引用图层①②+画布化(TurnCanvas,弧落子格)+产物/关键词索引追踪 + `add`(fixture 工坊+预览+B 落地 inline/pin,live 对照实测)已建成**;promote/invalidate 待建 |
+| [v2/operations.md](v2/operations.md) | 操作集(动词轴 + 放置轴)+ 交互负担(二阶剃刀)+ 引用图(弧叠加/画布/产物索引)+ 新交互 + 驱动 case | 设计中;**引用图层①②+画布化+产物/关键词索引 + `add`(fixture 工坊+预览+inline/pin live 对照实测)+ 统一耐久度轴(keep-as-pin/promote〔add·+move·〕/规则卡)已建成**;invalidate/轮盘 待建 |
 
 ### 🟢 v1 活跃 — 当前在动 / 常查
 | 文档 | 是什么 | 状态 |

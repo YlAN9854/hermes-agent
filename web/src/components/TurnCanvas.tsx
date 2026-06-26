@@ -402,12 +402,13 @@ export function TurnCanvas({
                     >
                       <title>{`${name} · ${added ? "你注入（add）" : TYPE_LABEL[s.chunk.type] ?? s.chunk.type}${s.chunk.pinned ? " · 📌 pin 免压缩" : ""} · ${formatTokenCount(s.chunk.tokens)}${fate ? ` · 标记:${fate}` : ""}`}</title>
                     </rect>
-                    {s.chunk.pinned && s.w > 12 && s.h > 12 && (
+                    {/* keep-as-pin/add·pin：📌 阈值放低，小格也显标记（守 #6：免压干预可见）。 */}
+                    {s.chunk.pinned && s.w > 10 && s.h > 9 && (
                       <text
-                        x={s.x + s.w - 4}
-                        y={s.y + 4 + Math.min(13, s.h * 0.5)}
+                        x={s.x + s.w - 3}
+                        y={s.y + 3 + Math.min(12, s.h * 0.6)}
                         textAnchor="end"
-                        fontSize={Math.min(13, Math.max(10, s.h * 0.5))}
+                        fontSize={Math.min(13, Math.max(9, s.h * 0.6))}
                         className="pointer-events-none"
                       >
                         📌
