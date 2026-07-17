@@ -765,7 +765,9 @@ CREATE TABLE IF NOT EXISTS messages (
     platform_message_id TEXT,
     observed INTEGER DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1,
-    compacted INTEGER NOT NULL DEFAULT 0
+    compacted INTEGER NOT NULL DEFAULT 0,
+    transcript_turn_id TEXT,
+    context_synthetic INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS session_model_usage (
@@ -3680,6 +3682,8 @@ class SessionDB:
         observed: bool = False,
         effect_disposition: Optional[str] = None,
         timestamp: Any = None,
+        transcript_turn_id: Optional[str] = None,
+        context_synthetic: bool = False,
     ) -> int:
         """
         Append a message to a session. Returns the message row ID.
@@ -3727,12 +3731,14 @@ class SessionDB:
             num_tool_calls = len(tool_calls) if isinstance(tool_calls, list) else 1
 
         def _do(conn):
+            turn_id_value = transcript_turn_id
             cursor = conn.execute(
                 """INSERT INTO messages (session_id, role, content, tool_call_id,
                    tool_calls, tool_name, effect_disposition, timestamp, token_count, finish_reason,
                    reasoning, reasoning_content, reasoning_details, codex_reasoning_items,
-                   codex_message_items, platform_message_id, observed, active)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   codex_message_items, platform_message_id, observed, active,
+                   transcript_turn_id, context_synthetic)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     role,
@@ -3752,9 +3758,17 @@ class SessionDB:
                     platform_message_id,
                     1 if observed else 0,
                     1,
+                    turn_id_value,
+                    1 if context_synthetic else 0,
                 ),
             )
             msg_id = cursor.lastrowid
+            if not turn_id_value and not context_synthetic:
+                turn_id_value = f"hermes-msg:{msg_id}"
+                conn.execute(
+                    "UPDATE messages SET transcript_turn_id = ? WHERE id = ?",
+                    (turn_id_value, msg_id),
+                )
 
             # Update counters
             if num_tool_calls > 0:
@@ -3820,12 +3834,15 @@ class SessionDB:
                 msg.get("platform_message_id") or msg.get("message_id")
             )
 
-            conn.execute(
+            synthetic = bool(msg.get("_compressed_summary"))
+            turn_id = msg.get("_transcript_turn_id")
+            cursor = conn.execute(
                 """INSERT INTO messages (session_id, role, content, tool_call_id,
                    tool_calls, tool_name, effect_disposition, timestamp, token_count, finish_reason,
                    reasoning, reasoning_content, reasoning_details, codex_reasoning_items,
-                   codex_message_items, platform_message_id, observed, active)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   codex_message_items, platform_message_id, observed, active,
+                   transcript_turn_id, context_synthetic)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     role,
@@ -3845,8 +3862,15 @@ class SessionDB:
                     platform_msg_id,
                     1 if msg.get("observed") else 0,
                     1,
+                    turn_id,
+                    1 if synthetic else 0,
                 ),
             )
+            if not turn_id and not synthetic:
+                conn.execute(
+                    "UPDATE messages SET transcript_turn_id = ? WHERE id = ?",
+                    (f"hermes-msg:{cursor.lastrowid}", cursor.lastrowid),
+                )
             inserted += 1
             if tool_calls is not None:
                 tool_calls_total += (
@@ -4017,6 +4041,10 @@ class SessionDB:
                 except (json.JSONDecodeError, TypeError):
                     logger.warning("Failed to deserialize tool_calls in get_messages, falling back to []")
                     msg["tool_calls"] = []
+            if msg.get("transcript_turn_id"):
+                msg["_transcript_turn_id"] = msg["transcript_turn_id"]
+            if msg.get("context_synthetic"):
+                msg["_compressed_summary"] = True
             result.append(msg)
         return result
 
@@ -4331,7 +4359,8 @@ class SessionDB:
             rows = self._conn.execute(
                 "SELECT role, content, tool_call_id, tool_calls, tool_name, effect_disposition, "
                 "finish_reason, reasoning, reasoning_content, reasoning_details, "
-                "codex_reasoning_items, codex_message_items, platform_message_id, observed, timestamp "
+                "codex_reasoning_items, codex_message_items, platform_message_id, observed, timestamp, "
+                "transcript_turn_id, context_synthetic "
                 f"FROM messages WHERE session_id IN ({placeholders})"
                 # Order by AUTOINCREMENT id (true insertion order), NOT timestamp:
                 # append_message stamps rows with time.time(), which is not
@@ -4351,6 +4380,10 @@ class SessionDB:
             if row["role"] in {"user", "assistant"} and isinstance(content, str):
                 content = sanitize_context(content).strip()
             msg = {"role": row["role"], "content": content}
+            if row["transcript_turn_id"]:
+                msg["_transcript_turn_id"] = row["transcript_turn_id"]
+            if row["context_synthetic"]:
+                msg["_compressed_summary"] = True
             if row["timestamp"]:
                 msg["timestamp"] = row["timestamp"]
             if row["tool_call_id"]:

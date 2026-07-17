@@ -355,6 +355,20 @@ export const api = {
     fetchJSON<SessionMessagesResponse>(
       appendProfileParam(`/api/sessions/${encodeURIComponent(id)}/messages`, profile),
     ),
+  getContextVisSessions: (profile = getManagementProfile()) =>
+    fetchJSON<ContextVisSessionsResponse>(appendProfileParam("/api/context-vis/sessions", profile)),
+  getContextVisSession: (id: string, profile = getManagementProfile()) =>
+    fetchJSON<ContextVisSessionResponse>(appendProfileParam(`/api/context-vis/sessions/${encodeURIComponent(id)}`, profile)),
+  createContextVisJob: (id: string, body: ContextVisJobRequest, profile = getManagementProfile()) =>
+    fetchJSON<{ job_id: string; status: string }>(appendProfileParam(`/api/context-vis/sessions/${encodeURIComponent(id)}/jobs`, profile), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }),
+  getContextVisJob: (id: string, profile = getManagementProfile()) =>
+    fetchJSON<ContextVisJob>(appendProfileParam(`/api/context-vis/jobs/${encodeURIComponent(id)}`, profile)),
+  saveContextVisModel: (id: string, body: ContextVisEditRequest, profile = getManagementProfile()) =>
+    fetchJSON<{ model: ContextVisModel }>(appendProfileParam(`/api/context-vis/sessions/${encodeURIComponent(id)}/model`, profile), {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }),
   getSessionDetail: (id: string, profile = getManagementProfile()) =>
     fetchJSON<SessionInfo>(
       appendProfileParam(`/api/sessions/${encodeURIComponent(id)}`, profile),
@@ -1903,6 +1917,42 @@ export interface SessionMessage {
 export interface SessionMessagesResponse {
   session_id: string;
   messages: SessionMessage[];
+}
+
+export interface ContextVisSpan { turn_id: string; char_start: number; char_end: number }
+export interface ContextVisSentence { text: string; source_spans: ContextVisSpan[] }
+export interface ContextVisInfo {
+  info_id: string; kind: string; detected_text: string; span_in_B: ContextVisSpan;
+  status_in_A: "present" | "reframed" | "absent" | "unknown";
+  reframed_text_in_A: string | null; confidence: "reliable" | "ai_guessed";
+}
+export interface ContextVisUnit {
+  unit_id: string; title: string; summary_sentences: ContextVisSentence[];
+  covered_turns: string[]; salient_infos: ContextVisInfo[]; frozen: boolean; created_at_turn: string;
+}
+export interface ContextVisAggregate {
+  node_id: string; title: string; child_unit_ids: string[];
+  origin: "llm_draft" | "user_edited"; intent_tag: string | null;
+}
+export interface ContextVisBacklink { from_unit_id: string; to_unit_id: string; note: string }
+export interface ContextVisModel {
+  units: ContextVisUnit[]; aggregates: ContextVisAggregate[]; decision_aggregates: ContextVisAggregate[];
+  decision_intent: string | null; backlinks: ContextVisBacklink[]; tier: 1 | 2 | 3;
+  revision: number; legacy_transcript_warning: string | null;
+}
+export interface ContextVisTurn { turn_id: string; role: "user" | "assistant" | "tool"; content: string; tool_name: string | null; timestamp: number }
+export interface ContextVisSessionResponse {
+  session_id: string; capabilities: { tier: number; compression_events: boolean; preserve: boolean };
+  model: ContextVisModel; transcript: ContextVisTurn[];
+}
+export interface ContextVisSessionsResponse {
+  sessions: Array<SessionInfo & { context_vis: { generated: boolean; revision: number; unit_count: number } }>;
+}
+export interface ContextVisJobRequest { action: "generate_units" | "detect_salient" | "draft_aggregates"; incremental?: boolean; mode?: "overview" | "decision"; intent?: string }
+export interface ContextVisJob { job_id: string; status: "queued" | "running" | "succeeded" | "failed"; result?: { model: ContextVisModel }; error?: string }
+export interface ContextVisEditRequest {
+  revision: number; aggregates?: ContextVisAggregate[]; decision_aggregates?: ContextVisAggregate[];
+  decision_intent?: string | null; backlinks?: ContextVisBacklink[];
 }
 
 export interface LogsResponse {

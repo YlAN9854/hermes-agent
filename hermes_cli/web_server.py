@@ -263,6 +263,11 @@ from hermes_cli.memory_oauth import router as _memory_oauth_router  # noqa: E402
 
 app.include_router(_memory_oauth_router)
 
+# Built-in, agent-neutral semantic transcript index. Hermes-specific storage
+# details are isolated behind context_vis.hermes_adapter.
+from context_vis.api import router as _context_vis_router  # noqa: E402
+app.include_router(_context_vis_router)
+
 # ---------------------------------------------------------------------------
 # Session token for protecting sensitive endpoints (reveal).
 # The desktop shell mints the token and injects it via

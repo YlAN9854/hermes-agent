@@ -6581,13 +6581,15 @@ def call_llm(
             # same-provider retry on a timeout means another full ``timeout``-
             # long wall-clock block before the except-chain below can fall
             # back — doubling the user-visible stall (issue #54465). Skip the
-            # same-provider retry for compression on a full-budget timeout and
-            # fall straight through to provider/model fallback; fast blips (a
+            # same-provider retry on a full-budget timeout. Compression may
+            # then use provider/model fallback; Context Vis fails promptly so
+            # its background job can report the timeout. Fast blips (a
             # streaming-close or a 5xx) still retry, since those are cheap.
-            if task == "compression" and _is_timeout_error(transient_err):
+            if task in {"compression", "context_vis"} and _is_timeout_error(transient_err):
                 logger.info(
-                    "Auxiliary compression: timeout on the critical path; "
-                    "skipping same-provider retry and falling back: %s",
+                    "Auxiliary %s: timeout on the critical path; "
+                    "skipping same-provider retry: %s",
+                    task,
                     transient_err,
                 )
                 raise
@@ -6612,6 +6614,12 @@ def call_llm(
             # Retries exhausted — fall through to first_err fallback handling.
             raise _last_transient
     except Exception as first_err:
+        # Context Vis is an interactive dashboard job with its own semantic
+        # validation retry. A full-budget provider timeout must be terminal:
+        # walking the provider fallback chain can turn one 180-second request
+        # into a job that appears stuck for many minutes.
+        if task == "context_vis" and _is_timeout_error(first_err):
+            raise
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
             retry_kwargs = dict(kwargs)
             retry_kwargs.pop("temperature", None)

@@ -258,6 +258,7 @@ _MAX_TOOL_WORKERS = 8
 # every top-level ``_``-prefixed key before the request leaves the process, so
 # this never reaches a strict OpenAI-compatible gateway.
 _DB_PERSISTED_MARKER = "_db_persisted"
+_TRANSCRIPT_TURN_ID = "_transcript_turn_id"
 
 
 # Guard so the OpenRouter metadata pre-warm thread is only spawned once per
@@ -1889,7 +1890,7 @@ class AIAgent:
                     ]
                 elif isinstance(msg.get("tool_calls"), list):
                     tool_calls_data = msg["tool_calls"]
-                self._session_db.append_message(
+                row_id = self._session_db.append_message(
                     session_id=self.session_id,
                     role=role,
                     content=content,
@@ -1903,7 +1904,11 @@ class AIAgent:
                     codex_reasoning_items=msg.get("codex_reasoning_items") if role == "assistant" else None,
                     codex_message_items=msg.get("codex_message_items") if role == "assistant" else None,
                     timestamp=_row_timestamp,
+                    transcript_turn_id=msg.get(_TRANSCRIPT_TURN_ID),
+                    context_synthetic=bool(msg.get("_compressed_summary")),
                 )
+                if not msg.get("_compressed_summary"):
+                    msg[_TRANSCRIPT_TURN_ID] = msg.get(_TRANSCRIPT_TURN_ID) or f"hermes-msg:{row_id}"
                 msg[_DB_PERSISTED_MARKER] = True
             # The intrinsic markers are now the sole source of truth. Reset the
             # one-shot seed so no id() outlives this flush to alias a message

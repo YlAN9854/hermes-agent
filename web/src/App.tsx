@@ -28,6 +28,7 @@ import {
   Database,
   Download,
   Eye,
+  Network,
   FolderOpen,
   FileText,
   Globe,
@@ -77,6 +78,7 @@ import DocsPage from "@/pages/DocsPage";
 import EnvPage from "@/pages/EnvPage";
 import FilesPage from "@/pages/FilesPage";
 import SessionsPage from "@/pages/SessionsPage";
+import ContextVisPage from "@/pages/ContextVisPage";
 import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import ModelsPage from "@/pages/ModelsPage";
@@ -133,6 +135,7 @@ const CHAT_NAV_ITEM: NavItem = {
 const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/": RootRedirect,
   "/sessions": SessionsPage,
+  "/context-vis": ContextVisPage,
   "/files": FilesPage,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
@@ -167,6 +170,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
     label: "Sessions",
     icon: MessageSquare,
   },
+  { path: "/context-vis", label: "Context Vis", icon: Network },
   { path: "/files", label: "Files", icon: FolderOpen },
   {
     path: "/analytics",
@@ -224,6 +228,7 @@ const ICON_MAP: Record<string, ComponentType<{ className?: string }>> = {
   Star,
   Code,
   Eye,
+  Network,
 };
 
 function resolveIcon(name: string): ComponentType<{ className?: string }> {

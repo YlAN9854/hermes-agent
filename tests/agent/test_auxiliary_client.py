@@ -2875,6 +2875,38 @@ class TestTransientTransportRetry:
         assert primary.chat.completions.create.call_count == 1
         assert fb_client.chat.completions.create.call_count == 1
 
+    def test_context_vis_skips_same_provider_retry_on_timeout(self):
+        """Interactive Context Vis jobs must not multiply a full timeout by
+        the generic same-provider transport retry budget."""
+        class _Timeout(Exception):
+            pass
+        _Timeout.__name__ = "APITimeoutError"
+
+        primary = MagicMock()
+        primary.base_url = "https://openrouter.ai/api/v1"
+        primary.chat.completions.create.side_effect = _Timeout("Request timed out.")
+
+        fb_client = MagicMock()
+        fb_client.base_url = "https://api.openai.com/v1"
+        fb_client.chat.completions.create.return_value = {"fallback": True}
+
+        p1, p2, p3 = self._patches(primary)
+        with (
+            p1, p2, p3,
+            patch(
+                "agent.auxiliary_client._try_configured_fallback_chain",
+                return_value=(None, None, ""),
+            ),
+            patch(
+                "agent.auxiliary_client._try_main_agent_model_fallback",
+                return_value=(fb_client, "fb-model", "openai"),
+            ),
+            pytest.raises(_Timeout),
+        ):
+            call_llm(task="context_vis", messages=[{"role": "user", "content": "hi"}])
+        assert primary.chat.completions.create.call_count == 1
+        assert fb_client.chat.completions.create.call_count == 0
+
     def test_non_compression_still_retries_same_provider_on_timeout(self):
         """The timeout skip is scoped to compression only; other auxiliary
         tasks keep the single same-provider transient retry.
