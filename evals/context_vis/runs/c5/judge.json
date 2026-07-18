@@ -1,0 +1,42 @@
+{
+  "case": "c5",
+  "scores": {
+    "boundary_coherence": 5,
+    "faithfulness": 5,
+    "coverage": 4,
+    "title_quality": 3,
+    "traceability": 4,
+    "salient_quality": 3
+  },
+  "span_support_fraction": 0.96,
+  "spans_checked": 26,
+  "sentences_verified": 9,
+  "constraints_i_found": 14,
+  "constraints_detected_by_model": 7,
+  "constraints_missed": [
+    "VAT tax-rate rule (t042): rate may only be 3%/6%/9%/13%, anything else must be flagged in an 'anomalies' JSON field — a user-stated hard domain rule ('税率只可能是...其他值一律标记为异常'), and the most important miss since the unit's own summary sentence mentions it",
+    "Implicit-but-binding license prohibition (t026-t027): AGPL-3.0 dependencies are unacceptable because legal will not approve AGPL for external distribution — this drove the entire library reversal but is not a salient_info",
+    "Architectural constraint (t002): extract.py and parse.py must stay strictly separated so the extraction backend can be swapped ('That separation is deliberate')",
+    "Decision-constraint (t030): drop pymupdf entirely, including from the dependency list",
+    "Tooling constraint (t000): Python with argparse, explicitly 'no click'",
+    "Scope constraint (t007): support only a single input file for now, batch mode later",
+    "Process constraint (t020): keep the pdfplumber version in git history in case it is needed again"
+  ],
+  "salient_false_positives": [],
+  "worst_unit": "PyMuPDF&License — 12 turns compressed into a single sentence; it cites the assistant's a-priori caveat (t019, find_tables 'historically weaker') as evidence for table mangling that was actually observed later (t025/t026), has no span for the 'fixed rotation' claim (t023), and carries zero salient_infos despite containing the AGPL prohibition that drove the whole reversal.",
+  "issues": [
+    "The VAT-rate rule (3/6/9/13% only, else anomaly) is a user-stated hard constraint that the 'Parse & Validat' summary sentence itself paraphrases, yet it is absent from salient_infos — the single biggest salient-detection failure.",
+    "Three of seven titles are damaged by the 15-char limit: 'pdfplumb Extrac' and 'Parse & Validat' are truncated mid-word, and 'Project Design' is generic; 'Scaffold&Amount' is borderline cryptic.",
+    "One span (t019 225:319) cites a prediction as evidence of an outcome: the assistant's advance caveat about find_tables is used to support the claim that PyMuPDF 'mangled line-item tables', which was only demonstrated at t025/t026.",
+    "The pytest failure-and-fix cycle (t047-t048: currency symbol stripped before NFKC normalization; rounding-drift diff computed before quantizing) is entirely absent — the outline records the final behavior but not the two genuine bugs and their fixes.",
+    "Several summary clauses lack supporting spans: 'delivering clean text and tables on digital invoices' (no span to t012/t013), 'fixed rotation' (no span to t023), and the rotation-branch OCR decision (t038-t039) has no span.",
+    "Some spans are token-thin relative to their sentences: 'Proposed layout:' (t001) for a sentence listing specific files, and the 10-character vendor name (t037) as sole evidence that OCR 'extracted accurate text'."
+  ],
+  "strengths": [
+    "Segmentation is essentially perfect: 7 units match an independent reading, cover all 60 turns with no gaps or overlaps, and the abandoned-then-revisited arc is respected — the PyMuPDF unit ends exactly at the abandon recommendation (t029) and 'Hybrid OCR' opens on the user's explicit decision to return to pdfplumber (t030).",
+    "All 9 summary sentences are factually accurate with correct attribution — the outline correctly states what was abandoned (PyMuPDF), why (mangled tables + AGPL distribution risk + no help on scanned input), and what was finally chosen (pdfplumber + local tesseract OCR hybrid).",
+    "All 7 salient_info spans are byte-exact verbatim quotes, every detected item is a genuine constraint (zero false positives), and the uniform 'reliable' confidence labels are honest for verbatim extractions.",
+    "Cross-language handling is good: Chinese constraints (string amounts t007) and Chinese evidence spans are extracted with correct offsets."
+  ],
+  "overall_comment": "A structurally excellent outline: boundaries mirror the conversation's task arc including the PyMuPDF detour and explicit return, and every summary sentence checks out against the transcript with 25/26 spans genuinely supporting their claims. Weaknesses concentrate in the annotation layer rather than the narrative: salient detection catches 7 of ~14 hard constraints but misses the VAT-rate domain rule and the AGPL prohibition — the two constraints most likely to matter downstream — and the char-limited titles degrade into mid-word truncation twice. Dense single-sentence summaries for 10-12-turn units also flatten real events like the two test-failure bug fixes."
+}

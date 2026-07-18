@@ -1,0 +1,30 @@
+{
+  "case": "c2",
+  "scores": {
+    "boundary_coherence": 4,
+    "faithfulness": 5,
+    "coverage": 4,
+    "title_quality": 4,
+    "traceability": 4
+  },
+  "span_support_fraction": 1.0,
+  "spans_checked": 20,
+  "sentences_verified": 13,
+  "worst_unit": "Fix Verificatio — title truncated mid-word, and its single 290-char span is a whole-turn quote rather than a targeted evidence slice",
+  "issues": [
+    "Title 'Fix Verificatio' is truncated mid-word within the 15-char limit; a fitting alternative (e.g. 'Fix Tests Pass') existed.",
+    "User process constraints are not surfaced in any summary: the no-production-restart ground rule (t000), the 10-minute soak bar (t008, invoked repeatedly at t029/t044), and the no-new-dependencies constraint (t024) all fall inside covered turns but appear in no sentence; salient_infos arrays are uniformly empty.",
+    "Multi-clause sentences are frequently backed by a single span that evidences only one clause: 'nine .on() sites' (Listener Audit), 'env-tunable' (Cache Fix Plan), 'slowed from 65 to 27 MB/min' (Leak Ongoing), 'never clears setInterval' (Heartbeat Cause), 'exactly one pong listener' (Mechanism OK), and the messageCache clause of Final Summary have no span backing, though the claims are accurate.",
+    "The two-hypothesis framing at t007 (listener leak vs unbounded cache), which structures the whole investigation, is absent from the 'Heap Diff' unit summary.",
+    "Mild over-fragmentation: 17 units for 50 turns, with five 2-turn units; 'Heap Diff' could merge into 'Leak Reproduced' and 'Cache Fix Plan' into 'Cache Discovery' without losing navigability.",
+    "Turn t012 (reading connection.js, the direct continuation of the listener audit announced at t011) is grouped into 'Emitter Counts' rather than 'Listener Audit'."
+  ],
+  "strengths": [
+    "Dead-end vs conclusion handling is excellent: 'Listener Parked' says parked (not disproven), 'Emitter Counts' precisely scopes the negative result to shared emitters, and 'Retainer Path'/'Heartbeat Cause' correctly represent the theory's vindication on per-socket emitters — the outline never misstates what was concluded when.",
+    "All 20 source_spans have correct character offsets and land on genuinely relevant text; no span is off-topic, misattributed, or contradicts its sentence.",
+    "Every verified sentence is factually accurate with correct numbers (65 vs 26.5 MB/min slopes, +14,382 WebSockets, 50k cap, 5-min TTL, 0.02 MB/min flat soak) and correct attribution.",
+    "Complete, contiguous turn coverage (t000-t049, no gaps or overlaps) with boundaries at real topic shifts; the narrative arc reproduce -> diff -> dead end -> cache fix -> residual leak -> revisit -> root cause -> verify is fully preserved.",
+    "Titles are mostly specific and navigable within 15 chars (e.g. 'Listener Parked', 'Leak Ongoing', 'Retainer Path')."
+  ],
+  "overall_comment": "A faithful, well-segmented outline of a two-bug leak hunt: every checked sentence is accurate, all 20 spans point at genuine supporting text, and the tricky abandoned-then-vindicated listener hypothesis is represented with unusual precision. The main weaknesses are omission of the user's standing process constraints (no prod restarts, 10-minute soak bar, no new dependencies) from any summary, one mid-word truncated title, and a habit of backing multi-clause sentences with a single span so several accurate clauses go unevidenced. Usable for navigation and trustworthy on outcomes, with modest gaps in constraint coverage and span completeness."
+}

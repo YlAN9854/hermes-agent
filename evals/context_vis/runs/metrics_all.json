@@ -1,0 +1,146 @@
+[
+ {
+  "case_id": "c1",
+  "n_gold_segments": 5,
+  "n_units": 5,
+  "coverage_complete": true,
+  "boundary_exact": {
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0
+  },
+  "boundary_tol1": {
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0
+  },
+  "unit_purity": 1.0,
+  "straddling_units": 0,
+  "sentences": 19,
+  "spans": 24,
+  "bad_spans": 0,
+  "spans_per_sentence": 1.26,
+  "median_span_chars": 74,
+  "titles_at_15char_cap": 1,
+  "empty_titles": 0,
+  "constraints": null
+ },
+ {
+  "case_id": "c2",
+  "n_gold_segments": 5,
+  "n_units": 17,
+  "coverage_complete": true,
+  "boundary_exact": {
+   "precision": 0.062,
+   "recall": 0.25,
+   "f1": 0.1
+  },
+  "boundary_tol1": {
+   "precision": 0.188,
+   "recall": 0.75,
+   "f1": 0.3
+  },
+  "unit_purity": 0.92,
+  "straddling_units": 3,
+  "sentences": 18,
+  "spans": 20,
+  "bad_spans": 0,
+  "spans_per_sentence": 1.11,
+  "median_span_chars": 68,
+  "titles_at_15char_cap": 5,
+  "empty_titles": 0,
+  "constraints": null
+ },
+ {
+  "case_id": "c3",
+  "n_gold_segments": 4,
+  "n_units": 12,
+  "coverage_complete": true,
+  "boundary_exact": {
+   "precision": 0.182,
+   "recall": 0.667,
+   "f1": 0.286
+  },
+  "boundary_tol1": {
+   "precision": 0.273,
+   "recall": 1.0,
+   "f1": 0.429
+  },
+  "unit_purity": 0.972,
+  "straddling_units": 1,
+  "sentences": 33,
+  "spans": 33,
+  "bad_spans": 0,
+  "spans_per_sentence": 1.0,
+  "median_span_chars": 40,
+  "titles_at_15char_cap": 3,
+  "empty_titles": 0,
+  "constraints": {
+   "gold_constraints": 12,
+   "recall_reliable": 0.667,
+   "recall_any": 0.667,
+   "detected_total": 14,
+   "detected_reliable": 11,
+   "detected_ai_guessed": 3
+  }
+ },
+ {
+  "case_id": "c4",
+  "n_gold_segments": 7,
+  "n_units": 24,
+  "coverage_complete": true,
+  "boundary_exact": {
+   "precision": 0.174,
+   "recall": 0.667,
+   "f1": 0.276
+  },
+  "boundary_tol1": {
+   "precision": 0.261,
+   "recall": 1.0,
+   "f1": 0.414
+  },
+  "unit_purity": 0.975,
+  "straddling_units": 2,
+  "sentences": 76,
+  "spans": 77,
+  "bad_spans": 0,
+  "spans_per_sentence": 1.01,
+  "median_span_chars": 68,
+  "titles_at_15char_cap": 9,
+  "empty_titles": 0,
+  "constraints": null
+ },
+ {
+  "case_id": "c5",
+  "n_gold_segments": 6,
+  "n_units": 7,
+  "coverage_complete": true,
+  "boundary_exact": {
+   "precision": 0.667,
+   "recall": 0.8,
+   "f1": 0.727
+  },
+  "boundary_tol1": {
+   "precision": 0.667,
+   "recall": 0.8,
+   "f1": 0.727
+  },
+  "unit_purity": 0.967,
+  "straddling_units": 1,
+  "sentences": 9,
+  "spans": 26,
+  "bad_spans": 0,
+  "spans_per_sentence": 2.89,
+  "median_span_chars": 56,
+  "titles_at_15char_cap": 4,
+  "empty_titles": 0,
+  "constraints": {
+   "gold_constraints": 6,
+   "recall_reliable": 0.833,
+   "recall_any": 0.833,
+   "detected_total": 7,
+   "detected_reliable": 7,
+   "detected_ai_guessed": 0
+  }
+ }
+]

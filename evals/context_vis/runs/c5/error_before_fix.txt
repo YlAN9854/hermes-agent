@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/home/hermes/workspace/paper/context-vis/vis-demo/hermes-agent/evals/context_vis/run_generate.py", line 48, in run_case
+    model = service.generate_units(incremental=False)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hermes/workspace/paper/context-vis/vis-demo/hermes-agent/context_vis/service.py", line 150, in generate_units
+    raise ValueError(f"semantic unit response remained invalid after retry: {last_error}")
+ValueError: semantic unit response remained invalid after retry: source quote is absent from turn synth-c5-t027: 'find_tables() mangling exactly the line-item grids we care most about'

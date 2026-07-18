@@ -1,0 +1,29 @@
+{
+  "case": "c1",
+  "scores": {
+    "boundary_coherence": 5,
+    "faithfulness": 5,
+    "coverage": 4,
+    "title_quality": 4,
+    "traceability": 4
+  },
+  "span_support_fraction": 0.92,
+  "spans_checked": 24,
+  "sentences_verified": 19,
+  "worst_unit": "Container & Doc — its README sentence is backed only by a span covering the Dockerfile code (t035[136:347]), leaving the README half of the claim unevidenced",
+  "issues": [
+    "Redis Caching: the '~400ms to 9ms' performance claim cites only the cache-miss log line (t023[650:707], '389ms'); the 9ms/0.6ms cache-hit evidence sits outside the span",
+    "Container & Doc: sentence about README.md content is supported solely by the Dockerfile snippet span; the README description in t035 chars 0-135 is not spanned",
+    "Weather API: the '422 validation for empty city' clause has no supporting span — both spans for that sentence (t015 code, t016 curl output) cover only the 404 path",
+    "Env Setup: the 'Python 3.11' clause of the first sentence is outside its span (t000[26:92]); the production-3.11-only constraint at chars 93+ is never directly spanned, and the user's explicit 'no 3.12-only syntax' constraint is not surfaced in any summary",
+    "Timezone Fix: 'all 5 tests passed' is asserted but the span (t032[677:719]) only shows the curl observed_at value; the pytest result and the intermediate test failure at t030 (old assertion had to be updated) are under-evidenced",
+    "Titles 'Env Setup' and 'Container & Doc' are serviceable but the least specific of the set; 'Container & Doc' reads as clipped"
+  ],
+  "strengths": [
+    "Boundary placement is essentially perfect: five units align exactly with the five user-initiated task shifts, all 40 turns covered with no gaps or overlaps",
+    "Zero fabrication across all 19 sentences — bug details (respone typo, 8-hour naive-UTC offset), fixes, and outcomes are stated accurately with correct user/assistant attribution",
+    "All 24 span offsets slice cleanly to meaningful text (no mid-character or garbage extractions) despite mixed Chinese/English content, and most land precisely on the load-bearing evidence",
+    "Summaries preserve key constraints (env-var API key, TTL <= 10 min, Python 3.11 base image) and the failure-fix arcs, not just happy-path results"
+  ],
+  "overall_comment": "A high-quality outline: segmentation mirrors the conversation's actual task structure exactly, and every summary sentence is factually faithful to the transcript. The main weakness is span selection for multi-clause sentences — several sentences bundle two claims but cite evidence for only one (9ms speedup, README content, 422 validation), so roughly 1 in 12 spans only half-supports its sentence. Titles work within the 15-char limit but two are on the generic side; no title is misleading."
+}

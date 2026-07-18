@@ -1,0 +1,323 @@
+{
+ "units": [
+  {
+   "unit_id": "unit-9740b238004d4d3f942e916de506fe35",
+   "title": "Project Design",
+   "summary_sentences": [
+    {
+     "text": "The user required an offline-only CLI tool `invoiceparse` that never sends invoice data over the network, with no cloud OCR or telemetry.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c5-t000",
+       "char_start": 297,
+       "char_end": 351
+      }
+     ]
+    },
+    {
+     "text": "The assistant proposed a src layout with cli.py, extract.py, parse.py, and models.py, emphasizing a single function contract `extract_document(path) -> RawDocument`, and the user confirmed keeping extract and parse strictly separated to enable backend swapping.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c5-t001",
+       "char_start": 160,
+       "char_end": 176
+      },
+      {
+       "turn_id": "synth-c5-t002",
+       "char_start": 107,
+       "char_end": 251
+      },
+      {
+       "turn_id": "synth-c5-t003",
+       "char_start": 85,
+       "char_end": 132
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c5-t000",
+    "synth-c5-t001",
+    "synth-c5-t002",
+    "synth-c5-t003"
+   ],
+   "salient_infos": [],
+   "frozen": true,
+   "created_at_turn": "synth-c5-t059"
+  },
+  {
+   "unit_id": "unit-67954916aff64942ac539d3b5dd5d598",
+   "title": "Scaffold&Amount",
+   "summary_sentences": [
+    {
+     "text": "The project skeleton was created, and the stub CLI reported page count.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c5-t004",
+       "char_start": 236,
+       "char_end": 258
+      },
+      {
+       "turn_id": "synth-c5-t005",
+       "char_start": 526,
+       "char_end": 594
+      }
+     ]
+    },
+    {
+     "text": "The assistant asked about amount representation, and the user required string amounts with Decimal internally, avoiding floats; the assistant then added a custom JSON encoder and a test to enforce it.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c5-t006",
+       "char_start": 301,
+       "char_end": 353
+      },
+      {
+       "turn_id": "synth-c5-t007",
+       "char_start": 12,
+       "char_end": 39
+      },
+      {
+       "turn_id": "synth-c5-t008",
+       "char_start": 220,
+       "char_end": 283
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c5-t004",
+    "synth-c5-t005",
+    "synth-c5-t006",
+    "synth-c5-t007",
+    "synth-c5-t008"
+   ],
+   "salient_infos": [],
+   "frozen": true,
+   "created_at_turn": "synth-c5-t059"
+  },
+  {
+   "unit_id": "unit-6e1ecb53a24443279746f5c7d3b55775",
+   "title": "pdfplumb Extrac",
+   "summary_sentences": [
+    {
+     "text": "Pdfplumber extraction was implemented, delivering clean text and tables on digital invoices, but scanned PDFs had no text layer and rotated ones yielded garbled text with reversed fragments like 'lat oT'.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c5-t009",
+       "char_start": 21,
+       "char_end": 77
+      },
+      {
+       "turn_id": "synth-c5-t010",
+       "char_start": 0,
+       "char_end": 85
+      },
+      {
+       "turn_id": "synth-c5-t015",
+       "char_start": 134,
+       "char_end": 249
+      },
+      {
+       "turn_id": "synth-c5-t017",
+       "char_start": 294,
+       "char_end": 399
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c5-t009",
+    "synth-c5-t010",
+    "synth-c5-t011",
+    "synth-c5-t012",
+    "synth-c5-t013",
+    "synth-c5-t014",
+    "synth-c5-t015",
+    "synth-c5-t016",
+    "synth-c5-t017"
+   ],
+   "salient_infos": [],
+   "frozen": true,
+   "created_at_turn": "synth-c5-t059"
+  },
+  {
+   "unit_id": "unit-7b1dad33146047ffbfc3c20ef3998637",
+   "title": "PyMuPDF&License",
+   "summary_sentences": [
+    {
+     "text": "PyMuPDF extraction fixed rotation but mangled line-item tables, and the scanned PDF remained empty, while the AGPL-3.0 license raised distribution concerns.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c5-t019",
+       "char_start": 225,
+       "char_end": 319
+      },
+      {
+       "turn_id": "synth-c5-t026",
+       "char_start": 148,
+       "char_end": 179
+      },
+      {
+       "turn_id": "synth-c5-t027",
+       "char_start": 441,
+       "char_end": 510
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c5-t018",
+    "synth-c5-t019",
+    "synth-c5-t020",
+    "synth-c5-t021",
+    "synth-c5-t022",
+    "synth-c5-t023",
+    "synth-c5-t024",
+    "synth-c5-t025",
+    "synth-c5-t026",
+    "synth-c5-t027",
+    "synth-c5-t028",
+    "synth-c5-t029"
+   ],
+   "salient_infos": [],
+   "frozen": true,
+   "created_at_turn": "synth-c5-t059"
+  },
+  {
+   "unit_id": "unit-455b684286684bc1816f0899430fc5a9",
+   "title": "Hybrid OCR",
+   "summary_sentences": [
+    {
+     "text": "After reverting to pdfplumber, the team added a Tesseract OCR fallback for pages with no text layer or rotation; after installing Chinese language data, it extracted accurate text from scanned and rotated invoices.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c5-t030",
+       "char_start": 15,
+       "char_end": 153
+      },
+      {
+       "turn_id": "synth-c5-t031",
+       "char_start": 271,
+       "char_end": 345
+      },
+      {
+       "turn_id": "synth-c5-t037",
+       "char_start": 247,
+       "char_end": 257
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c5-t030",
+    "synth-c5-t031",
+    "synth-c5-t032",
+    "synth-c5-t033",
+    "synth-c5-t034",
+    "synth-c5-t035",
+    "synth-c5-t036",
+    "synth-c5-t037",
+    "synth-c5-t038",
+    "synth-c5-t039",
+    "synth-c5-t040",
+    "synth-c5-t041"
+   ],
+   "salient_infos": [],
+   "frozen": true,
+   "created_at_turn": "synth-c5-t059"
+  },
+  {
+   "unit_id": "unit-6500f923cc0a41c8970f7dbef5c3ed3f",
+   "title": "Parse & Validat",
+   "summary_sentences": [
+    {
+     "text": "The parsing logic targeted mixed English/Chinese labels, enforced allowed VAT rates, handled decimal normalization for fullwidth yen and thousands separators, and flagged anomalies like 19% while exiting on missing required fields.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c5-t042",
+       "char_start": 207,
+       "char_end": 239
+      },
+      {
+       "turn_id": "synth-c5-t044",
+       "char_start": 599,
+       "char_end": 650
+      },
+      {
+       "turn_id": "synth-c5-t046",
+       "char_start": 56,
+       "char_end": 158
+      },
+      {
+       "turn_id": "synth-c5-t050",
+       "char_start": 214,
+       "char_end": 266
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c5-t042",
+    "synth-c5-t043",
+    "synth-c5-t044",
+    "synth-c5-t045",
+    "synth-c5-t046",
+    "synth-c5-t047",
+    "synth-c5-t048",
+    "synth-c5-t049",
+    "synth-c5-t050",
+    "synth-c5-t051"
+   ],
+   "salient_infos": [],
+   "frozen": true,
+   "created_at_turn": "synth-c5-t059"
+  },
+  {
+   "unit_id": "unit-621831998c8a415090b843e134a3ce15",
+   "title": "Package & Demo",
+   "summary_sentences": [
+    {
+     "text": "Packaging included a console entry point, a README, and a logging rule to suppress line-item details; the final demo processed all sample invoices successfully.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c5-t052",
+       "char_start": 163,
+       "char_end": 241
+      },
+      {
+       "turn_id": "synth-c5-t054",
+       "char_start": 367,
+       "char_end": 385
+      },
+      {
+       "turn_id": "synth-c5-t057",
+       "char_start": 78,
+       "char_end": 107
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c5-t052",
+    "synth-c5-t053",
+    "synth-c5-t054",
+    "synth-c5-t055",
+    "synth-c5-t056",
+    "synth-c5-t057",
+    "synth-c5-t058",
+    "synth-c5-t059"
+   ],
+   "salient_infos": [],
+   "frozen": true,
+   "created_at_turn": "synth-c5-t059"
+  }
+ ],
+ "aggregates": [],
+ "decision_aggregates": [],
+ "decision_intent": null,
+ "backlinks": [],
+ "tier": 1,
+ "revision": 1,
+ "legacy_transcript_warning": null
+}

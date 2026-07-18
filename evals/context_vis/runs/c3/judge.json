@@ -1,0 +1,41 @@
+{
+  "case": "c3",
+  "scores": {
+    "boundary_coherence": 4,
+    "faithfulness": 5,
+    "coverage": 4,
+    "title_quality": 3,
+    "traceability": 4,
+    "salient_quality": 2
+  },
+  "span_support_fraction": 0.91,
+  "spans_checked": 33,
+  "sentences_verified": 33,
+  "constraints_i_found": 12,
+  "constraints_detected_by_model": 8,
+  "constraints_missed": [
+    "t008: existing supplier_orders columns must not be renamed/retyped (finance report script selects the table directly; only additive changes allowed) — unit 'Schema Rules' has an empty salient_infos despite containing this hard constraint",
+    "t016: service is capped at 5 database connections; exceeding the cap is silently killed by the firewall with no error",
+    "t024: customer phone numbers must NEVER be printed in logs (explicit compliance red line; the most important miss — logs are org-visible while the rejects table is access-controlled)",
+    "t028: 02:00-04:00 is the backup window; cron must be scheduled after 04:30 (final decision 04:45)"
+  ],
+  "salient_false_positives": [
+    "'return latin-1  # last resort, never raises' (unit 'Code Problems') labeled tool_output_constraint with confidence 'reliable' — it is a code comment describing legacy behavior, not a binding constraint",
+    "Duplicate detections inflate the list: the --lock warning and the maintenance-mode error are each detected twice (once 'reliable', once 'ai_guessed' on a substring of the same text), and the conftest prod-DSN guard is detected four times (3x 'reliable' + 1x 'ai_guessed')"
+  ],
+  "worst_unit": "Cron Schedule — title describes only the last turn; the unit's main content is the successful full staging run (t026-t027), and it fails to register the backup-window scheduling constraint from t028 as salient",
+  "issues": [
+    "Systematic recall failure in salient_infos for user-stated constraints in the second half of the conversation: the schema-column freeze (t008), 5-connection cap (t016), no-phone-numbers-in-logs red line (t024), and backup-window rule (t028) all appear in summary sentences but were never promoted to salient_infos; 3 of the 4 units holding them have empty or tool-only salient lists",
+    "The 'ai_guessed' confidence label is not calibrated: every 'ai_guessed' item is a verbatim substring duplicate of an already-detected 'reliable' item, so the label conveys no reliability signal; meanwhile a genuine mislabel (the latin-1 code comment) carries 'reliable'",
+    "Title defects: 'Migration & Con' is truncated mid-word (ambiguous between connections/constraints), 'Implementation' is generic, and 'Cron Schedule' mismatches its unit's dominant content (staging success run)",
+    "The Python 3.10 salient detected_text is cut mid-token at 'Python 3.' (span 168:240 of t000), dropping the version number '3.10' that is the substance of the constraint",
+    "Several multi-fact sentences cite a single span covering only one clause (e.g. 'A full staging run succeeded: 4982 rows loaded, 18 rejects stored, peak DB connection of 1' cites only 'peak_db_connections=1'; the t033 verification sentence cites only the psycopg2-only line, not the NO_SQL_CONCAT grep or the empty legacy diff)"
+  ],
+  "strengths": [
+    "All 33 extracted source spans point to genuinely relevant transcript text with exact character offsets — no dangling or misaligned spans",
+    "Summary sentences are highly faithful: no invented facts, outcomes (test failures being test-side not implementation-side, negative amounts valid as reversals, staging failure then fix) are reported accurately",
+    "Unit segmentation tracks the real topical arc well (brief -> survey -> problems -> plan -> constraints -> implementation -> encoding incident -> maint/privacy -> testing/recap), and the near-miss encoding regression (t019-t021) is correctly isolated as its own unit",
+    "The salient constraints that were detected are quoted verbatim with exact spans and correct kind labels (user_stated vs tool_output)"
+  ],
+  "overall_comment": "The outline itself is strong: coherent segmentation, accurate and well-anchored summary sentences, and good narrative coverage of failures and fixes. The salient-constraint layer is the weak point: it reliably captures constraints from the first half plus tool-output warnings, but misses four user-stated hard constraints from later turns — including the explicit compliance red line on logging phone numbers — while padding the list with duplicates and one code-comment false positive. Confidence labels are verbatim-honest at the span level but do not reflect actual constraint-hood, as shown by the 'reliable' latin-1 comment and uniformly duplicated 'ai_guessed' entries."
+}

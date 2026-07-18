@@ -1,0 +1,26 @@
+{
+ "case_id": "c1",
+ "n_gold_segments": 5,
+ "n_units": 5,
+ "coverage_complete": true,
+ "boundary_exact": {
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1": 1.0
+ },
+ "boundary_tol1": {
+  "precision": 1.0,
+  "recall": 1.0,
+  "f1": 1.0
+ },
+ "unit_purity": 1.0,
+ "straddling_units": 0,
+ "sentences": 19,
+ "spans": 24,
+ "bad_spans": 0,
+ "spans_per_sentence": 1.26,
+ "median_span_chars": 74,
+ "titles_at_15char_cap": 1,
+ "empty_titles": 0,
+ "constraints": null
+}

@@ -1,0 +1,33 @@
+{
+  "case": "c4",
+  "scores": {
+    "boundary_coherence": 3,
+    "faithfulness": 4,
+    "coverage": 5,
+    "title_quality": 3,
+    "traceability": 5
+  },
+  "span_support_fraction": 0.95,
+  "spans_checked": 77,
+  "sentences_verified": 20,
+  "arbitrary_splits_noted": [
+    "t021/t022: 'Build Kickoff' vs 'Build Iteration' — the user's '开始迁 build job 吧' command is severed from the immediate execution it triggers; the kickoff unit instead bundles the unrelated nightly-e2e deferral decision (t019).",
+    "t036–t046: one continuous flaky-test-fix task is fragmented across five units (Test Run Result / Fix Request / DigestScheduler / IndexRebuild Fi / Flaky Tests Pas), including the single-turn unit 'Fix Request' (t038 only).",
+    "t066/t067: 'Build Optimize' vs 'Perf optimizati' — the assistant says '我加上再跑一轮' and the very next turn applying that diff starts a new unit; one optimization loop cut in half.",
+    "t061: the assistant's deploy-migration wrap-up is attached to 'Timing Compare' instead of the deploy/staging unit it concludes."
+  ],
+  "worst_unit": "'Fix Request' — a single user turn (t038) promoted to its own unit, the clearest symptom of over-fragmentation of the continuous flaky-fix arc t036–t046.",
+  "issues": [
+    "Over-fragmentation clusters around continuous activities: the flaky-fix arc (t036–t046) becomes 5 units and the perf-optimization loop (t065–t071) is split mid-task at t066/t067; unit 10 contains a single turn.",
+    "5 of 24 titles are truncated mid-word at the 15-char limit ('IndexRebuild Fi', 'Flaky Tests Pas', 'Perf optimizati', 'Jenkins handlin', 'Migration summa'), and several others are generic ('Fix Request', 'Env Config', 'Update docs'); denser Chinese titles were available within the limit.",
+    "Sentence [9.1] says the assistant summarized 'the two flaky test failures' while the log (t036) and t037 report 3 failing test cases concentrated in two suites — a count imprecision that also conflicts with unit 13's 'Three previously flaky tests'.",
+    "A few spans are weaker than their sentences: [0.2] cites only the serial-build remark and credentials clause of t003 while the sentence asserts the full pipeline structure; [13.0] cites one PASS line rather than the 'Test Suites: 0 failed, 107 passed' summary; [15.2] cites only 'environment: production' from the workflow while required-reviewer configuration actually happens at t054; [11.1] covers the +8h hardcode but not the implementation-timezone half of the claim.",
+    "The two ~48k-char test-log turns are summarized thinly in unit 9 ('Test suite launched via gh run watch command' carries almost no information for a 48k log); key totals (107 suites, 1004 tests, 14m47s vs 6m12s) surface only indirectly via assistant turns."
+  ],
+  "strengths": [
+    "Numbers are consistently faithful: 12/12 packages and 9m41s (t028/t029), 89% turbo hit = 32/36 and 412MB pnpm store (t031/t032), 107 suites / 3 failures then 0 failures (t036/t045), 31m52s→12m06s (-62%) and 48m23s→21m19s (-56%) (t063/t064), 16m02s after remote+layer cache (t068) all verified against the transcript.",
+    "Source spans are precise character-offset slices that land exactly on supporting text, including deep inside the long log turns (t025 pnpm-not-found line, t056 rollout line, t068 wall-clock line) — 73/77 fully supporting.",
+    "Coverage of user constraints and decisions is complete: parallel-run-until-stable principle, environment-scoped-secrets hard requirement, nightly-e2e deferral, full-suite mandate, no-skip flaky fixes, production approval gate, canary-not-production rehearsal, and the stop-optimizing call are all captured with correct attribution."
+  ],
+  "overall_comment": "The outline is highly faithful and traceable: nearly every cited number, outcome, and constraint checks out against the transcript, spans are exact, and no facts are invented. Its weaknesses are structural rather than factual: 24 units over 80 turns over-fragment two continuous work arcs (the flaky-fix cycle and the performance-optimization loop), including a single-turn unit, and five titles are truncated mid-word. As a navigational summary it is very usable, but boundary placement and title polish clearly lag the quality of the sentence-level content."
+}
