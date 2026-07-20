@@ -375,6 +375,50 @@ def test_adapter_reads_probe_events_and_skips_unknown_versions(tmp_path):
     db.close()
 
 
+def test_reconstructs_history_for_sessions_that_predate_the_probe(tmp_path):
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("s", "cli")
+    for role, text in [("user", "rule one"), ("assistant", "ok"), ("user", "more"), ("assistant", "done")]:
+        db.append_message("s", role, text)
+    loaded = db.get_messages_as_conversation("s")
+    db.archive_and_compact("s", [{"role": "assistant", "content": "[CONTEXT SUMMARY]: gen1", "_compressed_summary": True}, loaded[3]])
+    db.append_message("s", "user", "after gen1")
+    loaded2 = db.get_messages_as_conversation("s")
+    db.archive_and_compact("s", [{"role": "assistant", "content": "[CONTEXT SUMMARY]: gen2", "_compressed_summary": True}, loaded2[-1]])
+
+    events = HermesContextAdapter(db, "s", tmp_path).get_compression_events()
+
+    assert [e.fidelity for e in events] == ["reconstructed", "reconstructed"]
+    assert [e.sequence for e in events] == [1, 2]
+    # Generation 1 kept only the last turn; generation 2 kept only the newer one.
+    assert events[0].dropped_turn_ids == ["hermes-msg:1", "hermes-msg:2", "hermes-msg:3"]
+    assert events[0].kept_turn_ids == ["hermes-msg:4"]
+    assert events[0].summary_text == "[CONTEXT SUMMARY]: gen1"
+    assert events[1].dropped_turn_ids == ["hermes-msg:4"]
+    assert all("approximate" in e.note for e in events)
+    db.close()
+
+
+def test_probe_records_suppress_reconstruction_of_the_same_boundary(tmp_path):
+    db, adapter = _compacted_session(tmp_path)
+    assert adapter.get_compression_events()[0].fidelity == "reconstructed"
+
+    directory = tmp_path / "context-vis" / "compaction"
+    directory.mkdir(parents=True)
+    (directory / "s.jsonl").write_text(json.dumps({
+        "v": 1, "event_id": "observed-1", "ts": 1e12,  # after the archived rows
+        "before_turn_ids": ["hermes-msg:1", "hermes-msg:3"], "after_turn_ids": ["hermes-msg:3"],
+        "summary_text": "observed summary",
+    }) + "\n", encoding="utf-8")
+
+    events = HermesContextAdapter(db, "s", tmp_path).get_compression_events()
+
+    # The older boundary is still reconstructed; the observed one is not duplicated.
+    assert [e.fidelity for e in events] == ["reconstructed", "observed"]
+    assert [e.event_id for e in events][-1] == "observed-1"
+    db.close()
+
+
 def test_backlinks_only_point_backwards():
     transcript = [Turn("t1", "user", "one", None, 1), Turn("t2", "user", "two", None, 2)]
     from context_vis.domain import SemanticUnit, SummarySentence, SpanRef

@@ -160,6 +160,63 @@ class HermesContextAdapter:
                         records.append(record)
         return records
 
+    def _lineage_rows(self) -> list[dict[str, Any]]:
+        lineage = self.db.get_compression_lineage(self.session_id) or [self.session_id]
+        rows: list[dict[str, Any]] = []
+        for sid in lineage:
+            rows.extend(sorted(self.db.get_messages(sid, include_inactive=True), key=lambda r: r["id"]))
+        return rows
+
+    def _reconstructed_events(self, before_ts: float | None) -> list[CompressionEvent]:
+        """Derive past compactions from archived rows, for pre-probe history.
+
+        A compaction leaves its summary row followed by copies of the turns it
+        kept, so a synthetic row starts a new generation block. A turn present
+        in both adjacent blocks survived that boundary; one present only in the
+        earlier block was dropped. This cannot see turns that were never
+        flushed, and cannot tell a summarised drop from a pruned tool result,
+        hence fidelity="reconstructed".
+        """
+        blocks: list[dict[str, Any]] = []
+        current: dict[str, Any] = {"summary": None, "ts": 0.0, "ids": []}
+        for row in self._lineage_rows():
+            content = _text(row.get("content"))
+            synthetic = bool(row.get("context_synthetic")) or content.lstrip().startswith(_SUMMARY_PREFIXES)
+            turn_id = row.get("transcript_turn_id") or row.get("_transcript_turn_id")
+            if synthetic:
+                blocks.append(current)
+                current = {"summary": content, "ts": float(row.get("timestamp") or 0), "ids": []}
+            if turn_id:
+                # A summary merged into a real tail message is both the
+                # boundary marker and a surviving turn.
+                current["ids"].append(str(turn_id))
+        blocks.append(current)
+
+        events: list[CompressionEvent] = []
+        for index in range(1, len(blocks)):
+            previous, block = blocks[index - 1], blocks[index]
+            if before_ts is not None and block["ts"] >= before_ts:
+                continue  # covered by an observed probe record
+            # "Kept" means carried across the boundary, so it must appear on
+            # both sides: a block also holds turns appended after that
+            # compaction, which it did not keep.
+            block_set, previous_set = set(block["ids"]), set(previous["ids"])
+            kept = list(dict.fromkeys(t for t in block["ids"] if t in previous_set))
+            dropped = list(dict.fromkeys(t for t in previous["ids"] if t not in block_set))
+            if not dropped and not block["summary"]:
+                continue
+            events.append(CompressionEvent(
+                event_id=f"cvce-recon-{self.session_id}-{index}",
+                timestamp=block["ts"],
+                sequence=0,
+                fidelity="reconstructed",
+                kept_turn_ids=kept,
+                dropped_turn_ids=dropped,
+                summary_text=block["summary"],
+                note="Reconstructed from archived rows; the boundary time and the dropped/kept split are approximate.",
+            ))
+        return events
+
     def get_compression_events(self) -> list[CompressionEvent]:
         if self._events_cache is not None:
             return self._events_cache
@@ -183,6 +240,10 @@ class HermesContextAdapter:
                     if unlinked else None
                 ),
             ))
+        # Reconstruct only what predates the observed records, so a session
+        # compacted both before and after the probe was installed keeps its
+        # full history without deriving the same boundary twice.
+        events.extend(self._reconstructed_events(min((e.timestamp for e in events), default=None)))
         events.sort(key=lambda e: e.timestamp)
         self._events_cache = [
             replace(event, sequence=index) for index, event in enumerate(events, start=1)
