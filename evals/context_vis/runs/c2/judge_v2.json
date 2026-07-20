@@ -1,0 +1,24 @@
+{
+  "scores": {
+    "boundary_quality": 5,
+    "faithfulness": 5,
+    "coverage": 4,
+    "title_quality": 4,
+    "provenance": 4
+  },
+  "span_support_rate": 0.95,
+  "spans_checked": 19,
+  "issues": [
+    "Title 'Investigate listener leak…' ends in an ellipsis and reads as truncated/damaged; all other titles are clean.",
+    "Unit 'Memory leak reproduction', sentence 'After five minutes, heapUsed grows by over 200 MB...': its first span extracts '~65 MB RSS growth per minute of churn' (t005), which evidences rapid growth but not the heapUsed +200 MB figure; the actual evidence (t004: heapUsed 41.2 -> 255.1 MB over 300s) is not cited. Claim is true but this span does not support it.",
+    "Multi-clause sentences are often anchored by a span covering only one clause: e.g. 'The assistant patches heartbeat.js to register a single pong listener, clear the interval on close, and remove the setMaxListeners(0) hack' cites only the single-listener clause (t038[38:150]); the interval-clearing and setMaxListeners clauses sit in the same turn but outside the span. Similar partial anchoring in spans for the OOM-every-two-days clause (t000), the 'exactly one pong listener per socket' clause (t043), the '15-minute / no errors' clauses (t045), and the heapUsed-baseline clause (t047).",
+    "salient_infos is empty in every unit: the user's durable process rules — 'do not restart the production pods' (t000) and 'always run the soak test for at least 10 minutes before calling it fixed' (t008) — are captured nowhere; the no-restart rule is absent from all unit summaries even though it shaped the whole investigation and is restated in the incident doc (t049).",
+    "Minor attribution imprecision: 'The user suspects listener leaks' (unit 'Investigate listener leak…') — the listener hypothesis was proposed by the assistant (t007); the user only prioritized it ('Start with the listener theory', t008)."
+  ],
+  "notable_strengths": [
+    "Unit boundaries match an independent segmentation of the transcript exactly: 7 units for 7 natural work phases (repro, listener dead-end, cache fix, heartbeat rediscovery, heartbeat fix, final soak + CI guard, incident doc), each boundary falling on the user turn where the work actually shifts; covered_turns span t000-t049 with no gaps and no overlaps.",
+    "All quantitative claims verified correct against the transcript: 40 MB/h prod leak, OOM every ~2 days, 500-client churn, +14,382 leaked WebSockets (summary says 'over 14,000'), ~61 stacked pong listeners, LRU cap 50k with 5-minute TTL behind env vars, residual ~27 MB/min after the cache-only fix, and 0.02 MB/min flat slope in the 15-minute soak. No fabrications found.",
+    "Character offsets are accurate: every extracted span is a clean, meaningful phrase with no mid-word cuts; 18 of 19 spans genuinely support their sentence's claim.",
+    "The summaries preserve the investigation's key narrative logic — the listener theory was 'parked as a dead end', then vindicated when the leak turned out to live on per-socket emitters silenced by setMaxListeners(0) — which is exactly the lesson the user asked to be documented."
+  ]
+}

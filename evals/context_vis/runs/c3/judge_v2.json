@@ -1,0 +1,34 @@
+{
+  "scores": {
+    "boundary_quality": 4,
+    "faithfulness": 5,
+    "coverage": 4,
+    "title_quality": 3,
+    "provenance": 4,
+    "salient_quality": 3
+  },
+  "span_support_rate": 0.85,
+  "spans_checked": 23,
+  "salient_missed_constraints": [
+    "Cron scheduling constraint: user said cron must run after 04:30 because 02:00-04:00 is the backup window (t028 '你放 04:30 之后自己看着排'), and the final decision cron=04:45 (t034); only the bare backup-window fragment was captured, the actionable 'after 04:30' rule and the 04:45 decision were not",
+    "The 5-connection limit's failure mode ('超了会直接被防火墙掐掉而且不报错', t016) was cut off; only the bare '5 个数据库连接' fragment was kept, losing the silent-firewall-kill detail that makes the constraint dangerous"
+  ],
+  "salient_duplicate_or_broken": [
+    "The conftest warning \"conftest: WARNING: refusing DSN containing 'prod'...\" is recorded as three separate identical salient_infos (t029, t031 char 308, t031 char 576) - one constraint triplicated",
+    "\"别别别，这个不能省。\" is a contextless fragment recorded as its own entry while the immediately following span in the same turn (\"务必保留原有的 CSV 编码探测逻辑...\") is a second entry - one user constraint split into an overlapping/broken pair",
+    "\"return 'latin-1'  # last resort, never raises\" is a code comment from a read of the old importer, not a genuine operative constraint; marginal value as tool_output_constraint"
+  ],
+  "issues": [
+    "Two titles are truncated with an ellipsis: 'Exploration and Problem…' and 'Design and Constraints…' - damaged, non-specific titles (should be e.g. 'Exploration and Problem Discovery', 'Design and Constraint Negotiation')",
+    "Confidence split is miscalibrated: verbatim user-stated hard constraints are marked kind=other/ai_guessed - '表结构你想加索引、加新列都行，就是别动存量列。' (t008), '运维只给我们这套服务开了 5 个数据库连接' (t016), '凌晨两点到四点是备份窗口' (t028) are all direct user quotes and should be user_stated_constraint/reliable",
+    "7 of 23 summary spans support only one clause of a multi-clause sentence: e.g. 'Assistant proposes a modular plan with rejects table, bulk insert, and dataclasses' cites only the module-split list (t009[58:173]); 'Successful staging run shows correct GB18030 decoding, masked logs, and 0.9-second bulk insert' cites only the GB18030 clause (t027[23:51]); 'User asks to confirm all constraints and sets cron at 04:45' span omits the 04:45 part; no span is wrong, but citations under-cover their sentences",
+    "Unit 'Core Module Implementation' covers only t017-t018 although implementation continues through t019-t021 (reader.py) and t023/t025 (pipeline fixes); mild fragmentation relative to the actual implementation phase",
+    "Unit 6 sentence 'Initial test failures are due to non-erroneous negative amounts and an encoding sample fix' is awkwardly worded - the second failure was a test sample that happened to be valid GB18030, fixed by changing the sample bytes; the sentence is hard to parse though not factually wrong"
+  ],
+  "notable_strengths": [
+    "All 16 salient_info detected_text values are byte-exact matches of their span_in_B extractions, with intact values (Python 3.10, 5 connections, --lock, 02:00-04:00 semantics preserved)",
+    "Zero fabricated or contradicted claims across all titles and summary sentences; every checked span text is genuinely relevant to its sentence",
+    "Complete turn coverage: all 36 turns assigned to exactly one unit with no gaps or overlaps, and unit boundaries align well with the conversation's natural phases (exploration / design / implementation / encoding decision / staging / testing / wrap-up)",
+    "Nearly all hard constraints in the conversation (legacy/ untouchable, parameterized SQL, no new deps, migration --lock, maintenance mode, no phone numbers in logs, prod-DSN test guard) are captured as salient_infos with correct kind for the reliable-marked ones"
+  ]
+}

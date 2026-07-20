@@ -1,0 +1,16 @@
+{
+ "status": "pass",
+ "seconds": 132.6,
+ "checks": {
+  "old_units_byte_identical": true,
+  "new_units_appended": true,
+  "new_units_cover_exactly_inc_turns": true,
+  "user_aggregate_untouched": true,
+  "draft_node_appended_for_new_units": true
+ },
+ "units_before": 5,
+ "units_after": 6,
+ "new_unit_titles": [
+  "添加Prometheus指标"
+ ]
+}

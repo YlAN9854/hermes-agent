@@ -1,0 +1,30 @@
+{
+  "scores": {
+    "boundary_quality": 4,
+    "faithfulness": 5,
+    "coverage": 4,
+    "title_quality": 4,
+    "provenance": 5
+  },
+  "span_support_rate": 1.0,
+  "spans_checked": 32,
+  "issues": [
+    "Title 'Build Performance…' is truncated/damaged (ends in an ellipsis) — the unit is about proposing turbo remote cache + docker buildx layer cache (t065-t066).",
+    "One fix task is split across two units: 'Fix two flaky CI tests' (t036-t044) and 'Flaky Tests Fix & Rerun' (t045-t046); the rerun is the verification tail of the same task, and the two titles are near-duplicates that are easy to confuse.",
+    "The performance-optimization task is likewise split mid-task: 'Build Performance…' (t065-t066, the proposal) vs '性能优化收手' (t067-t071, the implementation and stop decision).",
+    "Terminology tension between sibling units: title says 'Fix two flaky CI tests' while the neighboring sentence says 'three flaky tests are now stable' — the transcript (t037, t046) says 3 failing test cases concentrated in 2 test files, so both readings are grounded but the inconsistency is confusing.",
+    "Sentence 'Assistant confirms the 12 Jenkins plugins have straightforward replacements' — the number 12 is correct (t009 lists exactly 12 plugins) but no span anchors it; the only span is t010[0:12] '插件面不大，都有现成替代'.",
+    "Sentence 'Assistant proposes a migration plan with three main workflows, environment-only secrets, and matrix concurrency limits' has a single span covering only 'Proposal: three workflows plus one deferred.'; the secrets requirement (t013-t014) and max-parallel design (t016) sub-claims have no anchoring span.",
+    "Sentence 'Added Turbo remote cache and Docker layer cache to the build workflow' anchors only 'Turbo remote cache' (t067[86:104]); the Docker layer cache half has no span.",
+    "salient_infos is an empty list for all 18 units — if the field is meant to carry key facts (e.g. the standing constraint from t000 that Jenkins must stay up in parallel until the new CI is proven stable), it is entirely unused.",
+    "Unit summaries are thin for large units: 'Build workflow creation' covers 11 turns (t019-t029) with one sentence, omitting the plan lock-in (t019-t020) and the pnpm-cache/setup fix details; the t000 user principle 'keep Jenkins running in parallel, no early decommission' is not represented in the first unit's summary (it only resurfaces in the t072-t075 unit).",
+    "'最终迁移总结' is a single-turn unit (t079); defensible as a standalone wrap-up but borderline over-fragmentation."
+  ],
+  "notable_strengths": [
+    "All 32 source spans checked extract to text that genuinely supports their sentences (span_support_rate 1.00); offsets are precise, often landing exactly on the key phrase.",
+    "Every quoted number was verified correct against raw tool logs: 5 Jenkins jobs, 12 plugins, exit-127 pnpm failure, 9m41s wall clock, 89% (32/36) turbo hit rate, 107 suites / 0 failed, 4m18s staging deploy, 31m52s→12m06s (-62%) and 48m23s→21m19s (-56%) three-run means, 21m19s→16m02s after remote/layer cache.",
+    "Complete contiguous coverage: all 80 turns are assigned to exactly one unit with no gaps or overlaps.",
+    "Boundaries largely track user-request turns (audit / plan / build / test / deploy / canary / timing / wind-down / docs), matching an independent reading of the conversation's task structure.",
+    "Spans drawn from very long tool logs (e.g. t045, a 47k-char jest log) are anchored deep in the log at the exact summary line rather than at the head, showing genuine offset-level provenance."
+  ]
+}

@@ -1,33 +1,33 @@
 {
  "case_id": "c3",
  "n_gold_segments": 4,
- "n_units": 12,
+ "n_units": 7,
  "coverage_complete": true,
  "boundary_exact": {
-  "precision": 0.182,
+  "precision": 0.333,
   "recall": 0.667,
-  "f1": 0.286
+  "f1": 0.444
  },
  "boundary_tol1": {
-  "precision": 0.273,
+  "precision": 0.5,
   "recall": 1.0,
-  "f1": 0.429
+  "f1": 0.667
  },
  "unit_purity": 0.972,
  "straddling_units": 1,
- "sentences": 33,
- "spans": 33,
+ "sentences": 20,
+ "spans": 23,
  "bad_spans": 0,
- "spans_per_sentence": 1.0,
- "median_span_chars": 40,
- "titles_at_15char_cap": 3,
+ "spans_per_sentence": 1.15,
+ "median_span_chars": 36,
+ "titles_at_15char_cap": 0,
  "empty_titles": 0,
  "constraints": {
   "gold_constraints": 12,
-  "recall_reliable": 0.667,
-  "recall_any": 0.667,
-  "detected_total": 14,
-  "detected_reliable": 11,
+  "recall_reliable": 0.75,
+  "recall_any": 0.917,
+  "detected_total": 16,
+  "detected_reliable": 13,
   "detected_ai_guessed": 3
  }
 }

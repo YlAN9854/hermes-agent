@@ -1,0 +1,23 @@
+[
+ {
+  "case_id": "c2",
+  "status": "ok",
+  "seconds": 463.3,
+  "turns": 50,
+  "units": 7
+ },
+ {
+  "case_id": "c3",
+  "status": "ok",
+  "seconds": 348.7,
+  "turns": 36,
+  "units": 7
+ },
+ {
+  "case_id": "c4",
+  "status": "ok",
+  "seconds": 861.3,
+  "turns": 80,
+  "units": 18
+ }
+]
