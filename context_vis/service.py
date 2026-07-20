@@ -84,6 +84,10 @@ def _spans_overlap(a: SpanRef, b: SpanRef) -> bool:
     return a.turn_id == b.turn_id and a.char_start < b.char_end and b.char_start < a.char_end
 
 
+def _norm_salient_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
 def _char_width(char: str) -> int:
     return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
 
@@ -162,7 +166,7 @@ class ContextVisService:
             return model.to_dict()
         new_units: list[SemanticUnit] = []
         for batch in _turn_batches(turns):
-            base_prompt = f"""Split the transcript into topic/task-coherent semantic units. Do not infer intent, abandonment, or backtracking. Preserve turn order and cover every supplied turn exactly once. A unit spans one complete task or topic arc — including its attempts, results, and follow-up fixes. Open a new unit when the work moves to a different sub-goal, component, bug, or deliverable, even within the same overall project; do not open one merely because the same piece of work advances a step. A typical unit covers roughly 3-12 consecutive turns; one unit per turn and one unit spanning a whole long transcript are both wrong. Titles must be short: at most 15 CJK characters, or about four words for Latin text. Each short summary sentence needs one or more exact verbatim source quotes.
+            base_prompt = f"""Split the transcript into topic/task-coherent semantic units. Do not infer intent, abandonment, or backtracking. Preserve turn order and cover every supplied turn exactly once. A unit spans one complete task or topic arc — including its attempts, results, and follow-up fixes. Open a new unit when the work moves to a different sub-goal, component, bug, or deliverable, even within the same overall project; do not open one merely because the same piece of work advances a step. A typical unit covers roughly 3-12 consecutive turns; one unit per turn and one unit spanning a whole long transcript are both wrong. Titles must be short: at most 15 CJK characters, or about four words for Latin text. Each summary sentence must be short and state exactly one fact; put separate facts in separate sentences, and give every sentence source quotes covering each claim it makes.
 For every source, copy quote directly from the specified turn. The quote should be long enough to occur exactly once in that turn. Also return char_start, the zero-based Python character offset where quote begins; it is required when the same quote occurs more than once.
 Return JSON: {{"units":[{{"title":"...","covered_turn_ids":["..."],"summary_sentences":[{{"text":"...","sources":[{{"turn_id":"...","quote":"exact substring","char_start":0}}]}}]}}]}}.
 TRANSCRIPT_JSON:\n{_turn_payload(batch)}"""
@@ -206,6 +210,7 @@ TRANSCRIPT_JSON:\n{_turn_payload(batch)}"""
             else:
                 raise ValueError(f"semantic unit response remained invalid after retry: {last_error}")
             new_units.extend(batch_units)
+        new_units = self._merge_pass(new_units)
         model.units.extend(new_units)
         if model.aggregates:
             model.aggregates.append(AggregateNode(f"aggregate-{uuid.uuid4().hex}", "New conversation", [u.unit_id for u in new_units]))
@@ -219,9 +224,51 @@ TRANSCRIPT_JSON:\n{_turn_payload(batch)}"""
         model.revision = revision
         return model.to_dict()
 
+    def _merge_pass(self, units: list[SemanticUnit]) -> list[SemanticUnit]:
+        """Merge adjacent same-topic units among the freshly generated ones.
+
+        Batch-wise generation cannot see across batch boundaries and tends to
+        fragment long sessions. Merging afterwards is safe: it only touches
+        units created in this call (never previously frozen ones) and leaves
+        every SpanRef untouched. The pass is an optimisation — any invalid
+        merge response falls back to the unmerged units instead of failing.
+        """
+        if len(units) < 2:
+            return units
+        listing = [{"index": i, "title": u.title, "summary": [s.text for s in u.summary_sentences]} for i, u in enumerate(units)]
+        prompt = f"""Below is an ordered list of semantic units summarising consecutive parts of one conversation. Merge adjacent units that belong to the same task or topic arc; keep units apart when the work moves to a different sub-goal, component, bug, or deliverable. Groups must be consecutive index runs covering every index exactly once, in order. Give every group a short title (at most 15 CJK characters, or about four words for Latin text).
+Return JSON: {{"groups":[{{"indexes":[0,1],"title":"..."}}]}}.
+UNITS_JSON:\n{json.dumps(listing, ensure_ascii=False)}"""
+        try:
+            raw = json.loads(self.adapter.llm_complete(prompt, max_tokens=3000))
+            groups = [(list(g.get("indexes", [])), str(g.get("title", ""))) for g in raw.get("groups", [])]
+        except Exception:
+            return units
+        if [i for indexes, _ in groups for i in indexes] != list(range(len(units))):
+            return units
+        merged: list[SemanticUnit] = []
+        for indexes, title in groups:
+            group = [units[i] for i in indexes]
+            if len(group) == 1:
+                merged.append(group[0])
+                continue
+            merged.append(SemanticUnit(
+                unit_id=f"unit-{uuid.uuid4().hex}",
+                title=_clamp_title(title or group[0].title),
+                summary_sentences=[s for u in group for s in u.summary_sentences],
+                covered_turns=[tid for u in group for tid in u.covered_turns],
+                frozen=True,
+                created_at_turn=group[-1].created_at_turn,
+            ))
+        return merged
+
     def detect_salient(self) -> dict[str, Any]:
         model, transcript, last = self.load()
         turns = {t.turn_id: t for t in transcript}
+        # The same constraint text can occur at several places in B (repeated
+        # tool warnings, restated rules). Keep the first occurrence only and
+        # count the rest — span overlap cannot catch cross-position repeats.
+        first_seen: dict[str, SalientInfo] = {}
         for unit in model.units:
             reliable: list[SalientInfo] = []
             for tid in unit.covered_turns:
@@ -230,11 +277,17 @@ TRANSCRIPT_JSON:\n{_turn_payload(batch)}"""
                     continue
                 for start, text in _constraint_sentences(turn.content):
                     if CONSTRAINT_RE.search(text):
-                        reliable.append(SalientInfo(
+                        earlier = first_seen.get(_norm_salient_text(text))
+                        if earlier is not None:
+                            earlier.occurrences += 1
+                            continue
+                        info = SalientInfo(
                             info_id=f"info-{uuid.uuid4().hex}",
                             kind="user_stated_constraint" if turn.role == "user" else "tool_output_constraint",
                             detected_text=text, span_in_B=SpanRef(tid, start, start + len(text)), confidence="reliable",
-                        ))
+                        )
+                        first_seen[_norm_salient_text(text)] = info
+                        reliable.append(info)
             unit.salient_infos = reliable
         already_detected = [info.detected_text for u in model.units for info in u.salient_infos]
         prompt = f"""Find only subtle high-impact constraints or rules missed by obvious imperative keywords: implicit requirements, licensing/compliance limits, value whitelists, dependencies other work relies on. It is acceptable to return none. Every result must be an exact quote. Do not repeat or re-quote anything in ALREADY_DETECTED_JSON.
@@ -257,10 +310,16 @@ TRANSCRIPT_JSON:\n{_turn_payload(transcript)}"""
             # slipped through dedup and inflated the ai_guessed count.
             if any(_spans_overlap(i.span_in_B, span) for i in unit.salient_infos):
                 continue
-            unit.salient_infos.append(SalientInfo(
+            earlier = first_seen.get(_norm_salient_text(item["quote"]))
+            if earlier is not None:
+                earlier.occurrences += 1
+                continue
+            info = SalientInfo(
                 info_id=f"info-{uuid.uuid4().hex}", kind="other", detected_text=item["quote"],
                 span_in_B=span, confidence="ai_guessed",
-            ))
+            )
+            first_seen[_norm_salient_text(item["quote"])] = info
+            unit.salient_infos.append(info)
         validate_model(model, transcript)
         model.revision = self.repo.save(self.adapter.session_id, model.to_dict(), last)
         return model.to_dict()

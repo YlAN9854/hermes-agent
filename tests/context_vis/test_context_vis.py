@@ -195,6 +195,77 @@ def test_salient_dedup_by_span_overlap_and_decimal_safe_sentences(tmp_path):
     repo.close()
 
 
+def _four_turn_batch_response():
+    return {"units": [
+        {"title": "Reproduce leak", "covered_turn_ids": ["t1", "t2"], "summary_sentences": [{
+            "text": "Leak reproduced", "sources": [{"turn_id": "t1", "quote": "Reproduce the leak."}],
+        }]},
+        {"title": "Leak rerun", "covered_turn_ids": ["t3", "t4"], "summary_sentences": [{
+            "text": "Rerun confirms leak", "sources": [{"turn_id": "t3", "quote": "Rerun shows the leak."}],
+        }]},
+    ]}
+
+
+def _four_turns():
+    return [
+        Turn("t1", "user", "Reproduce the leak.", None, 1),
+        Turn("t2", "assistant", "Reproducing now.", None, 2),
+        Turn("t3", "tool", "Rerun shows the leak.", "bash", 3),
+        Turn("t4", "assistant", "Confirmed.", None, 4),
+    ]
+
+
+def test_merge_pass_joins_adjacent_same_topic_units(tmp_path):
+    merge = {"groups": [{"indexes": [0, 1], "title": "Leak reproduction"}]}
+    adapter = FakeAdapter(_four_turns(), [_four_turn_batch_response(), merge])
+    repo = ContextVisRepository(tmp_path)
+
+    result = ContextVisService(adapter, repo).generate_units(False)
+
+    assert len(result["units"]) == 1
+    unit = result["units"][0]
+    assert unit["title"] == "Leak reproduction"
+    assert unit["covered_turns"] == ["t1", "t2", "t3", "t4"]
+    assert [s["text"] for s in unit["summary_sentences"]] == ["Leak reproduced", "Rerun confirms leak"]
+    assert unit["frozen"] is True
+    repo.close()
+
+
+def test_merge_pass_falls_back_to_unmerged_units_on_invalid_grouping(tmp_path):
+    bad_merge = {"groups": [{"indexes": [1, 0], "title": "Backwards"}]}
+    adapter = FakeAdapter(_four_turns(), [_four_turn_batch_response(), bad_merge])
+    repo = ContextVisRepository(tmp_path)
+
+    result = ContextVisService(adapter, repo).generate_units(False)
+
+    assert [u["title"] for u in result["units"]] == ["Reproduce leak", "Leak rerun"]
+    repo.close()
+
+
+def test_salient_cross_position_duplicates_collapse_to_first_with_count(tmp_path):
+    turns = [
+        Turn("t1", "user", "必须先备份数据库。然后再执行迁移。", None, 1),
+        Turn("t2", "tool", "migrate: 检查前置条件\n必须先备份数据库。\n检查通过", "bash", 2),
+    ]
+    generated = {"units": [{"title": "迁移", "covered_turn_ids": ["t1", "t2"], "summary_sentences": [{
+        "text": "迁移前置", "sources": [{"turn_id": "t1", "quote": "必须先备份数据库。然后再执行迁移。"}],
+    }]}]}
+    guessed = {"items": [{"turn_id": "t2", "quote": "必须先备份数据库。", "kind": "other"}]}
+    repo = ContextVisRepository(tmp_path)
+    service = ContextVisService(FakeAdapter(turns, [generated, guessed]), repo)
+    service.generate_units(False)
+
+    result = service.detect_salient()
+
+    infos = result["units"][0]["salient_infos"]
+    assert len(infos) == 1
+    assert infos[0]["detected_text"] == "必须先备份数据库。"
+    assert infos[0]["span_in_B"]["turn_id"] == "t1"
+    assert infos[0]["occurrences"] == 3  # t1 reliable + t2 reliable repeat + ai_guessed re-quote
+    assert infos[0]["confidence"] == "reliable"
+    repo.close()
+
+
 def test_repository_delete_model_allows_regeneration(tmp_path):
     turns = [Turn("t1", "user", "Build the index.", None, 1)]
     response = {"units": [{"title": "Index", "covered_turn_ids": ["t1"], "summary_sentences": [{

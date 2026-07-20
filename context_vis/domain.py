@@ -38,6 +38,7 @@ class SalientInfo:
     status_in_A: SurvivalStatus = "unknown"
     reframed_text_in_A: str | None = None
     confidence: Literal["reliable", "ai_guessed"] = "reliable"
+    occurrences: int = 1  # times the same constraint text appears in B; span_in_B is the first
 
 
 @dataclass
