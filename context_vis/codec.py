@@ -4,7 +4,7 @@ from typing import Any
 
 from .domain import (
     AggregateNode, BacktrackLink, ContextVisModel, SalientInfo,
-    SemanticUnit, SpanRef, SummarySentence,
+    SemanticUnit, SpanRef, SummarySentence, SurvivalState,
 )
 
 
@@ -24,4 +24,5 @@ def model_from_dict(data: dict[str, Any] | None) -> ContextVisModel:
         tier=data.get("tier", 1),
         revision=data.get("revision", 0),
         legacy_transcript_warning=data.get("legacy_transcript_warning"),
+        survival=SurvivalState(**data["survival"]) if data.get("survival") else None,
     )

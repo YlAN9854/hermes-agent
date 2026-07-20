@@ -5,6 +5,7 @@ from typing import Any, Literal, Protocol
 
 Role = Literal["user", "assistant", "tool"]
 SurvivalStatus = Literal["present", "reframed", "absent", "unknown"]
+Fidelity = Literal["observed", "reconstructed"]
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,72 @@ class SpanRef:
     turn_id: str
     char_start: int
     char_end: int
+
+
+@dataclass(frozen=True)
+class ActiveEntry:
+    """One entry of A, the mutable context the model currently sees.
+
+    Deliberately has no ``turn_id``: A is mutable, so nothing may point into
+    it. ``origin_turn_id`` traces back to B when the entry came from there and
+    is None for content compression authored (summaries). Never build a
+    SpanRef out of this type.
+    """
+
+    role: Role
+    content: str
+    origin_turn_id: str | None
+    synthetic: bool
+    tool_name: str | None = None
+
+
+@dataclass(frozen=True)
+class ActiveContext:
+    """A snapshot of the active context.
+
+    ``fidelity="observed"`` means observed as of the agent's last flush to
+    durable storage — a live session mid-turn may lag by a turn. It does not
+    mean "live".
+    """
+
+    entries: list[ActiveEntry]
+    fidelity: Fidelity = "observed"
+
+
+@dataclass(frozen=True)
+class CompressionEvent:
+    """One compression, described only by references into immutable B.
+
+    ``kept_turn_ids`` / ``dropped_turn_ids`` name B turns, so they stay valid
+    forever — the same invariant SpanRef relies on. ``summary_text`` is the
+    one thing not recoverable from B later, so it is carried in full.
+    """
+
+    event_id: str
+    timestamp: float
+    sequence: int
+    fidelity: Fidelity
+    kept_turn_ids: list[str]
+    dropped_turn_ids: list[str]
+    summary_text: str | None
+    summary_truncated: bool = False
+    note: str | None = None
+
+
+@dataclass
+class SurvivalState:
+    """Provenance for a computed survival pass.
+
+    ``active_fingerprint`` lets a reader tell that stored statuses were
+    computed against a different A than the current one, so a stale badge can
+    be labelled stale instead of silently presented as current.
+    """
+
+    computed_at: float
+    fidelity: Fidelity | None
+    event_count: int
+    active_fingerprint: str
+    note: str | None = None
 
 
 @dataclass
@@ -78,6 +145,7 @@ class ContextVisModel:
     tier: Literal[1, 2, 3] = 1
     revision: int = 0
     legacy_transcript_warning: str | None = None
+    survival: SurvivalState | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -85,10 +153,12 @@ class ContextVisModel:
 
 class ContextAdapter(Protocol):
     tier: int
+    session_id: str
+    legacy_warning: str | None
 
     def get_full_transcript(self) -> list[Turn]: ...
-    def get_active_context(self) -> list[Turn] | None: ...
-    def get_compression_events(self) -> list[dict[str, Any]]: ...
+    def get_active_context(self) -> ActiveContext | None: ...
+    def get_compression_events(self) -> list[CompressionEvent]: ...
     def llm_complete(self, prompt: str, **opts: Any) -> str: ...
 
 

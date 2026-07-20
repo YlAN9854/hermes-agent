@@ -5,7 +5,7 @@ from typing import Any
 
 from hermes_state import SessionDB
 
-from .domain import Turn
+from .domain import ActiveContext, CompressionEvent, Turn
 
 _SUMMARY_PREFIXES = (
     "[CONTEXT COMPACTION — REFERENCE ONLY]",
@@ -69,10 +69,10 @@ class HermesContextAdapter:
             self.legacy_warning = "This session was compressed before transcript provenance was available; duplicate removal is best-effort."
         return list(canonical.values())
 
-    def get_active_context(self) -> list[Turn] | None:
+    def get_active_context(self) -> ActiveContext | None:
         return None
 
-    def get_compression_events(self) -> list[dict[str, Any]]:
+    def get_compression_events(self) -> list[CompressionEvent]:
         return []
 
     def llm_complete(self, prompt: str, **opts: Any) -> str:

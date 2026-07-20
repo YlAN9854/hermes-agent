@@ -334,13 +334,86 @@ def test_dashboard_context_vis_endpoint_reads_isolated_profile_home(_isolate_her
     assert payload["model"]["tier"] == 1
 
 
+def _survival_fixture(constraint: str, active_texts: list[tuple[str, bool]], tier: int = 2):
+    """Build (model, transcript, active, info) for one constraint."""
+    from context_vis.domain import ActiveContext, ActiveEntry, SalientInfo, SemanticUnit, SpanRef, SummarySentence
+    content = f"Before. {constraint} After."
+    start = content.index(constraint)
+    turn = Turn("t1", "user", content, None, 1)
+    info = SalientInfo("i1", "user_stated_constraint", constraint, SpanRef("t1", start, start + len(constraint)))
+    unit = SemanticUnit("u1", "rule", [SummarySentence("rule", [SpanRef("t1", 0, 6)])], ["t1"], [info])
+    model = ContextVisModel(units=[unit], tier=tier)
+    active = ActiveContext([
+        ActiveEntry("assistant" if synthetic else "user", text, None if synthetic else "t1", synthetic)
+        for text, synthetic in active_texts
+    ])
+    return model, [turn], active, info
+
+
 def test_tier_one_survival_is_always_unknown():
-    from context_vis.domain import SalientInfo, SemanticUnit, SpanRef, SummarySentence
-    turn = Turn("t1", "user", "Never delete the source.", None, 1)
-    info = SalientInfo("i1", "user_stated_constraint", "Never delete the source.", SpanRef("t1", 0, 24))
-    model = ContextVisModel(units=[SemanticUnit("u1", "rule", [SummarySentence("rule", [SpanRef("t1", 0, 4)])], ["t1"], [info])], tier=1)
-    update_survival(model, [turn], [turn])
+    model, transcript, active, info = _survival_fixture("Never delete the source.", [("Never delete the source.", False)], tier=1)
+    update_survival(model, transcript, active)
     assert info.status_in_A == "unknown"
+
+
+def test_survival_none_active_context_is_unknown():
+    model, transcript, _, info = _survival_fixture("Never delete the source.", [])
+    update_survival(model, transcript, None)
+    assert info.status_in_A == "unknown"
+
+
+def test_survival_detects_reframing_inside_a_long_summary():
+    """The flagship Tier 2 case: a short constraint restated in a long summary.
+
+    Scoring against whole entries (the pre-fix behaviour) gives ~0.02 here, so
+    this was misclassified `absent` and the compare view had nothing to show.
+    """
+    constraint = "the production database must never be deleted"
+    reframed = "the team agreed the production database must never be dropped"
+    summary = (
+        "[CONTEXT COMPACTION - REFERENCE ONLY] Earlier turns were compacted. "
+        + "The user built a FastAPI weather service with Redis caching. " * 20
+        + reframed + ". "
+        + "Work then moved on to Docker packaging and deployment. " * 20
+    )
+    assert len(summary) > 2000 and constraint not in summary
+    model, transcript, active, info = _survival_fixture(constraint, [(summary, True)])
+
+    update_survival(model, transcript, active)
+
+    assert info.status_in_A == "reframed"
+    assert info.reframed_text_in_A
+    assert info.reframed_text_in_A != summary
+    assert len(info.reframed_text_in_A) < 4 * len(constraint)
+    assert "must never be dropped" in info.reframed_text_in_A
+
+
+def test_survival_present_absent_and_short_needle_paths():
+    verbatim = "Cache TTL must not exceed 10 minutes"
+    model, transcript, active, info = _survival_fixture(verbatim, [(f"Reminder: {verbatim} in all environments.", True)])
+    update_survival(model, transcript, active)
+    assert (info.status_in_A, info.reframed_text_in_A) == ("present", None)
+
+    model, transcript, active, info = _survival_fixture(verbatim, [("Totally unrelated content about billing exports.", True)])
+    update_survival(model, transcript, active)
+    assert (info.status_in_A, info.reframed_text_in_A) == ("absent", None)
+
+    # Below MIN_FRAGMENT_NEEDLE_CHARS: containment only, never fuzzy. The
+    # active text is a near-miss that would score well above the threshold if
+    # fragment scoring ran, so this pins the short-circuit rather than luck.
+    model, transcript, active, info = _survival_fixture("Use TLS 1.3", [("use tls 1.2 everywhere", True)])
+    update_survival(model, transcript, active)
+    assert info.status_in_A == "absent"
+
+
+def test_survival_does_not_invent_reframing_from_shared_stopwords():
+    constraint = "the migration must run with the --lock flag enabled"
+    noise = "The user asked about the weather and the time of the meeting. " * 30
+    model, transcript, active, info = _survival_fixture(constraint, [(noise, True)])
+
+    update_survival(model, transcript, active)
+
+    assert info.status_in_A == "absent"
 
 
 def test_salient_detection_keeps_rule_and_ai_guess_separate(tmp_path):
