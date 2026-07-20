@@ -38,6 +38,9 @@ def run_case(home: Path, case_id: str) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     try:
+        # Full regeneration is this harness's purpose; generate_units(False)
+        # refuses to overwrite an existing model.
+        repo.delete_model(session_id)
         adapter = HermesContextAdapter(db, session_id)
         service = ContextVisService(adapter, repo)
         transcript = adapter.get_full_transcript()

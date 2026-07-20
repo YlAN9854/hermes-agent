@@ -82,6 +82,12 @@ class ContextVisRepository:
             self._db.commit()
         return revision
 
+    def delete_model(self, session_id: str) -> None:
+        """Drop the stored model so a session can be regenerated from scratch."""
+        with self._lock:
+            self._db.execute("DELETE FROM context_models WHERE session_id=?", (session_id,))
+            self._db.commit()
+
     def create_job(self, job_id: str, session_id: str, action: str, request: dict[str, Any]) -> None:
         now = time.time()
         with self._lock:
