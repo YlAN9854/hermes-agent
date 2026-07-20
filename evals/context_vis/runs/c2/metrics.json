@@ -1,25 +1,25 @@
 {
  "case_id": "c2",
  "n_gold_segments": 5,
- "n_units": 7,
+ "n_units": 5,
  "coverage_complete": true,
  "boundary_exact": {
-  "precision": 0.167,
-  "recall": 0.25,
-  "f1": 0.2
+  "precision": 0.0,
+  "recall": 0.0,
+  "f1": 0.0
  },
  "boundary_tol1": {
   "precision": 0.5,
-  "recall": 0.75,
-  "f1": 0.6
+  "recall": 0.5,
+  "f1": 0.5
  },
- "unit_purity": 0.92,
+ "unit_purity": 0.84,
  "straddling_units": 3,
- "sentences": 16,
- "spans": 19,
+ "sentences": 22,
+ "spans": 23,
  "bad_spans": 0,
- "spans_per_sentence": 1.19,
- "median_span_chars": 83,
+ "spans_per_sentence": 1.05,
+ "median_span_chars": 130,
  "titles_at_15char_cap": 0,
  "empty_titles": 0,
  "constraints": null

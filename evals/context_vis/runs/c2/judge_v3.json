@@ -1,0 +1,23 @@
+{
+  "scores": {
+    "boundary_quality": 4,
+    "faithfulness": 4,
+    "coverage": 5,
+    "title_quality": 4,
+    "provenance": 4
+  },
+  "span_support_rate": 0.96,
+  "spans_checked": 23,
+  "issues": [
+    "unit-6b00654914ab40c6bbda1548b78d5302, sentence 'A heap snapshot diff shows large deltas of WebSocket, Timeout, closures, and strings, suggesting listener or cache retention.' cites synth-c2-t007 chars 0-247, which ends right before the text 'Two candidate explanations:\\nA) An event-listener leak... B) An unbounded cache...'. The cited span supports the quantitative deltas but not the 'suggesting listener or cache retention' interpretive clause, which lives in the untagged remainder of the same turn (chars ~247-501). Counted as half credit.",
+    "unit-e427da5ae5ac4f55b19da703741d0e4a, sentence 'Because no evidence of listener leak on shared emitters and no Node warnings, the listener theory is deprioritized and cache investigation begins.' cites synth-c2-t018 chars 205-300 ('I think this is a dead end...spend our time on hypothesis B'), which supports only the conclusion, not the 'because no evidence...no Node warnings' causal premise (that text is in chars 0-166 of the same turn, already used as the span for the preceding sentence). The sentence bundles a reason and a conclusion but cites only the conclusion half. Counted as half credit.",
+    "unit-ec6b9f17452c4621aa9ff1f89201bd57 ('Heartbeat Leak Fix') spans t031-t047, 17 turns, and internally contains three distinguishable sub-phases that get separate units elsewhere in this index at similar granularity: root-cause re-investigation (t031-t036), the code fix (t037-t041), and verification/CI-hardening (t042-t047). It is not wrong to keep them together (unit-a0fabe... 'Fix Unbounded Message Cache' similarly folds diagnosis+fix+test), but it is the largest and most heterogeneous unit in the index and a reader skimming titles would not expect the CI leak-guard-test addition to be filed under a title that says only 'Fix'.",
+    "Title 'Heartbeat Leak Fix' undersells the unit's scope (also includes re-opening the listener theory, root-cause diagnosis via heap-diff, per-socket listener instrumentation, a 15-minute soak, and a new CI regression test) — accurate but narrower than the content."
+  ],
+  "notable_strengths": [
+    "Coverage is perfect: covered_turns across all 5 units exactly partition all 50 transcript turns with no gaps, no duplicates, and each unit's turn range is contiguous (verified programmatically).",
+    "Unit boundaries align tightly with explicit pivot statements the user/assistant make in the transcript (t008 'One process rule before we start changing anything... Start with the listener theory', t019 'Fine, park it... Go hunt for caches', t031 'the cache was only part of the story... What's actually left', t048 'that closes it. Write me the short summary') — the segmentation tracks the conversation's own hypothesis-testing structure (theory A -> theory B -> reopened theory A root cause -> wrap-up) rather than an arbitrary turn count.",
+    "21 of 23 checked spans are exact, tightly-scoped substrings that fully and precisely support their summary sentence with no extraneous or missing content (e.g. the multi-span sentence combining t029 chars 89-141 and t030 chars 212-254 to justify both the '~27 MB/min' and 'linear growth remains' clauses is a good example of correct compositional citation).",
+    "The final 'Incident Summary' unit's citation of t049 chars 100-688 is a clean, complete match for a fairly long two-clause claim (two root causes plus the detection-miss explanation), with no drift or fabrication despite the density of the claim."
+  ]
+}

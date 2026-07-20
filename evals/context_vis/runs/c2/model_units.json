@@ -1,41 +1,46 @@
 {
  "units": [
   {
-   "unit_id": "unit-1760f718e9d244e393c0fae4a8446702",
-   "title": "Memory leak reproduction",
+   "unit_id": "unit-6b00654914ab40c6bbda1548b78d5302",
+   "title": "Reproduce and Analyze Leak",
    "summary_sentences": [
     {
-     "text": "The user reports that the ws-gateway service leaks memory at about 40 MB per hour, causing OOM restarts every two days.",
+     "text": "User requires no production restarts and local reproduction of the memory leak.",
      "source_spans": [
       {
        "turn_id": "synth-c2-t000",
-       "char_start": 86,
-       "char_end": 140
+       "char_start": 310,
+       "char_end": 496
       }
      ]
     },
     {
-     "text": "The assistant sets up a local reproduction with a churn load test of 500 concurrent clients.",
+     "text": "Assistant creates a load test with 500 concurrent clients that send messages and reconnect in a churn loop.",
      "source_spans": [
       {
        "turn_id": "synth-c2-t003",
-       "char_start": 148,
-       "char_end": 242
+       "char_start": 161,
+       "char_end": 259
       }
      ]
     },
     {
-     "text": "After five minutes, heapUsed grows by over 200 MB and the heap diff reveals over 14,000 leaked WebSocket objects.",
+     "text": "During the churn test, RSS grows ~65 MB per minute and heapUsed follows, indicating a JavaScript heap leak.",
      "source_spans": [
       {
        "turn_id": "synth-c2-t005",
        "char_start": 0,
-       "char_end": 75
-      },
+       "char_end": 126
+      }
+     ]
+    },
+    {
+     "text": "A heap snapshot diff shows large deltas of WebSocket, Timeout, closures, and strings, suggesting listener or cache retention.",
+     "source_spans": [
       {
        "turn_id": "synth-c2-t007",
        "char_start": 0,
-       "char_end": 83
+       "char_end": 247
       }
      ]
     }
@@ -55,41 +60,56 @@
    "created_at_turn": "synth-c2-t049"
   },
   {
-   "unit_id": "unit-f78264145fd04b87b293fccdf5eb41be",
-   "title": "Investigate listener leak…",
+   "unit_id": "unit-e427da5ae5ac4f55b19da703741d0e4a",
+   "title": "Listener Leak Investigation",
    "summary_sentences": [
     {
-     "text": "The user suspects listener leaks, and the assistant inventories every .on()/.addListener() registration.",
+     "text": "User instructs to start with listener theory and requires a minimum 10-minute soak test before calling any fix effective.",
      "source_spans": [
       {
-       "turn_id": "synth-c2-t009",
-       "char_start": 60,
-       "char_end": 122
+       "turn_id": "synth-c2-t008",
+       "char_start": 51,
+       "char_end": 291
       }
      ]
     },
     {
-     "text": "Instrumentation of shared emitters shows flat listener counts over 10 minutes and no MaxListenersExceededWarning is found.",
+     "text": "Auditing listener registration sites in the codebase highlights per-connection listeners on the socket in connection.js.",
      "source_spans": [
       {
-       "turn_id": "synth-c2-t014",
-       "char_start": 347,
-       "char_end": 428
-      },
-      {
-       "turn_id": "synth-c2-t017",
-       "char_start": 405,
-       "char_end": 426
+       "turn_id": "synth-c2-t011",
+       "char_start": 25,
+       "char_end": 182
       }
      ]
     },
     {
-     "text": "The listener theory is parked as a dead end.",
+     "text": "During churn, listener counts on shared emitters (wss, bus, process) stay constant at 1, showing no accretion.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c2-t015",
+       "char_start": 49,
+       "char_end": 173
+      }
+     ]
+    },
+    {
+     "text": "A search for MaxListenersExceededWarning in local and production logs yields no matches.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c2-t018",
+       "char_start": 0,
+       "char_end": 84
+      }
+     ]
+    },
+    {
+     "text": "Because no evidence of listener leak on shared emitters and no Node warnings, the listener theory is deprioritized and cache investigation begins.",
      "source_spans": [
       {
        "turn_id": "synth-c2-t018",
        "char_start": 205,
-       "char_end": 264
+       "char_end": 300
       }
      ]
     }
@@ -112,17 +132,12 @@
    "created_at_turn": "synth-c2-t049"
   },
   {
-   "unit_id": "unit-248c8f52b96643f68be5752cc7429efd",
-   "title": "Cache unbounded growth fix",
+   "unit_id": "unit-a0fabe1148704e5a94a51d6bf2a09060",
+   "title": "Fix Unbounded Message Cache",
    "summary_sentences": [
     {
-     "text": "The user instructs to hunt for caches, and a grep reveals an unbounded messageCache with no deletion.",
+     "text": "Code search reveals a messageCache Map in cache.js without any eviction logic, causing unbounded growth.",
      "source_spans": [
-      {
-       "turn_id": "synth-c2-t020",
-       "char_start": 132,
-       "char_end": 219
-      },
       {
        "turn_id": "synth-c2-t021",
        "char_start": 138,
@@ -131,22 +146,37 @@
      ]
     },
     {
-     "text": "The assistant implements an LRU cache capped at 50k entries with a 5‑minute TTL, controlled by environment variables.",
+     "text": "The cache is intended for redelivery but lacks a limit, so all relayed messages are retained indefinitely.",
      "source_spans": [
       {
-       "turn_id": "synth-c2-t025",
-       "char_start": 33,
-       "char_end": 177
+       "turn_id": "synth-c2-t023",
+       "char_start": 0,
+       "char_end": 130
       }
      ]
     },
     {
-     "text": "After the fix, the load test shows the cache evicting entries but RSS still grows at ~27 MB/min.",
+     "text": "An LRU cap of 50k entries and a 5-minute TTL are added to messageCache, configurable via environment variables.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c2-t025",
+       "char_start": 30,
+       "char_end": 256
+      }
+     ]
+    },
+    {
+     "text": "After the cache fix, the memory leak slope drops to ~27 MB/min but a linear growth remains, indicating another leak.",
      "source_spans": [
       {
        "turn_id": "synth-c2-t029",
        "char_start": 89,
-       "char_end": 182
+       "char_end": 141
+      },
+      {
+       "turn_id": "synth-c2-t030",
+       "char_start": 212,
+       "char_end": 254
       }
      ]
     }
@@ -170,26 +200,76 @@
    "created_at_turn": "synth-c2-t049"
   },
   {
-   "unit_id": "unit-8f67f07080b0482fb3929e22fc41b6e5",
-   "title": "Heartbeat leak rediscovery",
+   "unit_id": "unit-ec6b9f17452c4621aa9ff1f89201bd57",
+   "title": "Heartbeat Leak Fix",
    "summary_sentences": [
     {
-     "text": "The assistant re‑examines heap retainer paths and discovers two compounding bugs in the heartbeat helper: each closed socket carries an array of ~61 'pong' listeners and the repeating Timeout is never cleared.",
+     "text": "Heap retainer analysis reveals heartbeat.js leaks a repeating setInterval and accumulates 'pong' listeners on per-socket emitters, retaining disconnected sockets.",
      "source_spans": [
       {
        "turn_id": "synth-c2-t034",
        "char_start": 75,
-       "char_end": 229
+       "char_end": 613
       }
      ]
     },
     {
-     "text": "This explains why earlier listener counts were flat — the leak was on per‑socket emitters silenced by setMaxListeners(0).",
+     "text": "The code silenced Node's warning with setMaxListeners(0), which prevented detection of the listener pile-up.",
      "source_spans": [
       {
        "turn_id": "synth-c2-t036",
        "char_start": 75,
        "char_end": 218
+      }
+     ]
+    },
+    {
+     "text": "The fix registers a single persistent 'pong' listener, clears the interval on socket close, and removes setMaxListeners(0).",
+     "source_spans": [
+      {
+       "turn_id": "synth-c2-t038",
+       "char_start": 38,
+       "char_end": 359
+      }
+     ]
+    },
+    {
+     "text": "Per-socket instrumentation shows exactly one 'pong' listener on each live socket during churn.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c2-t043",
+       "char_start": 108,
+       "char_end": 189
+      }
+     ]
+    },
+    {
+     "text": "After all clients disconnect and a forced GC, interval count drops to zero and WebSocket instances drop to 3, compared to ~14,000 before the fix.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c2-t043",
+       "char_start": 354,
+       "char_end": 497
+      }
+     ]
+    },
+    {
+     "text": "A 15-minute soak test with 500 churning clients yields a flat memory profile (0.02 MB/min slope), confirming the leak is resolved.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c2-t045",
+       "char_start": 354,
+       "char_end": 420
+      }
+     ]
+    },
+    {
+     "text": "A CI leak-guard regression test is added to prevent future regressions.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c2-t046",
+       "char_start": 230,
+       "char_end": 437
       }
      ]
     }
@@ -200,76 +280,14 @@
     "synth-c2-t033",
     "synth-c2-t034",
     "synth-c2-t035",
-    "synth-c2-t036"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c2-t049"
-  },
-  {
-   "unit_id": "unit-1f303775c0d846fbbe8ffb92c7161e3a",
-   "title": "Heartbeat fix implementation",
-   "summary_sentences": [
-    {
-     "text": "The assistant patches heartbeat.js to register a single pong listener, clear the interval on close, and remove the setMaxListeners(0) hack.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c2-t038",
-       "char_start": 38,
-       "char_end": 150
-      }
-     ]
-    },
-    {
-     "text": "After the patch, per‑socket listener counts consistently show exactly one pong listener per socket and zero intervals after disconnect.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c2-t043",
-       "char_start": 354,
-       "char_end": 419
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c2-t036",
     "synth-c2-t037",
     "synth-c2-t038",
     "synth-c2-t039",
     "synth-c2-t040",
     "synth-c2-t041",
     "synth-c2-t042",
-    "synth-c2-t043"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c2-t049"
-  },
-  {
-   "unit_id": "unit-62de1f30d73f4ed499e70888372b1c1a",
-   "title": "Final soak and CI guard",
-   "summary_sentences": [
-    {
-     "text": "The user demands a 15‑minute soak test, which shows flat memory with only 0.02 MB/min slope and no errors.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c2-t045",
-       "char_start": 354,
-       "char_end": 420
-      }
-     ]
-    },
-    {
-     "text": "A leak‑guard regression test is added to CI, verifying that heapUsed returns to baseline and no stray WebSocket or timeout objects remain.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c2-t047",
-       "char_start": 261,
-       "char_end": 320
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c2-t043",
     "synth-c2-t044",
     "synth-c2-t045",
     "synth-c2-t046",
@@ -280,16 +298,26 @@
    "created_at_turn": "synth-c2-t049"
   },
   {
-   "unit_id": "unit-a493438ae22f449d951f1e0386e1bd40",
-   "title": "Incident documentation wrap‑up",
+   "unit_id": "unit-2ca94aba8b0643e5b594d99fde34700d",
+   "title": "Incident Summary",
    "summary_sentences": [
     {
-     "text": "The assistant writes an incident summary detailing the two root causes — the unbounded messageCache and the heartbeat’s per‑tick pong listener and uncleared interval — and the fixes.",
+     "text": "User requests a summary of the incident and PR description, including explanation of why the initial listener investigation missed the leak.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c2-t048",
+       "char_start": 46,
+       "char_end": 176
+      }
+     ]
+    },
+    {
+     "text": "Assistant provides a summary detailing the two root causes: the heartbeat timer/listener leak and the unbounded message cache, and notes how setMaxListeners(0) and per-socket emitters hid the listener leak.",
      "source_spans": [
       {
        "turn_id": "synth-c2-t049",
        "char_start": 100,
-       "char_end": 411
+       "char_end": 688
       }
      ]
     }

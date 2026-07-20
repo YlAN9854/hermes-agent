@@ -44,13 +44,28 @@ def test_generation_resolves_exact_spans_and_incrementally_appends(tmp_path):
     repo.close()
 
 
-def test_generation_rejects_ambiguous_source_quote_without_partial_save(tmp_path):
-    turns = [Turn("t1", "user", "same same", None, 1)]
-    response = {"units": [{"title": "Bad", "covered_turn_ids": ["t1"], "summary_sentences": [{"text": "bad", "sources": [{"turn_id": "t1", "quote": "same"}]}]}]}
+def test_generation_rejects_absent_source_quote_without_partial_save(tmp_path):
+    turns = [Turn("t1", "user", "alpha beta", None, 1)]
+    response = {"units": [{"title": "Bad", "covered_turn_ids": ["t1"], "summary_sentences": [{"text": "bad", "sources": [{"turn_id": "t1", "quote": "gamma"}]}]}]}
     repo = ContextVisRepository(tmp_path)
     with pytest.raises(ValueError, match="invalid after retry"):
         ContextVisService(FakeAdapter(turns, [response, response]), repo).generate_units(False)
     assert repo.load("session-1")[0] is None
+    repo.close()
+
+
+def test_generation_ambiguous_quote_falls_back_to_first_occurrence_on_retry(tmp_path):
+    turns = [Turn("t1", "user", "same same", None, 1)]
+    response = {"units": [{"title": "Dup", "covered_turn_ids": ["t1"], "summary_sentences": [{"text": "dup", "sources": [{"turn_id": "t1", "quote": "same"}]}]}]}
+    adapter = FakeAdapter(turns, [response, response])
+    repo = ContextVisRepository(tmp_path)
+
+    result = ContextVisService(adapter, repo).generate_units(False)
+
+    # Strict on the first attempt (char_start demanded), first-occurrence
+    # fallback on the retry instead of failing the batch.
+    assert len(adapter.prompts) == 2
+    assert result["units"][0]["summary_sentences"][0]["source_spans"][0] == {"turn_id": "t1", "char_start": 0, "char_end": 4}
     repo.close()
 
 

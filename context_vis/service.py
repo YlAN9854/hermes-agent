@@ -114,7 +114,7 @@ def _clamp_title(raw: Any, max_width: int = 30) -> str:
     return "".join(kept).rstrip() + "…"
 
 
-def _resolve_quote(turn: Turn, quote: str, start_hint: int | None = None) -> SpanRef:
+def _resolve_quote(turn: Turn, quote: str, start_hint: int | None = None, allow_ambiguous_first: bool = False) -> SpanRef:
     if not quote:
         raise ValueError("empty source quote")
     if start_hint is not None and turn.content[start_hint:start_hint + len(quote)] == quote:
@@ -134,6 +134,11 @@ def _resolve_quote(turn: Turn, quote: str, start_hint: int | None = None) -> Spa
             return SpanRef(turn.turn_id, raw_start, raw_end)
         raise ValueError(f"source quote is absent from turn {turn.turn_id}: {quote!r}")
     if turn.content.find(quote, first + 1) >= 0:
+        # Every occurrence of an identical quote carries the same evidence
+        # text; on the retry attempt, anchoring to the first occurrence beats
+        # failing the whole batch over an unattainable char_start.
+        if allow_ambiguous_first:
+            return SpanRef(turn.turn_id, first, first + len(quote))
         raise ValueError(
             f"source quote is ambiguous in turn {turn.turn_id}; provide a valid char_start: {quote!r}"
         )
@@ -195,7 +200,10 @@ TRANSCRIPT_JSON:\n{_turn_payload(batch)}"""
                             raise ValueError("LLM returned unknown or empty covered turns")
                         sentences = []
                         for sentence in item.get("summary_sentences", []):
-                            spans = [_resolve_quote(turn_map[src["turn_id"]], src["quote"], src.get("char_start")) for src in sentence.get("sources", [])]
+                            spans = [
+                                _resolve_quote(turn_map[src["turn_id"]], src["quote"], src.get("char_start"), allow_ambiguous_first=bool(attempt))
+                                for src in sentence.get("sources", [])
+                            ]
                             sentences.append(SummarySentence(sentence["text"].strip(), spans))
                         batch_units.append(SemanticUnit(
                             unit_id=f"unit-{uuid.uuid4().hex}", title=_clamp_title(item.get("title", "")),

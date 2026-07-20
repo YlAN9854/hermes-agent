@@ -1,6 +1,6 @@
 {
  "status": "pass",
- "seconds": 132.6,
+ "seconds": 74.5,
  "checks": {
   "old_units_byte_identical": true,
   "new_units_appended": true,

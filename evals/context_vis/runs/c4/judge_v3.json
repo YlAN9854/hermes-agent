@@ -1,0 +1,24 @@
+{
+  "scores": {
+    "boundary_quality": 5,
+    "faithfulness": 4,
+    "coverage": 5,
+    "title_quality": 4,
+    "provenance": 4
+  },
+  "span_support_rate": 0.98,
+  "spans_checked": 78,
+  "issues": [
+    "unit-90a.../unit-c43 sentence 'matrix 并发打爆 runner 额度... max-parallel 为 4 并启用 cancel-in-progress' cites two spans only from t016 (assistant's reply, 'max-parallel: 4' and 'cancel-in-progress: true'); the user's actual concern being summarized ('matrix 12 个包会不会把 runner 额度打爆？') lives in t015 and is never cited, so half the sentence's claim has no direct textual support.",
+    "unit-30410c02 sentence about the CONTRIBUTING.md diff ('...including PR checks, shard re-run, deploy approval workflow, and transition status') cites only chars 73-396 of t077, which contains solely the PR-checks paragraph; the shard re-run bullet, the deploy-approval bullet, and the Jenkins-parallel transition-status bullet all appear later in the same diff (chars ~400-1112) but are outside the cited span — 3 of 4 sub-claims are uncited.",
+    "Title/summary language is inconsistent across units: 5 of 6 unit titles and most summary sentences are in Chinese, but unit-30410c02's title ('CI Migration Wrap-up') and several of its and unit-020/unit-df6/unit-00c's sentences switch to English — no functional harm but reads as stitched from mixed passes.",
+    "unit-c43 ('准备与规划') is fairly large (21 turns, 5 sub-topics: Jenkinsfile read, job inventory, plugin audit, workflow proposal, plan write-up/lock-in) compared to the other units (~8-17 turns each); a split into 'discovery' (t000-t010) and 'migration proposal' (t011-t020) would have been a slightly tighter fit to the topic shifts, though the current grouping is still defensible since it is all pre-execution planning."
+  ],
+  "notable_strengths": [
+    "Turn coverage is an exact partition: all 80 transcript turns are covered exactly once across the 6 units, with zero gaps and zero duplicates.",
+    "Unit boundaries line up precisely with the transcript's own milestone structure (M1 build t021-032, M2 test t033-049, M3 deploy t050-060, M4 decommission/wrap-up t072-079), matching an independently derived task map turn-for-turn.",
+    "Numeric claims pulled from long tool logs are verified accurate against the raw text: plugin count (12, counted from the list-plugins output), cron specs (H/2 * * * *, H 2 * * *, H 6 * * 1 matching '每2分钟/每晚2点/每周一6点'), the three-run timing means (e.g. (31:40+30:55+33:02)/3 = 31m52.33s matches the claimed 31m52s, same for 12m06s/48m23s/21m19s), and log-derived facts like the EADDRINUSE:39400 port conflict, 107/107 passing suites, 6m12s runtime, and gateway/web-app Docker build times (74s/96s) all check out exactly against the source spans.",
+    "Cause-and-fix pairs for the two flaky tests (digestScheduler hardcoded +8h offset fixed via fake timers + timezone-aware computation; indexRebuild fixed port 39400 fixed via listen(0) ephemeral port) are each backed by spans that quote the actual root-cause line and the actual diff line, not just paraphrase.",
+    "Multi-turn attribution is generally handled well, e.g. the staging/production environment-protection sentence correctly cites the 'protection_rules: []' fragment for staging and the 'required_reviewers... platform-leads' fragment for production from the same tool turn, matching the JSON's actual key order."
+  ]
+}

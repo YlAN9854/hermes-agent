@@ -1,16 +1,161 @@
 {
  "units": [
   {
-   "unit_id": "unit-fcfffa52a2c74084bc8da1e052c395c6",
-   "title": "Jenkinsfile analysis",
+   "unit_id": "unit-c43f3552cfbf4c9baae94527aa67e48a",
+   "title": "准备与规划",
    "summary_sentences": [
     {
-     "text": "Assistant reads the main Jenkinsfile and identifies the serial build of 12 packages as the primary bottleneck.",
+     "text": "用户要求摸清当前 Jenkins CI 的状况，包括主 Jenkinsfile 的作用和挂载的所有 job。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t000",
+       "char_start": 58,
+       "char_end": 97
+      }
+     ]
+    },
+    {
+     "text": "用户要求迁移期间 Jenkins 必须保持可用，不要提前下线。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t000",
+       "char_start": 104,
+       "char_end": 130
+      }
+     ]
+    },
+    {
+     "text": "助手计划读取 Jenkinsfile 并使用 Jenkins CLI 列出所有 job。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t001",
+       "char_start": 123,
+       "char_end": 174
+      }
+     ]
+    },
+    {
+     "text": "主流水线包括 install、lint 和 12 个包的串行 build 与 typecheck 阶段。",
      "source_spans": [
       {
        "turn_id": "synth-c4-t003",
-       "char_start": 37,
-       "char_end": 62
+       "char_start": 18,
+       "char_end": 64
+      }
+     ]
+    },
+    {
+     "text": "测试阶段使用 4 个并行分片。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t003",
+       "char_start": 77,
+       "char_end": 89
+      }
+     ]
+    },
+    {
+     "text": "在 main 分支上执行 Docker 构建、staging 部署和人工审批的生产部署。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t003",
+       "char_start": 92,
+       "char_end": 142
+      }
+     ]
+    },
+    {
+     "text": "Jenkins 上共有 5 个 job，分别是 monorepo-pr、monorepo-main、nightly-e2e、release-tag、dependency-audit。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t007",
+       "char_start": 0,
+       "char_end": 183
+      }
+     ]
+    },
+    {
+     "text": "已安装的 Jenkins 插件共 12 个。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t010",
+       "char_start": 256,
+       "char_end": 264
+      }
+     ]
+    },
+    {
+     "text": "助手指出这些插件在 GitHub Actions 中均有替代方案，例如 junit 用 junit artifact，slack 用官方 action，credentials-binding 用 environment secrets。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t010",
+       "char_start": 13,
+       "char_end": 128
+      }
+     ]
+    },
+    {
+     "text": "助手提出三个工作流的迁移方案：build.yml（PR+main，matrix 构建12个包）、test.yml（4 分片测试）和 deploy.yml（仅 main，由 test 触发，staging 自动，production 需审批）。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t012",
+       "char_start": 45,
+       "char_end": 324
+      }
+     ]
+    },
+    {
+     "text": "用户要求所有 secrets 必须使用 GitHub Environments，禁止写入 workflow 文件，且生产环境审批人设为 platform-leads。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t013",
+       "char_start": 16,
+       "char_end": 115
+      }
+     ]
+    },
+    {
+     "text": "助手确认使用两个 environment：staging（无审批）和 production（审批人 platform-leads），kubeconfig 以 base64 存储。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t014",
+       "char_start": 42,
+       "char_end": 163
+      }
+     ]
+    },
+    {
+     "text": "用户担心 matrix 并发打爆 runner 额度，助手计划在 build matrix 上设置 max-parallel 为 4 并启用 cancel-in-progress。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t016",
+       "char_start": 34,
+       "char_end": 49
+      },
+      {
+       "turn_id": "synth-c4-t016",
+       "char_start": 112,
+       "char_end": 136
+      }
+     ]
+    },
+    {
+     "text": "方案写入 docs/ci-migration-plan.md，包含四个里程碑 M1-M4，nightly-e2e 推迟到最后迁移。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t018",
+       "char_start": 0,
+       "char_end": 72
+      }
+     ]
+    },
+    {
+     "text": "用户决定从 build 工作流开始，先不迁移 nightly-e2e。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t019",
+       "char_start": 0,
+       "char_end": 60
       }
      ]
     }
@@ -19,77 +164,14 @@
     "synth-c4-t000",
     "synth-c4-t001",
     "synth-c4-t002",
-    "synth-c4-t003"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t035"
-  },
-  {
-   "unit_id": "unit-589e518a450e487a9edfc4b09477b109",
-   "title": "Other Jenkins jobs",
-   "summary_sentences": [
-    {
-     "text": "Assistant discovers five Jenkins jobs: monorepo-pr, monorepo-main, nightly-e2e, release-tag, and dependency-audit.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t007",
-       "char_start": 11,
-       "char_end": 183
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t003",
     "synth-c4-t004",
     "synth-c4-t005",
     "synth-c4-t006",
-    "synth-c4-t007"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t035"
-  },
-  {
-   "unit_id": "unit-f11f75a88d784c1b942467be1c4e624e",
-   "title": "Jenkins plugins",
-   "summary_sentences": [
-    {
-     "text": "Assistant confirms the 12 Jenkins plugins have straightforward replacements in GitHub Actions.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t010",
-       "char_start": 0,
-       "char_end": 12
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t007",
     "synth-c4-t008",
     "synth-c4-t009",
-    "synth-c4-t010"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t035"
-  },
-  {
-   "unit_id": "unit-1c2542f1bf8347fc9c993fdad33855f5",
-   "title": "Migration plan design",
-   "summary_sentences": [
-    {
-     "text": "Assistant proposes a migration plan with three main workflows, environment-only secrets, and matrix concurrency limits.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t012",
-       "char_start": 0,
-       "char_end": 44
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t010",
     "synth-c4-t011",
     "synth-c4-t012",
     "synth-c4-t013",
@@ -97,35 +179,80 @@
     "synth-c4-t015",
     "synth-c4-t016",
     "synth-c4-t017",
-    "synth-c4-t018"
+    "synth-c4-t018",
+    "synth-c4-t019",
+    "synth-c4-t020"
    ],
    "salient_infos": [],
    "frozen": true,
    "created_at_turn": "synth-c4-t035"
   },
   {
-   "unit_id": "unit-fc4301c9f795448f8a63a5608b598b40",
-   "title": "Build workflow creation",
+   "unit_id": "unit-90ad9a5a43e04778a0df9672a26280d5",
+   "title": "迁移 build 工作流",
    "summary_sentences": [
     {
-     "text": "Build workflow initially fails due to missing pnpm, then after fixing succeeds with all 12 packages built in 9m41s.",
+     "text": "用户启动 build 工作流迁移，助手创建 .github/workflows/build.yml，包含对 12 个包的 matrix 构建。",
      "source_spans": [
       {
-       "turn_id": "synth-c4-t025",
-       "char_start": 411,
-       "char_end": 434
-      },
+       "turn_id": "synth-c4-t023",
+       "char_start": 253,
+       "char_end": 394
+      }
+     ]
+    },
+    {
+     "text": "第一次运行失败，所有 12 个 matrix job 均因 pnpm 命令未找到而报错（exit 127）。",
+     "source_spans": [
       {
-       "turn_id": "synth-c4-t028",
-       "char_start": 4015,
-       "char_end": 4056
+       "turn_id": "synth-c4-t026",
+       "char_start": 10,
+       "char_end": 58
+      }
+     ]
+    },
+    {
+     "text": "修复措施包括添加 pnpm/action-setup@v4 并固定 9.6.0 版本，启用 setup-node 的 pnpm 缓存，以及加入 turbo 缓存。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t026",
+       "char_start": 136,
+       "char_end": 223
+      }
+     ]
+    },
+    {
+     "text": "第二次运行成功，12/12 matrix 全部通过，wall clock 9 分 41 秒，较 Jenkins 串行约 23 分钟缩短超过一半。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t029",
+       "char_start": 0,
+       "char_end": 92
+      }
+     ]
+    },
+    {
+     "text": "第二次运行 turbo 缓存命中率 89%（32/36 命中），pnpm store 缓存 412MB 恢复正常。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t032",
+       "char_start": 0,
+       "char_end": 54
+      }
+     ]
+    },
+    {
+     "text": "M1 里程碑达成，build.yml 标记为稳定。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t032",
+       "char_start": 54,
+       "char_end": 79
       }
      ]
     }
    ],
    "covered_turns": [
-    "synth-c4-t019",
-    "synth-c4-t020",
     "synth-c4-t021",
     "synth-c4-t022",
     "synth-c4-t023",
@@ -134,28 +261,7 @@
     "synth-c4-t026",
     "synth-c4-t027",
     "synth-c4-t028",
-    "synth-c4-t029"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t035"
-  },
-  {
-   "unit_id": "unit-937106d09220454391c9fab090b1d8eb",
-   "title": "Build cache check",
-   "summary_sentences": [
-    {
-     "text": "Turbo cache hit rate reaches 89% on second run, confirming build workflow stability.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t032",
-       "char_start": 6,
-       "char_end": 31
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t029",
     "synth-c4-t030",
     "synth-c4-t031",
     "synth-c4-t032"
@@ -165,16 +271,151 @@
    "created_at_turn": "synth-c4-t035"
   },
   {
-   "unit_id": "unit-44e2765d6c624f9e98d4b233e0f90e96",
-   "title": "Test workflow creation",
+   "unit_id": "unit-020332cf34ef456aac92d3cb8d03fb6d",
+   "title": "测试流水线迁移",
    "summary_sentences": [
     {
-     "text": "Test workflow is created with 4 shards, fail-fast off, and junit artifact upload.",
+     "text": "用户要求开始迁移 test 工作流，并全量运行测试。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t033",
+       "char_start": 11,
+       "char_end": 49
+      }
+     ]
+    },
+    {
+     "text": "助手创建 test.yml，设置 fail-fast 为 false 以保持 shard 独立性，并上传 junit XML 报告。",
      "source_spans": [
       {
        "turn_id": "synth-c4-t034",
-       "char_start": 19,
-       "char_end": 163
+       "char_start": 80,
+       "char_end": 162
+      }
+     ]
+    },
+    {
+     "text": "The test run revealed flaky failures in digestScheduler and indexRebuild.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t037",
+       "char_start": 20,
+       "char_end": 200
+      },
+      {
+       "turn_id": "synth-c4-t038",
+       "char_start": 0,
+       "char_end": 30
+      }
+     ]
+    },
+    {
+     "text": "The digestScheduler test failure was caused by a hardcoded +8h timezone offset that fails on UTC runners.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t041",
+       "char_start": 22,
+       "char_end": 69
+      }
+     ]
+    },
+    {
+     "text": "The indexRebuild test failed due to a port conflict when shards share a runner.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t036",
+       "char_start": 48059,
+       "char_end": 48116
+      }
+     ]
+    },
+    {
+     "text": "The fix for digestScheduler uses fake timers and computes the expected slot with the user's timezone.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t042",
+       "char_start": 237,
+       "char_end": 398
+      }
+     ]
+    },
+    {
+     "text": "The fix for indexRebuild uses an ephemeral port to avoid collisions.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t044",
+       "char_start": 214,
+       "char_end": 238
+      }
+     ]
+    },
+    {
+     "text": "The test rerun passed all tests with 0 failures.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t045",
+       "char_start": 47582,
+       "char_end": 47626
+      }
+     ]
+    },
+    {
+     "text": "The execution time was 6 minutes 12 seconds using 4 shards.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t045",
+       "char_start": 47709,
+       "char_end": 47751
+      }
+     ]
+    },
+    {
+     "text": "The assistant noted that three previously flaky tests are now stable.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t046",
+       "char_start": 32,
+       "char_end": 47
+      }
+     ]
+    },
+    {
+     "text": "The user requested test summary reporting like Jenkins' JUnit page.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t047",
+       "char_start": 0,
+       "char_end": 51
+      }
+     ]
+    },
+    {
+     "text": "The workflow was updated to include a step that publishes per-shard JUnit summary.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t048",
+       "char_start": 86,
+       "char_end": 210
+      }
+     ]
+    },
+    {
+     "text": "A separate report job was added to merge all shard JUnit reports and produce a total summary.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t048",
+       "char_start": 233,
+       "char_end": 522
+      }
+     ]
+    },
+    {
+     "text": "Assistant confirmed the change produces per-shard summaries, a merged total table, and 30-day artifact retention.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t049",
+       "char_start": 7,
+       "char_end": 111
       }
      ]
     }
@@ -182,38 +423,7 @@
    "covered_turns": [
     "synth-c4-t033",
     "synth-c4-t034",
-    "synth-c4-t035"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t035"
-  },
-  {
-   "unit_id": "unit-de213eb4151743609b6520dd864ace31",
-   "title": "Fix two flaky CI tests",
-   "summary_sentences": [
-    {
-     "text": "The digestScheduler flaky test was fixed by using fake timers to compute the expected slot in the user's timezone instead of a hardcoded +8h offset.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t042",
-       "char_start": 237,
-       "char_end": 306
-      }
-     ]
-    },
-    {
-     "text": "The indexRebuild port collision was resolved by binding the fixture to an ephemeral port with listen(0) instead of the fixed port 39400.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t044",
-       "char_start": 214,
-       "char_end": 293
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t035",
     "synth-c4-t036",
     "synth-c4-t037",
     "synth-c4-t038",
@@ -222,61 +432,9 @@
     "synth-c4-t041",
     "synth-c4-t042",
     "synth-c4-t043",
-    "synth-c4-t044"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t044"
-  },
-  {
-   "unit_id": "unit-b754596c25ba4fc69f05dde650fd01cf",
-   "title": "Flaky Tests Fix & Rerun",
-   "summary_sentences": [
-    {
-     "text": "The test rerun passed all suites and confirmed that three flaky tests are now stable.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t045",
-       "char_start": 47582,
-       "char_end": 47626
-      },
-      {
-       "turn_id": "synth-c4-t046",
-       "char_start": 32,
-       "char_end": 47
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t044",
     "synth-c4-t045",
-    "synth-c4-t046"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t066"
-  },
-  {
-   "unit_id": "unit-f0825af34a664648bfe78922698b2fc5",
-   "title": "JUnit Summary Addition",
-   "summary_sentences": [
-    {
-     "text": "A JUnit summary report feature was added to the CI workflow.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t047",
-       "char_start": 29,
-       "char_end": 38
-      },
-      {
-       "turn_id": "synth-c4-t049",
-       "char_start": 7,
-       "char_end": 71
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t046",
     "synth-c4-t047",
     "synth-c4-t048",
     "synth-c4-t049"
@@ -286,26 +444,166 @@
    "created_at_turn": "synth-c4-t066"
   },
   {
-   "unit_id": "unit-5d4c32b50695409c87629b06fa0a5fc1",
-   "title": "Deploy & Staging Verification",
+   "unit_id": "unit-df6c88dcf34e408bbe653edaf395e459",
+   "title": "部署工作流迁移与验证",
    "summary_sentences": [
     {
-     "text": "The deploy workflow with automatic staging and required production approval was set up, and a staging deployment succeeded.",
+     "text": "The user mandated manual approval for production deployment, using platform-leads as reviewers.",
      "source_spans": [
       {
        "turn_id": "synth-c4-t050",
        "char_start": 19,
-       "char_end": 35
+       "char_end": 71
+      }
+     ]
+    },
+    {
+     "text": "The assistant designed a workflow with automatic staging and production requiring environment approval, mirroring Jenkins input gate.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t051",
+       "char_start": 0,
+       "char_end": 231
+      }
+     ]
+    },
+    {
+     "text": "The deploy workflow YAML defined a staging job and a production job with an environment that has required reviewers.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t052",
+       "char_start": 631,
+       "char_end": 769
+      }
+     ]
+    },
+    {
+     "text": "The assistant stated that environments and secrets need to be configured.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t053",
+       "char_start": 0,
+       "char_end": 73
+      }
+     ]
+    },
+    {
+     "text": "The production environment was configured with platform-leads as required reviewers, while staging had no protection rules.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t054",
+       "char_start": 318,
+       "char_end": 407
       },
       {
        "turn_id": "synth-c4-t054",
-       "char_start": 741,
-       "char_end": 823
+       "char_start": 106,
+       "char_end": 129
+      }
+     ]
+    },
+    {
+     "text": "Environment-scoped secrets KUBECONFIG_STAGING and KUBECONFIG_PROD were set.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t054",
+       "char_start": 583,
+       "char_end": 667
       },
+      {
+       "turn_id": "synth-c4-t054",
+       "char_start": 739,
+       "char_end": 823
+      }
+     ]
+    },
+    {
+     "text": "After environment setup, assistant confirmed environments ready and planned a staging deploy verification.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t055",
+       "char_start": 20,
+       "char_end": 96
+      }
+     ]
+    },
+    {
+     "text": "The staging deploy rolled out all four services successfully, with smoke tests returning 200.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t056",
+       "char_start": 412,
+       "char_end": 548
+      }
+     ]
+    },
+    {
+     "text": "The staging deployment completed in 4 minutes 18 seconds.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t056",
+       "char_start": 2256,
+       "char_end": 2274
+      }
+     ]
+    },
+    {
+     "text": "Assistant confirmed staging deploy success and that production is awaiting approval.",
+     "source_spans": [
       {
        "turn_id": "synth-c4-t057",
        "char_start": 0,
-       "char_end": 39
+       "char_end": 71
+      }
+     ]
+    },
+    {
+     "text": "User requested a production rehearsal on the staging-canary namespace without touching real production.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t058",
+       "char_start": 0,
+       "char_end": 51
+      }
+     ]
+    },
+    {
+     "text": "The canary deployment passed all smoke checks (26/26) within the staging-canary namespace.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t059",
+       "char_start": 532,
+       "char_end": 575
+      }
+     ]
+    },
+    {
+     "text": "The approval gate required platform-leads review and was approved after 3 minutes 12 seconds.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t059",
+       "char_start": 728,
+       "char_end": 789
+      }
+     ]
+    },
+    {
+     "text": "The rehearsal completed without touching any resources outside the staging-canary namespace.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t059",
+       "char_start": 821,
+       "char_end": 902
+      }
+     ]
+    },
+    {
+     "text": "Assistant concluded the canary rehearsal replicated the Jenkins input approval gate, marking M3 complete.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t060",
+       "char_start": 92,
+       "char_end": 127
       }
      ]
     }
@@ -318,135 +616,162 @@
     "synth-c4-t054",
     "synth-c4-t055",
     "synth-c4-t056",
-    "synth-c4-t057"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t066"
-  },
-  {
-   "unit_id": "unit-98a626b28182475b959255a4fe9127d4",
-   "title": "Canary Rehearsal",
-   "summary_sentences": [
-    {
-     "text": "A canary rehearsal demonstrated the production approval process safely without touching real production.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t058",
-       "char_start": 11,
-       "char_end": 50
-      },
-      {
-       "turn_id": "synth-c4-t059",
-       "char_start": 821,
-       "char_end": 902
-      },
-      {
-       "turn_id": "synth-c4-t060",
-       "char_start": 92,
-       "char_end": 127
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t057",
     "synth-c4-t058",
     "synth-c4-t059",
-    "synth-c4-t060",
-    "synth-c4-t061"
+    "synth-c4-t060"
    ],
    "salient_infos": [],
    "frozen": true,
    "created_at_turn": "synth-c4-t066"
   },
   {
-   "unit_id": "unit-1232eefd1f9f4838936800c94b30c1c8",
-   "title": "CI Timing Comparison",
+   "unit_id": "unit-00c8d19b0cd14c5a90b7f9264f0a069f",
+   "title": "性能比较与优化",
    "summary_sentences": [
     {
-     "text": "New CI pipelines reduced PR build times by 62% and main build times by 56%.",
+     "text": "Assistant summarized deploy migration status: staging automated, production approval replicated, secrets environment-scoped, and canary rehearsal passed.",
      "source_spans": [
       {
-       "turn_id": "synth-c4-t064",
-       "char_start": 5,
-       "char_end": 64
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
-    "synth-c4-t062",
-    "synth-c4-t063",
-    "synth-c4-t064"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t066"
-  },
-  {
-   "unit_id": "unit-816af87e02dc4b3da8b500bf432211f2",
-   "title": "Build Performance…",
-   "summary_sentences": [
-    {
-     "text": "Proposed improvements include turbo remote cache and docker buildx layer cache.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t066",
-       "char_start": 5,
-       "char_end": 44
-      },
-      {
-       "turn_id": "synth-c4-t066",
-       "char_start": 46,
-       "char_end": 102
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
-    "synth-c4-t065",
-    "synth-c4-t066"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t066"
-  },
-  {
-   "unit_id": "unit-6207f0c03ddc41afaa4213db72a136c7",
-   "title": "性能优化收手",
-   "summary_sentences": [
-    {
-     "text": "Added Turbo remote cache and Docker layer cache to the build workflow.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t067",
-       "char_start": 86,
-       "char_end": 104
+       "turn_id": "synth-c4-t061",
+       "char_start": 0,
+       "char_end": 81
       }
      ]
     },
     {
-     "text": "After applying the cache, the main pipeline dropped from 21m19s to 16m02s, the user decided to stop optimizing, and final stabilized figures were PR 12 minutes and main 16 minutes.",
+     "text": "User requested a timing comparison of old and new CI, averaged over three runs.",
      "source_spans": [
       {
-       "turn_id": "synth-c4-t069",
-       "char_start": 39,
-       "char_end": 54
+       "turn_id": "synth-c4-t062",
+       "char_start": 0,
+       "char_end": 34
+      }
+     ]
+    },
+    {
+     "text": "The PR pipeline mean time reduced from 31m52s (Jenkins) to 12m06s (GHA).",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t063",
+       "char_start": 131,
+       "char_end": 199
       },
+      {
+       "turn_id": "synth-c4-t063",
+       "char_start": 200,
+       "char_end": 268
+      }
+     ]
+    },
+    {
+     "text": "The main branch full pipeline mean fell from 48m23s (Jenkins) to 21m19s (GHA).",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t063",
+       "char_start": 269,
+       "char_end": 337
+      },
+      {
+       "turn_id": "synth-c4-t063",
+       "char_start": 338,
+       "char_end": 406
+      }
+     ]
+    },
+    {
+     "text": "Assistant noted Jenkins times excluded a median 4-minute executor wait, so actual savings are larger.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t064",
+       "char_start": 65,
+       "char_end": 115
+      }
+     ]
+    },
+    {
+     "text": "The user asked if the build time can be further reduced.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t065",
+       "char_start": 0,
+       "char_end": 12
+      }
+     ]
+    },
+    {
+     "text": "Assistant suggested turbo remote cache and Docker layer cache to further speed up builds.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t066",
+       "char_start": 5,
+       "char_end": 102
+      }
+     ]
+    },
+    {
+     "text": "The build workflow was updated to use Turbo remote cache and Docker layer cache.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t067",
+       "char_start": 71,
+       "char_end": 104
+      },
+      {
+       "turn_id": "synth-c4-t067",
+       "char_start": 358,
+       "char_end": 441
+      }
+     ]
+    },
+    {
+     "text": "The main pipeline wall clock was 16m02s, down from 21m19s, with gateway Docker build at 74s (was 210s) and web-app at 96s (was 254s).",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t068",
+       "char_start": 1060,
+       "char_end": 1121
+      },
+      {
+       "turn_id": "synth-c4-t068",
+       "char_start": 1153,
+       "char_end": 1214
+      },
+      {
+       "turn_id": "synth-c4-t068",
+       "char_start": 1218,
+       "char_end": 1265
+      }
+     ]
+    },
+    {
+     "text": "The user decided against further optimization, considering 16 minutes sufficient.",
+     "source_spans": [
       {
        "turn_id": "synth-c4-t070",
-       "char_start": 4,
-       "char_end": 9
-      },
+       "char_start": 0,
+       "char_end": 20
+      }
+     ]
+    },
+    {
+     "text": "The assistant confirmed the final performance numbers: PR 12 minutes, main 16 minutes, stable over three runs.",
+     "source_spans": [
       {
        "turn_id": "synth-c4-t071",
-       "char_start": 17,
-       "char_end": 36
+       "char_start": 12,
+       "char_end": 46
       }
      ]
     }
    ],
    "covered_turns": [
+    "synth-c4-t061",
+    "synth-c4-t062",
+    "synth-c4-t063",
+    "synth-c4-t064",
+    "synth-c4-t065",
+    "synth-c4-t066",
     "synth-c4-t067",
     "synth-c4-t068",
     "synth-c4-t069",
@@ -458,36 +783,86 @@
    "created_at_turn": "synth-c4-t079"
   },
   {
-   "unit_id": "unit-949f056e520f4bb3a6655357396d39dc",
-   "title": "Jenkins PR禁用与并行观察",
+   "unit_id": "unit-30410c0225de4506b41297bd8dcfb054",
+   "title": "CI Migration Wrap-up",
    "summary_sentences": [
     {
-     "text": "User requested to handle Jenkins, reminding to keep parallel observation and not decommission prematurely.",
+     "text": "The user requested to wrap up and asked about Jenkins, reminding to observe in parallel first.",
      "source_spans": [
       {
        "turn_id": "synth-c4-t072",
-       "char_start": 26,
-       "char_end": 37
+       "char_start": 0,
+       "char_end": 38
       }
      ]
     },
     {
-     "text": "The plan was to disable monorepo-pr SCM polling; monorepo-pr was then disabled via CLI, and Jenkins entered pure observation mode.",
+     "text": "The assistant outlined the M4 plan: disable monorepo-pr SCM polling, keep monorepo-main parallel for two weeks, and leave nightly-e2e, release-tag, and dependency-audit untouched.",
      "source_spans": [
       {
        "turn_id": "synth-c4-t073",
-       "char_start": 9,
-       "char_end": 34
-      },
+       "char_start": 0,
+       "char_end": 144
+      }
+     ]
+    },
+    {
+     "text": "The monorepo-pr Jenkins job was disabled.",
+     "source_spans": [
       {
        "turn_id": "synth-c4-t074",
        "char_start": 85,
        "char_end": 111
-      },
+      }
+     ]
+    },
+    {
+     "text": "The assistant confirmed monorepo-pr disabled and monorepo-main continues in parallel.",
+     "source_spans": [
       {
        "turn_id": "synth-c4-t075",
-       "char_start": 35,
-       "char_end": 52
+       "char_start": 0,
+       "char_end": 35
+      }
+     ]
+    },
+    {
+     "text": "The user asked to update CONTRIBUTING.md to document the new CI usage.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t076",
+       "char_start": 0,
+       "char_end": 41
+      }
+     ]
+    },
+    {
+     "text": "The CONTRIBUTING.md diff replaced Jenkins CI information with GitHub Actions details, including PR checks, shard re-run, deploy approval workflow, and transition status.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t077",
+       "char_start": 73,
+       "char_end": 396
+      }
+     ]
+    },
+    {
+     "text": "The assistant confirmed the CONTRIBUTING update is complete, including new CI entry, single shard rerun, approval flow, and transition status.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t078",
+       "char_start": 0,
+       "char_end": 67
+      }
+     ]
+    },
+    {
+     "text": "The assistant summarized the migration: M1-M3 delivered, performance PR -62% main -56%, secrets environment-scoped; remaining tasks: decommission monorepo-main after two weeks and migrate nightly-e2e and dependency-audit next phase.",
+     "source_spans": [
+      {
+       "turn_id": "synth-c4-t079",
+       "char_start": 0,
+       "char_end": 216
       }
      ]
     }
@@ -496,72 +871,10 @@
     "synth-c4-t072",
     "synth-c4-t073",
     "synth-c4-t074",
-    "synth-c4-t075"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t079"
-  },
-  {
-   "unit_id": "unit-e62176532bdd4f4d8d267b1b9e4b3172",
-   "title": "更新CONTRIBUTING文档",
-   "summary_sentences": [
-    {
-     "text": "User requested to update CONTRIBUTING with new CI usage and report locations.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t076",
-       "char_start": 25,
-       "char_end": 40
-      }
-     ]
-    },
-    {
-     "text": "The documentation was updated to describe GitHub Actions, including rerunning a single shard and the pending Jenkins monorepo-main parallel run.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t077",
-       "char_start": 402,
-       "char_end": 450
-      },
-      {
-       "turn_id": "synth-c4-t077",
-       "char_start": 656,
-       "char_end": 734
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t075",
     "synth-c4-t076",
     "synth-c4-t077",
-    "synth-c4-t078"
-   ],
-   "salient_infos": [],
-   "frozen": true,
-   "created_at_turn": "synth-c4-t079"
-  },
-  {
-   "unit_id": "unit-f5b3ebd9cd9340eda1e808e8cf41a67e",
-   "title": "最终迁移总结",
-   "summary_sentences": [
-    {
-     "text": "Final migration summary stated M1-M3 completion, and remaining items: Jenkins monorepo-main decommission after two weeks and next-phase migration for nightly-e2e and dependency-audit.",
-     "source_spans": [
-      {
-       "turn_id": "synth-c4-t079",
-       "char_start": 5,
-       "char_end": 15
-      },
-      {
-       "turn_id": "synth-c4-t079",
-       "char_start": 150,
-       "char_end": 215
-      }
-     ]
-    }
-   ],
-   "covered_turns": [
+    "synth-c4-t078",
     "synth-c4-t079"
    ],
    "salient_infos": [],

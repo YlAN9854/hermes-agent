@@ -1,87 +1,35 @@
 [
  {
-  "case_id": "c2",
-  "n_gold_segments": 5,
-  "n_units": 7,
-  "coverage_complete": true,
-  "boundary_exact": {
-   "precision": 0.167,
-   "recall": 0.25,
-   "f1": 0.2
-  },
-  "boundary_tol1": {
-   "precision": 0.5,
-   "recall": 0.75,
-   "f1": 0.6
-  },
-  "unit_purity": 0.92,
-  "straddling_units": 3,
-  "sentences": 16,
-  "spans": 19,
-  "bad_spans": 0,
-  "spans_per_sentence": 1.19,
-  "median_span_chars": 83,
-  "titles_at_15char_cap": 0,
-  "empty_titles": 0,
-  "constraints": null
- },
- {
   "case_id": "c3",
   "n_gold_segments": 4,
-  "n_units": 7,
+  "n_units": 4,
   "coverage_complete": true,
   "boundary_exact": {
    "precision": 0.333,
-   "recall": 0.667,
-   "f1": 0.444
+   "recall": 0.333,
+   "f1": 0.333
   },
   "boundary_tol1": {
-   "precision": 0.5,
-   "recall": 1.0,
+   "precision": 0.667,
+   "recall": 0.667,
    "f1": 0.667
   },
-  "unit_purity": 0.972,
-  "straddling_units": 1,
-  "sentences": 20,
-  "spans": 23,
+  "unit_purity": 0.917,
+  "straddling_units": 2,
+  "sentences": 43,
+  "spans": 48,
   "bad_spans": 0,
-  "spans_per_sentence": 1.15,
-  "median_span_chars": 36,
+  "spans_per_sentence": 1.12,
+  "median_span_chars": 45,
   "titles_at_15char_cap": 0,
   "empty_titles": 0,
   "constraints": {
    "gold_constraints": 12,
    "recall_reliable": 0.75,
-   "recall_any": 0.917,
-   "detected_total": 16,
-   "detected_reliable": 13,
+   "recall_any": 1.0,
+   "detected_total": 14,
+   "detected_reliable": 11,
    "detected_ai_guessed": 3
   }
- },
- {
-  "case_id": "c4",
-  "n_gold_segments": 7,
-  "n_units": 18,
-  "coverage_complete": true,
-  "boundary_exact": {
-   "precision": 0.294,
-   "recall": 0.833,
-   "f1": 0.435
-  },
-  "boundary_tol1": {
-   "precision": 0.294,
-   "recall": 0.833,
-   "f1": 0.435
-  },
-  "unit_purity": 0.975,
-  "straddling_units": 1,
-  "sentences": 22,
-  "spans": 36,
-  "bad_spans": 0,
-  "spans_per_sentence": 1.64,
-  "median_span_chars": 39,
-  "titles_at_15char_cap": 1,
-  "empty_titles": 0,
-  "constraints": null
  }
 ]
