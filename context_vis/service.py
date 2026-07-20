@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 import uuid
 from typing import Any
 
@@ -12,7 +13,25 @@ from .domain import (
 )
 from .repository import ContextVisRepository
 
-CONSTRAINT_RE = re.compile(r"(?:必须|不要|始终|禁止|务必|不得|请勿|must\b|never\b|always\b|do not\b|don't\b)", re.I)
+CONSTRAINT_RE = re.compile(r"(?:必须|不要|不能|始终|禁止|务必|不得|绝不|切勿|请勿|must\b|never\b|always\b|do not\b|don't\b)", re.I)
+
+# ASCII sentence enders count only before whitespace/EOL so decimals and
+# version numbers ("Python 3.10", "p99 2.5ms") stay inside one sentence;
+# CJK enders always break.
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[。！？])|(?<=[.!?])(?=\s|$)")
+
+
+def _constraint_sentences(content: str):
+    """Yield (char_offset, text) sentence fragments of a turn's content."""
+    line_start = 0
+    for line in content.split("\n"):
+        offset = 0
+        for fragment in _SENTENCE_BREAK_RE.split(line):
+            stripped = fragment.strip()
+            if stripped:
+                yield line_start + offset + (len(fragment) - len(fragment.lstrip())), stripped
+            offset += len(fragment)
+        line_start += len(line) + 1
 
 
 def _turn_payload(turns: list[Turn]) -> str:
@@ -59,6 +78,36 @@ def _without_markdown_decorators(text: str) -> tuple[str, list[int]]:
             normalized.append(char)
         raw_offsets.append(index)
     return "".join(normalized), raw_offsets
+
+
+def _spans_overlap(a: SpanRef, b: SpanRef) -> bool:
+    return a.turn_id == b.turn_id and a.char_start < b.char_end and b.char_start < a.char_end
+
+
+def _char_width(char: str) -> int:
+    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+
+
+def _clamp_title(raw: Any, max_width: int = 30) -> str:
+    """Clamp a title by display width (CJK=2, Latin=1) without mid-word cuts.
+
+    The spec's "≤15 字" cap is CJK-oriented; 15 Latin characters hold only two
+    or three words, and a blind ``[:15]`` slice cut English titles mid-word.
+    """
+    title = " ".join(str(raw).split())
+    if sum(_char_width(char) for char in title) <= max_width:
+        return title
+    kept: list[str] = []
+    width = 0
+    for char in title:
+        if width + _char_width(char) > max_width - 1:
+            if char.isalnum() and kept and kept[-1].isalnum() and " " in kept:
+                while kept and kept[-1] != " ":
+                    kept.pop()
+            break
+        kept.append(char)
+        width += _char_width(char)
+    return "".join(kept).rstrip() + "…"
 
 
 def _resolve_quote(turn: Turn, quote: str, start_hint: int | None = None) -> SpanRef:
@@ -113,7 +162,7 @@ class ContextVisService:
             return model.to_dict()
         new_units: list[SemanticUnit] = []
         for batch in _turn_batches(turns):
-            base_prompt = f"""Split the transcript into topic/task-coherent semantic units. Do not infer intent, abandonment, or backtracking. Preserve turn order and cover every supplied turn exactly once. Titles must be at most 15 characters. Each short summary sentence needs one or more exact verbatim source quotes.
+            base_prompt = f"""Split the transcript into topic/task-coherent semantic units. Do not infer intent, abandonment, or backtracking. Preserve turn order and cover every supplied turn exactly once. A unit spans one complete task or topic arc — including its attempts, results, and follow-up fixes. Open a new unit when the work moves to a different sub-goal, component, bug, or deliverable, even within the same overall project; do not open one merely because the same piece of work advances a step. A typical unit covers roughly 3-12 consecutive turns; one unit per turn and one unit spanning a whole long transcript are both wrong. Titles must be short: at most 15 CJK characters, or about four words for Latin text. Each short summary sentence needs one or more exact verbatim source quotes.
 For every source, copy quote directly from the specified turn. The quote should be long enough to occur exactly once in that turn. Also return char_start, the zero-based Python character offset where quote begins; it is required when the same quote occurs more than once.
 Return JSON: {{"units":[{{"title":"...","covered_turn_ids":["..."],"summary_sentences":[{{"text":"...","sources":[{{"turn_id":"...","quote":"exact substring","char_start":0}}]}}]}}]}}.
 TRANSCRIPT_JSON:\n{_turn_payload(batch)}"""
@@ -145,7 +194,7 @@ TRANSCRIPT_JSON:\n{_turn_payload(batch)}"""
                             spans = [_resolve_quote(turn_map[src["turn_id"]], src["quote"], src.get("char_start")) for src in sentence.get("sources", [])]
                             sentences.append(SummarySentence(sentence["text"].strip(), spans))
                         batch_units.append(SemanticUnit(
-                            unit_id=f"unit-{uuid.uuid4().hex}", title=str(item.get("title", ""))[:15],
+                            unit_id=f"unit-{uuid.uuid4().hex}", title=_clamp_title(item.get("title", "")),
                             summary_sentences=sentences, covered_turns=covered, frozen=True,
                             created_at_turn=batch[-1].turn_id,
                         ))
@@ -179,18 +228,18 @@ TRANSCRIPT_JSON:\n{_turn_payload(batch)}"""
                 turn = turns[tid]
                 if turn.role not in {"user", "tool"}:
                     continue
-                for line_match in re.finditer(r"[^。.!?\n]+[。.!?]?", turn.content):
-                    text = line_match.group(0).strip()
-                    if text and CONSTRAINT_RE.search(text):
-                        start = turn.content.find(text, line_match.start())
+                for start, text in _constraint_sentences(turn.content):
+                    if CONSTRAINT_RE.search(text):
                         reliable.append(SalientInfo(
                             info_id=f"info-{uuid.uuid4().hex}",
                             kind="user_stated_constraint" if turn.role == "user" else "tool_output_constraint",
                             detected_text=text, span_in_B=SpanRef(tid, start, start + len(text)), confidence="reliable",
                         ))
             unit.salient_infos = reliable
-        prompt = f"""Find only subtle high-impact constraints or rules missed by obvious imperative keywords. It is acceptable to return none. Every result must be an exact quote.
+        already_detected = [info.detected_text for u in model.units for info in u.salient_infos]
+        prompt = f"""Find only subtle high-impact constraints or rules missed by obvious imperative keywords: implicit requirements, licensing/compliance limits, value whitelists, dependencies other work relies on. It is acceptable to return none. Every result must be an exact quote. Do not repeat or re-quote anything in ALREADY_DETECTED_JSON.
 Return JSON: {{"items":[{{"turn_id":"...","quote":"exact substring","kind":"other"}}]}}.
+ALREADY_DETECTED_JSON:\n{json.dumps(already_detected, ensure_ascii=False)}
 TRANSCRIPT_JSON:\n{_turn_payload(transcript)}"""
         guessed = json.loads(self.adapter.llm_complete(prompt, max_tokens=3000)).get("items", [])
         unit_by_turn = {tid: unit for unit in model.units for tid in unit.covered_turns}
@@ -203,7 +252,10 @@ TRANSCRIPT_JSON:\n{_turn_payload(transcript)}"""
                 span = _resolve_quote(turn, item.get("quote", ""))
             except ValueError:
                 continue
-            if any(i.detected_text == item["quote"] and i.span_in_B == span for i in unit.salient_infos):
+            # Overlap, not equality: the exploratory pass often re-quotes a
+            # reliable hit with slightly different bounds, which previously
+            # slipped through dedup and inflated the ai_guessed count.
+            if any(_spans_overlap(i.span_in_B, span) for i in unit.salient_infos):
                 continue
             unit.salient_infos.append(SalientInfo(
                 info_id=f"info-{uuid.uuid4().hex}", kind="other", detected_text=item["quote"],

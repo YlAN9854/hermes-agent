@@ -136,6 +136,80 @@ def test_generation_resolves_rendered_markdown_quote_to_raw_source_span(tmp_path
     repo.close()
 
 
+def test_generation_resolves_quote_across_hard_line_wraps(tmp_path):
+    content = "The listener stalls because there is no such\nproblem in the parked consumer group, and restarts drain it."
+    turns = [Turn("t1", "assistant", content, None, 1)]
+    response = {"units": [{"title": "Wrap", "covered_turn_ids": ["t1"], "summary_sentences": [{
+        "text": "Wrapped quote",
+        "sources": [{"turn_id": "t1", "quote": "there is no such problem in the parked consumer group"}],
+    }]}]}
+    repo = ContextVisRepository(tmp_path)
+
+    result = ContextVisService(FakeAdapter(turns, [response]), repo).generate_units(False)
+
+    span = result["units"][0]["summary_sentences"][0]["source_spans"][0]
+    assert content[span["char_start"]:span["char_end"]] == "there is no such\nproblem in the parked consumer group"
+    repo.close()
+
+
+@pytest.mark.parametrize("raw_title, clamped", [
+    ("缓存优化与失效策略的完整重构方", "缓存优化与失效策略的完整重构方"),
+    ("缓存优化与失效策略的完整重构方案", "缓存优化与失效策略的完整重构…"),
+    ("IndexRebuild Finalization And Migration Summary", "IndexRebuild Finalization And…"),
+    ("Migration summary for the rebuilt index pipeline", "Migration summary for the…"),
+])
+def test_titles_clamp_by_display_width_without_mid_word_cuts(tmp_path, raw_title, clamped):
+    turns = [Turn("t1", "user", "Rebuild the search index.", None, 1)]
+    response = {"units": [{"title": raw_title, "covered_turn_ids": ["t1"], "summary_sentences": [{
+        "text": "t", "sources": [{"turn_id": "t1", "quote": "Rebuild the search index."}],
+    }]}]}
+    repo = ContextVisRepository(tmp_path)
+
+    result = ContextVisService(FakeAdapter(turns, [response]), repo).generate_units(False)
+
+    assert result["units"][0]["title"] == clamped
+    repo.close()
+
+
+def test_salient_dedup_by_span_overlap_and_decimal_safe_sentences(tmp_path):
+    content = "部署脚本必须使用 Python 3.10 运行。其他版本未验证。\n另外绝不改动 schema 定义。"
+    turns = [Turn("t1", "user", content, None, 1)]
+    generated = {"units": [{"title": "版本", "covered_turn_ids": ["t1"], "summary_sentences": [{
+        "text": "版本要求", "sources": [{"turn_id": "t1", "quote": "必须使用 Python 3.10"}],
+    }]}]}
+    guessed = {"items": [{"turn_id": "t1", "quote": "部署脚本必须使用 Python 3.10 运行", "kind": "other"}]}
+    repo = ContextVisRepository(tmp_path)
+    service = ContextVisService(FakeAdapter(turns, [generated, guessed]), repo)
+    service.generate_units(False)
+
+    result = service.detect_salient()
+
+    infos = result["units"][0]["salient_infos"]
+    # The decimal point in "3.10" must not end the sentence, "绝不" must be a
+    # reliable keyword, and the overlapping ai_guessed re-quote must be dropped.
+    assert [i["detected_text"] for i in infos] == [
+        "部署脚本必须使用 Python 3.10 运行。",
+        "另外绝不改动 schema 定义。",
+    ]
+    assert [i["confidence"] for i in infos] == ["reliable", "reliable"]
+    repo.close()
+
+
+def test_repository_delete_model_allows_regeneration(tmp_path):
+    turns = [Turn("t1", "user", "Build the index.", None, 1)]
+    response = {"units": [{"title": "Index", "covered_turn_ids": ["t1"], "summary_sentences": [{
+        "text": "Index requested", "sources": [{"turn_id": "t1", "quote": "Build the index."}],
+    }]}]}
+    repo = ContextVisRepository(tmp_path)
+    ContextVisService(FakeAdapter(turns, [response]), repo).generate_units(False)
+
+    repo.delete_model("session-1")
+
+    regenerated = ContextVisService(FakeAdapter(turns, [response]), repo).generate_units(False)
+    assert len(regenerated["units"]) == 1
+    repo.close()
+
+
 def test_adapter_deduplicates_provenance_copies_and_hides_summary(tmp_path):
     db = SessionDB(tmp_path / "state.db")
     db.create_session("s", "cli")
