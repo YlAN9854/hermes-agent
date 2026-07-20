@@ -504,6 +504,25 @@ def test_survival_detects_reframing_inside_a_long_summary():
     assert "must never be dropped" in info.reframed_text_in_A
 
 
+def test_survival_detects_a_chinese_reframing_that_reorders_characters():
+    """Chinese paraphrase leaves only short contiguous runs, so character
+    similarity alone scores it below unrelated English text. Token containment
+    is what carries this case."""
+    constraint = "绝对不能在日志里打印客户手机号"
+    summary = (
+        "用户要求为客服系统编写工单导出脚本。已完成的工作：确认了表结构，实现了分批导出。" * 3
+        + "过程中用户强调过：任何日志输出都必须对客户的手机号码做脱敏，不得让其出现在日志中。"
+    )
+    assert constraint not in summary
+    model, transcript, active, info = _survival_fixture(constraint, [(summary, True)])
+
+    update_survival(model, transcript, active)
+
+    assert info.status_in_A == "reframed"
+    assert "脱敏" in info.reframed_text_in_A
+    assert len(info.reframed_text_in_A) < len(summary) / 2
+
+
 def test_survival_present_absent_and_short_needle_paths():
     verbatim = "Cache TTL must not exceed 10 minutes"
     model, transcript, active, info = _survival_fixture(verbatim, [(f"Reminder: {verbatim} in all environments.", True)])

@@ -40,6 +40,71 @@ def _boundary_prf(gold: set[int], pred: set[int], tolerance: int = 0) -> dict:
     return {"precision": round(precision, 3), "recall": round(recall, 3), "f1": round(f1, 3)}
 
 
+def _survival_metrics(case: Case, case_id: str, run_dir: Path, turns_by_id: dict) -> dict | None:
+    """Score predicted survival statuses against the case's gold labels.
+
+    Also reports reframed_fragment_ratio: the stored reframing's length over
+    the active entry it came from. A value near 1.0 means whole entries are
+    being stored again instead of the matching fragment.
+    """
+    path = run_dir / "model_survival.json"
+    if not case.survival or not path.exists():
+        return None
+    model = json.loads(path.read_text(encoding="utf-8"))
+    active = json.loads((run_dir / "active_context.json").read_text(encoding="utf-8"))
+    entry_lengths = [len(e["content"]) for e in active.get("entries", [])]
+    detected = [info for u in model["units"] for info in u["salient_infos"]]
+
+    per_status: dict[str, dict[str, int]] = {s: {"tp": 0, "fp": 0, "fn": 0} for s in ("present", "reframed", "absent")}
+    matched = []
+    for gold in case.survival:
+        gc = case.constraints[gold.constraint]
+        tid = f"synth-{case_id}-t{gc.turn:03d}"
+        g_start = case.turns[gc.turn].content.find(gc.text)
+        g_end = g_start + len(gc.text)
+        hits = [
+            info for info in detected
+            if info["span_in_B"]["turn_id"] == tid
+            and info["span_in_B"]["char_start"] < g_end and info["span_in_B"]["char_end"] > g_start
+        ]
+        if not hits:
+            # Never detected as salient, so its survival cannot be judged.
+            # Counted apart from misclassification: detection recall is a
+            # different measurement and must not pollute this one.
+            matched.append({"constraint": gc.text[:40], "gold": gold.status, "predicted": None})
+            continue
+        predicted = hits[0]["status_in_A"]
+        matched.append({"constraint": gc.text[:40], "gold": gold.status, "predicted": predicted})
+        if predicted == gold.status:
+            per_status[gold.status]["tp"] += 1
+        else:
+            per_status[gold.status]["fn"] += 1
+            if predicted in per_status:
+                per_status[predicted]["fp"] += 1
+
+    fragments = [len(i["reframed_text_in_A"]) for i in detected if i.get("reframed_text_in_A")]
+    longest_entry = max(entry_lengths, default=0)
+    judged = [m for m in matched if m["predicted"] is not None]
+    return {
+        "gold_labelled": len(case.survival),
+        "judged": len(judged),
+        "not_detected": len(matched) - len(judged),
+        "correct": sum(1 for m in judged if m["gold"] == m["predicted"]),
+        "per_status": {
+            status: {
+                **counts,
+                "precision": round(counts["tp"] / (counts["tp"] + counts["fp"]), 3) if counts["tp"] + counts["fp"] else None,
+                "recall": round(counts["tp"] / (counts["tp"] + counts["fn"]), 3) if counts["tp"] + counts["fn"] else None,
+            }
+            for status, counts in per_status.items()
+        },
+        "detail": matched,
+        "reframed_fragment_ratio": round(max(fragments) / longest_entry, 3) if fragments and longest_entry else None,
+        "compression_events": len(active.get("events", [])),
+        "active_fidelity": active.get("fidelity"),
+    }
+
+
 def evaluate_case(case_id: str) -> dict:
     case: Case = load_case(case_id)
     run_dir = RUNS_DIR / case_id
@@ -120,9 +185,12 @@ def evaluate_case(case_id: str) -> dict:
             "detected_ai_guessed": sum(1 for i in salient if i["confidence"] == "ai_guessed"),
         }
 
+    survival_eval = _survival_metrics(case, case_id, run_dir, turns_by_id)
+
     return {
         "case_id": case_id,
         "n_gold_segments": len(case.segments),
+        "survival": survival_eval,
         "n_units": len(units),
         "coverage_complete": coverage_complete,
         "boundary_exact": _boundary_prf(gold_starts, pred_starts),

@@ -18,7 +18,10 @@ from hermes_state import SessionDB
 
 from .case_schema import Case, case_stats, validate_case
 
-CASE_IDS = ["c1", "c2", "c3", "c4", "c5"]
+CASE_IDS = ["c1", "c2", "c3", "c4", "c5", "c6"]
+
+# Matches what the compressor emits, so the seeded rows have production shape.
+SUMMARY_PREFIX = "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below.\n\n"
 
 
 def load_case(case_id: str) -> Case:
@@ -43,6 +46,17 @@ def seed_case(db: SessionDB, case: Case) -> str:
             timestamp=base + i * 30.0,
             transcript_turn_id=f"synth-{case.case_id}-t{i:03d}",
         )
+    if case.compaction:
+        # Replay a compaction so A genuinely differs from B: the kept turns
+        # carry their original transcript ids, and the summary row is
+        # synthetic so it never enters B.
+        loaded = db.get_messages_as_conversation(session_id)
+        kept = [loaded[i] for i in case.compaction.kept_turns]
+        db.archive_and_compact(session_id, [
+            {"role": "assistant", "content": SUMMARY_PREFIX + case.compaction.summary,
+             "_compressed_summary": True},
+            *kept,
+        ])
     return session_id
 
 

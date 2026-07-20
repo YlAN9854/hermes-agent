@@ -1,0 +1,15 @@
+[
+ {
+  "case_id": "c6",
+  "status": "ok",
+  "seconds": 0.0,
+  "tier": 2,
+  "events": 1,
+  "salient": 6,
+  "by_status": {
+   "absent": 3,
+   "present": 2,
+   "reframed": 1
+  }
+ }
+]

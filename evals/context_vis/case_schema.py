@@ -43,6 +43,20 @@ class Backtrack:
 
 
 @dataclass
+class Compaction:
+    """A compaction to replay while seeding, so A differs from B."""
+
+    kept_turns: list[int]  # turn indexes that survive into A
+    summary: str           # the text compression injects in place of the rest
+
+
+@dataclass
+class GoldSurvival:
+    constraint: int  # index into Case.constraints
+    status: str      # "present" | "reframed" | "absent"
+
+
+@dataclass
 class Case:
     case_id: str
     title: str
@@ -50,6 +64,8 @@ class Case:
     segments: list[Segment]
     constraints: list[GoldConstraint] = field(default_factory=list)
     backtracks: list[Backtrack] = field(default_factory=list)
+    compaction: Compaction | None = None
+    survival: list[GoldSurvival] = field(default_factory=list)
 
 
 def validate_case(case: Case) -> list[str]:
@@ -79,6 +95,35 @@ def validate_case(case: Case) -> list[str]:
     for bi, bt in enumerate(case.backtracks):
         if not (0 <= bt.to_segment < bt.from_segment < len(case.segments)):
             errors.append(f"backtrack {bi}: needs to_segment < from_segment, both valid segment indexes")
+    if case.compaction:
+        for kt in case.compaction.kept_turns:
+            if not (0 <= kt < n):
+                errors.append(f"compaction: kept turn index {kt} out of range")
+        if sorted(case.compaction.kept_turns) != case.compaction.kept_turns:
+            errors.append("compaction: kept_turns must be in transcript order")
+    for si, gs in enumerate(case.survival):
+        if gs.status not in {"present", "reframed", "absent"}:
+            errors.append(f"survival {si}: invalid status {gs.status!r}")
+        if not (0 <= gs.constraint < len(case.constraints)):
+            errors.append(f"survival {si}: constraint index {gs.constraint} out of range")
+            continue
+        if not case.compaction:
+            errors.append(f"survival {si}: gold survival needs a compaction to survive")
+            continue
+        text = case.constraints[gs.constraint].text
+        kept = gs.constraint < len(case.constraints) and any(
+            case.constraints[gs.constraint].turn == kt for kt in case.compaction.kept_turns
+        )
+        if gs.status == "reframed":
+            # A reframing means restated in DIFFERENT words. If the constraint
+            # text survives verbatim anywhere in A, the honest answer is
+            # "present", and the case would be testing the wrong branch.
+            if text in case.compaction.summary or kept:
+                errors.append(f"survival {si}: marked reframed but the text survives verbatim in A")
+        if gs.status == "present" and not (kept or text in case.compaction.summary):
+            errors.append(f"survival {si}: marked present but the text is nowhere in A")
+        if gs.status == "absent" and (kept or text in case.compaction.summary):
+            errors.append(f"survival {si}: marked absent but the text is still in A")
     return errors
 
 

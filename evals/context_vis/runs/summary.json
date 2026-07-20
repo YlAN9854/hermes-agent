@@ -1,9 +1,9 @@
 [
  {
-  "case_id": "c3",
+  "case_id": "c6",
   "status": "ok",
-  "seconds": 409.8,
-  "turns": 36,
-  "units": 4
+  "seconds": 356.0,
+  "turns": 20,
+  "units": 5
  }
 ]

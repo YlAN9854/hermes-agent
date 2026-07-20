@@ -22,20 +22,21 @@ from .domain import ActiveContext, ContextVisModel, Turn
 # summary genuinely restates it. Fragment scoring restores the intended
 # semantics.
 #
-# Calibrated on genuine reframings (0.38-0.90) against unrelated text
-# (0.0-0.41, the non-zero ones being character noise such as "and the ").
-# 0.50 rejects every measured false match, at the cost of missing the most
-# heavily reworded paraphrase. The asymmetry is deliberate per 铁律 6: a false
+# A window scores as the mean of two signals (see _window_score): character
+# sequence similarity and token containment. Neither works alone. Sequence
+# similarity alone fails on Chinese, where paraphrase reorders characters and
+# leaves only short contiguous runs (a genuine restatement measured 0.36 while
+# unrelated English text reached 0.44). Containment alone is weak on English,
+# where shared stopwords inflate it. Blended, genuine reframings measured
+# 0.51-0.82 and unrelated text 0.0-0.29 across both scripts, so 0.40 sits in
+# the gap. Erring toward rejection is deliberate per 铁律 6: a false
 # "reframed" tells the user the model still knows a constraint when it does
 # not, whereas a false "absent" merely under-claims.
-REFRAME_MATCH_THRESHOLD = 0.50
+REFRAME_MATCH_THRESHOLD = 0.40
 
-# Matching text must cover this fraction of the constraint before a fragment is
-# scored at all: a cheap reject that stops a handful of shared stopwords from
-# manufacturing a "reframing". Measured over ALL common blocks, not just the
-# longest: a heavily reworded paraphrase matches in several short runs, and
-# gating on the longest run alone rejected genuine reframings.
-MIN_ANCHOR_COVERAGE = 0.35
+# Cheap whole-entry prefilter before the window scan: an entry sharing less
+# than this fraction of the constraint's tokens cannot contain a restatement.
+MIN_ENTRY_CONTAINMENT = 0.25
 
 # Fragment window width, as a multiple of the constraint length.
 FRAGMENT_WINDOW_SCALE = 1.6
@@ -101,29 +102,35 @@ def _snap_to_word_bounds(text: str, start: int, end: int, budget: int = 32) -> t
     return start, end
 
 
-def _best_fragment(needle: str, entry_norm: str, offsets: list[int], raw: str) -> tuple[float, str]:
-    """Score the best window of ``entry_norm`` against ``needle``.
+def _containment(needle_tokens: set[str], text: str) -> float:
+    """Fraction of the constraint's tokens present in ``text``."""
+    return len(needle_tokens & _tokens(text)) / len(needle_tokens) if needle_tokens else 0.0
 
-    Returns (score, raw_fragment). ``autojunk=False`` is load-bearing: the
-    default treats any character appearing in >1% of a >=200-char haystack as
-    junk, which for prose silently discards spaces and most vowels.
+
+def _window_score(needle: str, needle_tokens: set[str], window: str) -> float:
+    """Blend character similarity with token containment. See the threshold note.
+
+    ``autojunk=False`` is load-bearing: the default treats any character
+    appearing in >1% of a >=200-char haystack as junk, which for prose
+    silently discards spaces and most vowels.
     """
-    matcher = SequenceMatcher(None, needle, entry_norm, autojunk=False)
-    blocks = matcher.get_matching_blocks()
-    if sum(block.size for block in blocks) < MIN_ANCHOR_COVERAGE * len(needle):
+    sequence = SequenceMatcher(None, needle, window, autojunk=False).ratio()
+    return (sequence + _containment(needle_tokens, window)) / 2
+
+
+def _best_fragment(needle: str, entry_norm: str, offsets: list[int], raw: str) -> tuple[float, str]:
+    """Score the best-matching window of ``entry_norm``. Returns (score, raw fragment)."""
+    needle_tokens = _tokens(needle)
+    if _containment(needle_tokens, entry_norm) < MIN_ENTRY_CONTAINMENT:
         return 0.0, ""
-    # The longest block positions the window even though the gate above spans
-    # all of them: it is the most reliable centre for the restated text.
-    anchor = max(blocks, key=lambda block: block.size)
-    width = max(int(len(needle) * FRAGMENT_WINDOW_SCALE), anchor.size)
-    centre = anchor.b + anchor.size // 2
+    width = max(int(len(needle) * FRAGMENT_WINDOW_SCALE), 1)
+    step = max(1, len(needle) // 3)
     best_score, best_bounds = 0.0, None
-    for shift in (0, -width // 4, width // 4):
-        low = max(0, min(centre + shift - width // 2, len(entry_norm) - 1))
+    for low in range(0, max(len(entry_norm) - width, 0) + 1, step):
         high = min(len(entry_norm), low + width)
         if high <= low:
             continue
-        score = SequenceMatcher(None, needle, entry_norm[low:high], autojunk=False).ratio()
+        score = _window_score(needle, needle_tokens, entry_norm[low:high])
         if score > best_score:
             best_score, best_bounds = score, (low, high)
     if best_bounds is None:

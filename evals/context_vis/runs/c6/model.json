@@ -1,0 +1,361 @@
+{
+ "units": [
+  {
+   "unit_id": "unit-b0901bf454f94088b6a9e6230c1ffce6",
+   "title": "需求与表结构分析",
+   "summary_sentences": [
+    {
+     "text": "用户要求绝对不能打印客户手机号。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t000",
+       "char_start": 32,
+       "char_end": 47
+      }
+     ]
+    },
+    {
+     "text": "用户要求运维只给了5个数据库连接，不能再多开。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t000",
+       "char_start": 52,
+       "char_end": 74
+      }
+     ]
+    },
+    {
+     "text": "用户要求上线只能在凌晨1点到3点的发布窗口内。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t000",
+       "char_start": 79,
+       "char_end": 104
+      }
+     ]
+    },
+    {
+     "text": "助手确认需求并检查工单表结构。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t001",
+       "char_start": 52,
+       "char_end": 63
+      }
+     ]
+    },
+    {
+     "text": "工单表中phone字段以明文存储。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t002",
+       "char_start": 281,
+       "char_end": 324
+      }
+     ]
+    },
+    {
+     "text": "助手计划对导出和日志中的手机号做脱敏，并采用游标分页每批5000行。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t003",
+       "char_start": 7,
+       "char_end": 60
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c6-t000",
+    "synth-c6-t001",
+    "synth-c6-t002",
+    "synth-c6-t003"
+   ],
+   "salient_infos": [
+    {
+     "info_id": "info-5a29a28e65db43c2b37f0b16902caf13",
+     "kind": "user_stated_constraint",
+     "detected_text": "绝对不能在日志里打印客户手机号；",
+     "span_in_B": {
+      "turn_id": "synth-c6-t000",
+      "char_start": 32,
+      "char_end": 48
+     },
+     "status_in_A": "absent",
+     "reframed_text_in_A": null,
+     "confidence": "reliable",
+     "occurrences": 1
+    },
+    {
+     "info_id": "info-8710694e75c24f2fbef5e892400c48e1",
+     "kind": "user_stated_constraint",
+     "detected_text": "运维只给了我们 5 个数据库连接，不能再多开；",
+     "span_in_B": {
+      "turn_id": "synth-c6-t000",
+      "char_start": 52,
+      "char_end": 75
+     },
+     "status_in_A": "absent",
+     "reframed_text_in_A": null,
+     "confidence": "reliable",
+     "occurrences": 1
+    }
+   ],
+   "frozen": true,
+   "created_at_turn": "synth-c6-t019"
+  },
+  {
+   "unit_id": "unit-b1629a8788b344c1aa41a00eafd4339a",
+   "title": "初版脚本实现",
+   "summary_sentences": [
+    {
+     "text": "用户指定CSV导出字段为id, customer_id, status, created_at，不含phone列。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t004",
+       "char_start": 5,
+       "char_end": 68
+      }
+     ]
+    },
+    {
+     "text": "助手决定编写第一版导出脚本。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t005",
+       "char_start": 18,
+       "char_end": 41
+      }
+     ]
+    },
+    {
+     "text": "脚本实现服务端游标、每批5000行，导出列不含phone，日志不打印行内容。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t007",
+       "char_start": 0,
+       "char_end": 51
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c6-t004",
+    "synth-c6-t005",
+    "synth-c6-t006",
+    "synth-c6-t007"
+   ],
+   "salient_infos": [
+    {
+     "info_id": "info-eb08f8f2b8584c1aa7edb61a8ced54bb",
+     "kind": "user_stated_constraint",
+     "detected_text": "另外导出格式用 CSV，字段顺序按 id, customer_id, status, created_at，不要带 phone 列。",
+     "span_in_B": {
+      "turn_id": "synth-c6-t004",
+      "char_start": 3,
+      "char_end": 69
+     },
+     "status_in_A": "absent",
+     "reframed_text_in_A": null,
+     "confidence": "reliable",
+     "occurrences": 1
+    },
+    {
+     "info_id": "info-c2f29f1e02a643069afbb3abe0369af2",
+     "kind": "other",
+     "detected_text": "open(out_path, 'w', newline='')",
+     "span_in_B": {
+      "turn_id": "synth-c6-t006",
+      "char_start": 250,
+      "char_end": 281
+     },
+     "status_in_A": "absent",
+     "reframed_text_in_A": null,
+     "confidence": "ai_guessed",
+     "occurrences": 1
+    }
+   ],
+   "frozen": true,
+   "created_at_turn": "synth-c6-t019"
+  },
+  {
+   "unit_id": "unit-e66d5d457c64463a96a48fceac91af1e",
+   "title": "导出功能测试",
+   "summary_sentences": [
+    {
+     "text": "用户要求先导1000行进行测试。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t008",
+       "char_start": 0,
+       "char_end": 17
+      }
+     ]
+    },
+    {
+     "text": "测试成功写入1000行到CSV。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t009",
+       "char_start": 109,
+       "char_end": 164
+      }
+     ]
+    },
+    {
+     "text": "输出文件中不包含phone字段。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t009",
+       "char_start": 268,
+       "char_end": 300
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c6-t008",
+    "synth-c6-t009",
+    "synth-c6-t010"
+   ],
+   "salient_infos": [],
+   "frozen": true,
+   "created_at_turn": "synth-c6-t019"
+  },
+  {
+   "unit_id": "unit-4726d887d669458c982c31d3a1f5a2c8",
+   "title": "定时任务部署",
+   "summary_sentences": [
+    {
+     "text": "用户要求将脚本接入每日全量导出的定时任务。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t011",
+       "char_start": 6,
+       "char_end": 25
+      }
+     ]
+    },
+    {
+     "text": "助手计划使用cron，并将首次部署安排在发布窗口内，执行时间放在业务低峰。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t012",
+       "char_start": 0,
+       "char_end": 61
+      }
+     ]
+    },
+    {
+     "text": "定时任务已设置为每天04:30执行全量导出到/var/exports/tickets.csv。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t014",
+       "char_start": 0,
+       "char_end": 54
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c6-t011",
+    "synth-c6-t012",
+    "synth-c6-t013",
+    "synth-c6-t014"
+   ],
+   "salient_infos": [
+    {
+     "info_id": "info-221fdbe2d90d49a98725e1091d269eff",
+     "kind": "other",
+     "detected_text": "/var/exports/tickets.csv",
+     "span_in_B": {
+      "turn_id": "synth-c6-t013",
+      "char_start": 99,
+      "char_end": 123
+     },
+     "status_in_A": "present",
+     "reframed_text_in_A": null,
+     "confidence": "ai_guessed",
+     "occurrences": 1
+    }
+   ],
+   "frozen": true,
+   "created_at_turn": "synth-c6-t019"
+  },
+  {
+   "unit_id": "unit-93e342fa79274840b8859f6e730c3229",
+   "title": "文档编写与收尾",
+   "summary_sentences": [
+    {
+     "text": "用户强调部署必须遵守时间窗口，并要求编写使用说明。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t015",
+       "char_start": 0,
+       "char_end": 32
+      }
+     ]
+    },
+    {
+     "text": "助手已编写README.md，涵盖用法、参数和cron配置，脚本交付完成。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t018",
+       "char_start": 0,
+       "char_end": 41
+      }
+     ]
+    },
+    {
+     "text": "用户认可交付结果，并要求上线前再次确认。",
+     "source_spans": [
+      {
+       "turn_id": "synth-c6-t019",
+       "char_start": 0,
+       "char_end": 19
+      }
+     ]
+    }
+   ],
+   "covered_turns": [
+    "synth-c6-t015",
+    "synth-c6-t016",
+    "synth-c6-t017",
+    "synth-c6-t018",
+    "synth-c6-t019"
+   ],
+   "salient_infos": [
+    {
+     "info_id": "info-6dd370762a4041e393bfc3f9c4583e76",
+     "kind": "user_stated_constraint",
+     "detected_text": "部署这件事必须守住那个时间窗口。",
+     "span_in_B": {
+      "turn_id": "synth-c6-t015",
+      "char_start": 0,
+      "char_end": 16
+     },
+     "status_in_A": "present",
+     "reframed_text_in_A": null,
+     "confidence": "reliable",
+     "occurrences": 1
+    }
+   ],
+   "frozen": true,
+   "created_at_turn": "synth-c6-t019"
+  }
+ ],
+ "aggregates": [],
+ "decision_aggregates": [],
+ "decision_intent": null,
+ "backlinks": [],
+ "tier": 2,
+ "revision": 2,
+ "legacy_transcript_warning": null,
+ "survival": {
+  "computed_at": 1784551446.1436818,
+  "fidelity": "observed",
+  "event_count": 1,
+  "active_fingerprint": "54f547cb348ba137bf26a7d9db05cb483c4d5a70c1c2d5366bc6ff8a7b6b3f6e",
+  "note": "1 of 1 compaction(s) were reconstructed from archived rows rather than observed, so their boundaries are approximate."
+ }
+}

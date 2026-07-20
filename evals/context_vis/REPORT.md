@@ -255,3 +255,70 @@ Step 0–2 的质量问题（过度切分、引文覆盖、salient 噪声、两�
 | P3 | 跨 turn 归纳句的多 span 引用 | P1-B 残留 |
 
 复现 P1 轮：`run_generate c2 c3 c4` → `metrics c2 c3 c4` → 盲评产物 `runs/<cid>/judge_v3.json`；增量验收同上。
+
+---
+
+# Tier 2 轮（2026-07-19）：压缩可视化
+
+规格 §5 的差异化核心。代码：`0fcd4398`（类型 + survival 修复）、`2a0b6a20`（探针）、`f4b08200`（adapter 探针路径 + 动态 tier）、`c1d67478`（历史重建）、`9da146f8`（service/API 接线 + 阈值校准）、`c761b60d`（前端）。单测 24→44，前端 vitest 73 全绿。
+
+## T1：规格声称的探针不存在，本轮建成
+
+§1 写「Hermes：由现有探针插件的 dump 提供（messages_before/after/summary）」——探查确认 `VALID_HOOKS` 里**没有任何 compaction 钩子**，唯一现有信号 `conversation_compression.py:948` 的 `session:compress` 事件只带 id 与计数器。
+
+新增 `agent/compaction_probe.py`：默认关（`HERMES_CONTEXT_VIS_PROBE`），核心调用点 8 行（import 置于自身 try 内），模块内吞 `BaseException`。**只记 turn id 与摘要全文，不记消息体**——消息体已在 state.db 且可由这些 id 寻址，再存一份就是复制真相层（正是「索引 vs 真相」铁律要防的）；唯一事后不可恢复的是被后续压缩取代的摘要，故只全文存它。杠杆点是 `run_agent.py:1911` 把 `_transcript_turn_id` 盖在活的内存 dict 上、且 `_fresh_compaction_message_copy` 保留它，故探针点上 before/after 两侧都带 B 溯源。
+
+**历史会话不依赖探针**：`archive_and_compact` 非破坏性，压缩会留下「摘要行 + 其保留的 turn 副本」，故合成行即分代边界，**同时出现在相邻两代的 turn 即为跨越该边界存活者**。据此重建 pre-probe 历史，全部标 `fidelity="reconstructed"` + note。仅重建早于最早观测记录的边界，避免同一边界被两种来源各算一次。
+
+## T2：survival 引擎此前不可能工作（本轮两次修正）
+
+`survival.py` 是死代码，且有一个上线即失效的缺陷：reframed 拿**整条 turn 正文**做 `SequenceMatcher.ratio()`，而 ratio 是 2M/T——43 字符约束落在 2.8k 字符、确实包含其重述的摘要里得分 **0.0035**（默认 `autojunk=True` 还会把散文里的空格与多数元音当噪声丢弃，再恶化约 5.6 倍）。reframed 分支永不触发，§5.3 的旗舰功能会直接死掉。
+
+改为**片段窗口评分**后，用真实压缩会话验证时又发现两个问题，均由数据而非推测定位：
+
+1. **锚点门限只看最长公共块**，导致重写较重的英文改述（匹配散落在多个短块）被拒——改为按全部公共块之和计量。
+2. **0.62 阈值从未被验证**：真实改述隔离比对也只有 0.51–0.57。校准后降到 0.50。
+
+随后 c6 评估暴露了第三个、也是最根本的问题：**中文改述会重排字符**，「绝对不能在日志里打印客户手机号」→「任何日志输出都必须对客户的手机号码做脱敏」只剩 5 个连续匹配字符，字符相似度 0.359——**低于不相关英文文本的 0.442**。字符序列相似度单独使用在中文上不成立。
+
+最终方案：**窗口分数 = 字符序列相似度与 token 覆盖率的均值**。两个信号缺一不可——中文靠 token 覆盖率（0.667 vs 不相关 0.158），英文靠序列相似度（token 覆盖率会被 stopword 抬高）。混合后跨两种语言：
+
+| | 正例（真实改述） | 负例（不相关） |
+|---|---|---|
+| 单用字符序列 | 0.359–0.890 | 0.0–0.442（**重叠**） |
+| 单用 token 覆盖 | 0.667–0.857 | 0.0–0.143 |
+| **混合（采用）** | **0.479–0.890** | **全部 0.0** |
+
+阈值定 0.40，落在完全分离的间隙中。`reframed_text_in_A` 存的是窗口对应的原文片段（词边界吸附、上限 4× 约束长度），而非整条 turn——`reframed_fragment_ratio` 实测 0.108。
+
+## T3：c6 评估（新增 case）
+
+20 turns、2.8k 字符的小案例，脚本化重放一次压缩，三条约束分别对应三种命运：一条在保留的 turn 里逐字存活、一条被摘要改述、一条被丢弃且从未重述。`case_schema` 的校验强制 gold 自洽（标 `reframed` 的约束原文**不得**逐字出现在 A 中，否则诚实答案是 `present`，测的就是错的分支）。
+
+| 指标 | 结果 |
+|---|---|
+| A/B 分离 | B 保留全部 20 turns；A 为 6 条（5 保留 + 1 合成摘要）；事件 1 次，丢弃 15 / 保留 5 |
+| 三状态判定 | **3/3 正确**，present / reframed / absent 的 P 与 R 均为 **1.0** |
+| `reframed_fragment_ratio` | 0.108（接近 1.0 即代表整条 turn 的老 bug 复发） |
+| tier / fidelity | 2 / observed |
+
+指标区分「未被检出」与「检出但判错」——salient 检出率是另一项测量，不应污染存活判定的分数。
+
+## T4：铁律核对
+
+- **A 侧永不产生指针**：`ActiveEntry` 刻意不设 `turn_id`，只有可空的 `origin_turn_id`；复用 `Turn` 会诱导 `SpanRef(active.turn_id, …)` 而类型系统拦不住。A 的匹配结果只以纯文本进 `reframed_text_in_A`。
+- **降级是隐藏**：`summariseSurvival` 在 tier<2 或无已知状态时返回 `null` 而非零值——「0 条被改述」会被读成结论，而非「没有可见性」。Tier 1 会话 UI 与本轮之前逐像素一致（有测试断言）。
+- **tier 由「A 是否可读」判定**，而非「有无压缩事件」：从未压缩的会话事件数为 0 但状态真实全为 present，隐藏属过度降级；压缩相关表述另由 `capabilities.compression_events` 把关。
+- **陈旧不谎报**：`reframed_text_in_A` 是可变 A 的快照，下次压缩即过期。`load()` 只比对 A 的指纹并给出 `survival_stale`，**不在读路径持久化**（否则每次 GET 顶掉 revision，用户下次保存必 409）。
+
+## 后续
+
+| 优先级 | 项 |
+|---|---|
+| P1 | 用更多语言/改述强度扩充 c6，把阈值 0.40 放到更大样本上复核 |
+| P1 | 压缩事件面板（历次压缩、丢弃了哪些 turn、摘要全文）——本轮有数据无 UI |
+| P2 | §5.2 提到的 LLM 细判（当前确定性版本已达 3/3，暂无必要） |
+| P2 | Tier 3 `request_preserve` 回写 |
+| P2 | 真实长会话跑满压缩阈值的端到端验收（本轮用脚本化重放） |
+
+复现：`seed c6` → `run_generate c6` → `run_survival c6` → `metrics c6`；探针端到端：置 `HERMES_CONTEXT_VIS_PROBE=1` 后跑真实压缩，记录落在 `<HERMES_HOME>/context-vis/compaction/<session>.jsonl`。

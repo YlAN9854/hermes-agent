@@ -1,0 +1,82 @@
+{
+ "case_id": "c6",
+ "n_gold_segments": 4,
+ "survival": {
+  "gold_labelled": 3,
+  "judged": 3,
+  "not_detected": 0,
+  "correct": 3,
+  "per_status": {
+   "present": {
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0
+   },
+   "reframed": {
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0
+   },
+   "absent": {
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0
+   }
+  },
+  "detail": [
+   {
+    "constraint": "绝对不能在日志里打印客户手机号",
+    "gold": "reframed",
+    "predicted": "reframed"
+   },
+   {
+    "constraint": "运维只给了我们 5 个数据库连接，不能再多开",
+    "gold": "absent",
+    "predicted": "absent"
+   },
+   {
+    "constraint": "部署这件事必须守住那个时间窗口",
+    "gold": "present",
+    "predicted": "present"
+   }
+  ],
+  "reframed_fragment_ratio": 0.108,
+  "compression_events": 1,
+  "active_fidelity": "observed"
+ },
+ "n_units": 5,
+ "coverage_complete": true,
+ "boundary_exact": {
+  "precision": 0.75,
+  "recall": 1.0,
+  "f1": 0.857
+ },
+ "boundary_tol1": {
+  "precision": 0.75,
+  "recall": 1.0,
+  "f1": 0.857
+ },
+ "unit_purity": 1.0,
+ "straddling_units": 0,
+ "sentences": 18,
+ "spans": 18,
+ "bad_spans": 0,
+ "spans_per_sentence": 1.0,
+ "median_span_chars": 32,
+ "titles_at_15char_cap": 0,
+ "empty_titles": 0,
+ "constraints": {
+  "gold_constraints": 3,
+  "recall_reliable": 1.0,
+  "recall_any": 1.0,
+  "detected_total": 6,
+  "detected_reliable": 4,
+  "detected_ai_guessed": 2
+ }
+}
