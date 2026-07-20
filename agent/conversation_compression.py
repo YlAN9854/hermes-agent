@@ -957,6 +957,22 @@ def compress_context(
             except Exception as e:
                 logger.debug("event_callback error on session:compress: %s", e)
 
+        # Optional compaction dump for offline context analysis. Disabled
+        # unless HERMES_CONTEXT_VIS_PROBE is set; the import is inside the try
+        # so a missing or broken probe module cannot affect a compaction.
+        try:
+            from agent.compaction_probe import record_compaction
+            record_compaction(
+                session_id=agent.session_id or "",
+                boundary_parent_session_id=_boundary_parent,
+                in_place=in_place,
+                messages_before=messages,
+                messages_after=compressed,
+                compression_count=agent.context_compressor.compression_count,
+            )
+        except Exception as e:
+            logger.debug("compaction probe error: %s", e)
+
         # Surface the compaction mode to the caller (run_conversation / gateway)
         # via a rotation-independent flag. The gateway uses this — NOT an
         # id-change diff — to re-baseline transcript handling (history_offset=0 +
