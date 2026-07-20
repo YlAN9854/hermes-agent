@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, GitMerge, Link2, RefreshCw, Search, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 import type {
-  ContextVisAggregate, ContextVisBacklink, ContextVisModel, ContextVisSentence,
-  ContextVisSessionResponse, ContextVisSessionsResponse, ContextVisSpan,
+  ContextVisAggregate, ContextVisBacklink, ContextVisInfo, ContextVisModel, ContextVisSentence,
+  ContextVisSessionResponse, ContextVisSessionsResponse, ContextVisSpan, ContextVisTurn,
 } from "@/lib/api";
-import { buildHighlightSegments } from "@/lib/context-vis";
+import { buildHighlightSegments, summariseSurvival } from "@/lib/context-vis";
 import { useProfileScope } from "@/contexts/useProfileScope";
 import { Card, CardContent, CardHeader, CardTitle } from "@nous-research/ui/ui/components/card";
 import { Button } from "@nous-research/ui/ui/components/button";
@@ -21,8 +21,51 @@ function HighlightedText({ content, spans, turnId }: { content: string; spans: C
     : <span key={i}>{part.text}</span>)}</>;
 }
 
-function AggregateEditor({ nodes, units, onChange }: {
-  nodes: ContextVisAggregate[]; units: ContextVisModel["units"];
+const SURVIVAL_LABEL: Record<string, { icon: string; text: string; className: string }> = {
+  present: { icon: "✅", text: "still visible", className: "text-success" },
+  reframed: { icon: "⚠️", text: "reframed", className: "text-warning" },
+  absent: { icon: "❌", text: "no longer visible", className: "text-destructive" },
+};
+
+/** Survival badge. Renders nothing below Tier 2 or without a known status,
+ *  so a Tier 1 session looks exactly as it did before compression visibility. */
+function SurvivalBadge({ info, tier, onClick }: { info: ContextVisInfo; tier: number; onClick: () => void }) {
+  const label = tier >= 2 ? SURVIVAL_LABEL[info.status_in_A] : undefined;
+  if (!label) return null;
+  const actionable = info.status_in_A !== "present";
+  return <button
+    type="button"
+    disabled={!actionable}
+    onClick={(e) => { e.stopPropagation(); if (actionable) onClick(); }}
+    title={actionable ? `In the model's current context: ${label.text} — click for detail` : "Still visible to the model verbatim"}
+    className={`${label.className} ${actionable ? "underline decoration-dotted" : ""}`}
+  >{label.icon} {label.text}</button>;
+}
+
+/** Side-by-side B original vs the wording A now carries (spec 5.3). The left
+ *  column is sliced out of the transcript, not from detected_text: the truth
+ *  layer is the source, and the index is only an index. */
+function SurvivalDetail({ info, turn, turnNumber, onLocate }: {
+  info: ContextVisInfo; turn: ContextVisTurn | undefined; turnNumber: number; onLocate: () => void;
+}) {
+  const original = turn ? turn.content.slice(info.span_in_B.char_start, info.span_in_B.char_end) : info.detected_text;
+  return <div className="mt-2 border border-border p-2 text-xs">
+    {info.status_in_A === "reframed" ? <div className="grid gap-2 sm:grid-cols-2">
+      <div><div className="text-text-secondary mb-1">Original — transcript turn {turnNumber}</div>
+        <p className="text-text-primary">{original}</p></div>
+      <div><div className="text-text-secondary mb-1">How the model now sees it</div>
+        <p className="text-warning">{info.reframed_text_in_A}</p></div>
+    </div> : <p className="text-text-primary">
+      The model can no longer see this. The original is still in turn {turnNumber} of the transcript.
+    </p>}
+    <Button size="sm" outlined className="mt-2" onClick={(e) => { e.stopPropagation(); onLocate(); }}>
+      Show me in the transcript
+    </Button>
+  </div>;
+}
+
+function AggregateEditor({ nodes, units, tier, onChange }: {
+  nodes: ContextVisAggregate[]; units: ContextVisModel["units"]; tier: number;
   onChange: (nodes: ContextVisAggregate[]) => void;
 }) {
   const unitTitle = Object.fromEntries(units.map((u) => [u.unit_id, u.title]));
@@ -62,6 +105,12 @@ function AggregateEditor({ nodes, units, onChange }: {
       </div>
       <p className="text-xs text-text-secondary mt-1">{node.child_unit_ids.map((id) => unitTitle[id] ?? id).join(" · ")}</p>
       <p className="text-xs text-text-secondary mt-1">Rule matches: {node.child_unit_ids.flatMap((id) => unitInfo[id] ?? []).filter((i) => i.confidence === "reliable").length} · AI guesses: {node.child_unit_ids.flatMap((id) => unitInfo[id] ?? []).filter((i) => i.confidence === "ai_guessed").length}</p>
+      {(() => {
+        const roll = summariseSurvival(node.child_unit_ids.flatMap((id) => unitInfo[id] ?? []), tier);
+        return roll && <p className="text-xs text-text-secondary mt-1">
+          {roll.total} tracked here · <span className="text-warning">{roll.reframed} reframed</span> · <span className="text-destructive">{roll.absent} no longer visible</span>
+        </p>;
+      })()}
     </div>)}
   </div>;
 }
@@ -77,6 +126,7 @@ export default function ContextVisPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeUnit, setActiveUnit] = useState<string | null>(null);
   const [activeSpans, setActiveSpans] = useState<ContextVisSpan[]>([]);
+  const [inspecting, setInspecting] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("overview");
   const [intent, setIntent] = useState("");
   const [backlinkFrom, setBacklinkFrom] = useState("");
@@ -127,12 +177,22 @@ export default function ContextVisPage() {
 
   const filtered = sessions.filter((s) => `${s.title ?? ""} ${s.preview ?? ""}`.toLowerCase().includes(query.toLowerCase()));
   const unitByTurn = useMemo(() => new Map(detail?.model.units.flatMap((u) => u.covered_turns.map((id) => [id, u.unit_id])) ?? []), [detail]);
+  const tier = detail?.capabilities.tier ?? 1;
+  const turnById = useMemo(() => new Map((detail?.transcript ?? []).map((t) => [t.turn_id, t])), [detail]);
+  const turnNumber = useCallback((turnId: string) => (detail?.transcript.findIndex((t) => t.turn_id === turnId) ?? -1) + 1, [detail]);
+  const locateInTranscript = useCallback((span: ContextVisSpan) => {
+    setActiveSpans([span]);
+    document.getElementById(`turn-${span.turn_id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
   const aggregates = detail ? (mode === "overview" ? detail.model.aggregates : detail.model.decision_aggregates) : [];
 
   return <div className="space-y-3">
     <div className="flex items-center justify-between">
       <div><h1 className="font-expanded text-2xl text-text-primary">Context Vis</h1><p className="text-sm text-text-secondary">Semantic index over immutable conversation transcripts</p></div>
-      <Badge>Tier 1</Badge>
+      <span className="flex gap-1">
+        <Badge>Tier {tier}</Badge>
+        {detail?.capabilities.compression_fidelity === "reconstructed" && <Badge>Reconstructed history</Badge>}
+      </span>
     </div>
     {error && <div className="border border-destructive text-destructive p-3 text-sm">{error}</div>}
     <div className="grid grid-cols-1 xl:grid-cols-[16rem_minmax(22rem,1fr)_minmax(24rem,1.2fr)] gap-3 min-h-[70vh]">
@@ -152,6 +212,7 @@ export default function ContextVisPage() {
             {!detail.model.units.length ? <Button disabled={working} onClick={() => void runJob({ action: "generate_units" })}><Sparkles className="h-4 w-4 mr-1" />Generate semantic view</Button> : <>
               <Button outlined disabled={working} onClick={() => void runJob({ action: "generate_units", incremental: true })}>Append new turns</Button>
               <Button outlined disabled={working} onClick={() => void runJob({ action: "detect_salient" })}>Detect salient info</Button>
+              {detail.survival_stale && <Button outlined disabled={working} onClick={() => void runJob({ action: "refresh_survival" })} title="The context has changed since these statuses were computed">Refresh survival state</Button>}
               <Button outlined disabled title="Requires an agent with Tier 3 preserve support">Preserve original (unsupported)</Button>
             </>}
             {working && <Spinner />}
@@ -160,11 +221,25 @@ export default function ContextVisPage() {
             <div className="flex gap-2"><Button size="sm" outlined={mode !== "overview"} onClick={() => setMode("overview")}>Overview</Button><Button size="sm" outlined={mode !== "decision"} onClick={() => setMode("decision")}>Decision</Button></div>
             {mode === "decision" && <Input value={intent} onChange={(e) => setIntent(e.target.value)} placeholder="Continue, or turn toward…" />}
             <Button size="sm" outlined disabled={working || (mode === "decision" && !intent.trim())} onClick={() => void runJob({ action: "draft_aggregates", mode, intent })}>Draft aggregation</Button>
-            {!!aggregates.length && <><AggregateEditor nodes={aggregates} units={detail.model.units} onChange={(nodes) => setDetail({ ...detail, model: { ...detail.model, [mode === "overview" ? "aggregates" : "decision_aggregates"]: nodes } })} /><Button size="sm" onClick={() => void saveEdits(mode === "overview" ? { aggregates } : { decision_aggregates: aggregates, decision_intent: detail.model.decision_intent })}>Save aggregation</Button></>}
+            {!!aggregates.length && <><AggregateEditor nodes={aggregates} units={detail.model.units} tier={tier} onChange={(nodes) => setDetail({ ...detail, model: { ...detail.model, [mode === "overview" ? "aggregates" : "decision_aggregates"]: nodes } })} /><Button size="sm" onClick={() => void saveEdits(mode === "overview" ? { aggregates } : { decision_aggregates: aggregates, decision_intent: detail.model.decision_intent })}>Save aggregation</Button></>}
             <div className="space-y-2">{detail.model.units.map((unit) => <div key={unit.unit_id} className={`border p-3 ${activeUnit === unit.unit_id ? "border-primary bg-primary/5" : "border-border"}`} onClick={() => { setActiveUnit(unit.unit_id); setActiveSpans([]); document.getElementById(`turn-${unit.covered_turns[0]}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>
-              <div className="flex flex-wrap justify-between gap-1"><strong className="text-sm text-text-primary">{unit.title}</strong><span className="flex gap-1"><Badge>Rules {unit.salient_infos.filter((i) => i.confidence === "reliable").length}</Badge><Badge>AI guesses {unit.salient_infos.filter((i) => i.confidence === "ai_guessed").length}</Badge><Badge>{unit.frozen ? "frozen" : "draft"}</Badge></span></div>
+              <div className="flex flex-wrap justify-between gap-1"><strong className="text-sm text-text-primary">{unit.title}</strong><span className="flex gap-1"><Badge>Rules {unit.salient_infos.filter((i) => i.confidence === "reliable").length}</Badge><Badge>AI guesses {unit.salient_infos.filter((i) => i.confidence === "ai_guessed").length}</Badge>{(() => {
+                const roll = summariseSurvival(unit.salient_infos, tier);
+                return roll && (roll.reframed + roll.absent > 0) ? <Badge>{roll.reframed} reframed · {roll.absent} gone</Badge> : null;
+              })()}<Badge>{unit.frozen ? "frozen" : "draft"}</Badge></span></div>
               {unit.summary_sentences.map((sentence: ContextVisSentence, i) => <p key={i} className="text-sm text-text-secondary mt-1 cursor-pointer" onMouseEnter={() => setActiveSpans(sentence.source_spans)} onMouseLeave={() => setActiveSpans([])}>{sentence.text}</p>)}
-              {unit.salient_infos.map((info) => <div key={info.info_id} className="mt-2 border-l-2 border-warning pl-2 text-xs text-text-primary"><Badge>{info.confidence === "reliable" ? "Rule match" : "AI guessed"}</Badge> {info.detected_text}</div>)}
+              {unit.salient_infos.map((info) => <div key={info.info_id} className="mt-2 border-l-2 border-warning pl-2 text-xs text-text-primary">
+                <span className="flex flex-wrap items-center gap-1">
+                  <Badge>{info.confidence === "reliable" ? "Rule match" : "AI guessed"}</Badge>
+                  <SurvivalBadge info={info} tier={tier} onClick={() => setInspecting(inspecting === info.info_id ? null : info.info_id)} />
+                </span>
+                <span>{info.detected_text}</span>
+                {inspecting === info.info_id && <SurvivalDetail
+                  info={info} turn={turnById.get(info.span_in_B.turn_id)}
+                  turnNumber={turnNumber(info.span_in_B.turn_id)}
+                  onLocate={() => locateInTranscript(info.span_in_B)}
+                />}
+              </div>)}
             </div>)}</div>
             <div className="border-t border-border pt-3 space-y-2"><h3 className="font-mondwest text-display text-sm">Backtrack links</h3>
               {detail.model.backlinks.map((b, i) => <div key={`${b.from_unit_id}-${b.to_unit_id}-${i}`} className="flex items-center gap-1 border-l-2 border-t border-primary pl-2 pt-1 text-xs text-text-secondary">

@@ -1939,16 +1939,26 @@ export interface ContextVisModel {
   units: ContextVisUnit[]; aggregates: ContextVisAggregate[]; decision_aggregates: ContextVisAggregate[];
   decision_intent: string | null; backlinks: ContextVisBacklink[]; tier: 1 | 2 | 3;
   revision: number; legacy_transcript_warning: string | null;
+  survival: ContextVisSurvivalState | null;
+}
+export interface ContextVisSurvivalState {
+  computed_at: number; fidelity: "observed" | "reconstructed" | null;
+  event_count: number; active_fingerprint: string; note: string | null;
 }
 export interface ContextVisTurn { turn_id: string; role: "user" | "assistant" | "tool"; content: string; tool_name: string | null; timestamp: number }
 export interface ContextVisSessionResponse {
-  session_id: string; capabilities: { tier: number; compression_events: boolean; preserve: boolean };
+  session_id: string;
+  capabilities: {
+    tier: number; compression_events: boolean;
+    compression_fidelity: "observed" | "reconstructed" | null; preserve: boolean;
+  };
+  survival_stale: boolean;
   model: ContextVisModel; transcript: ContextVisTurn[];
 }
 export interface ContextVisSessionsResponse {
   sessions: Array<SessionInfo & { context_vis: { generated: boolean; revision: number; unit_count: number } }>;
 }
-export interface ContextVisJobRequest { action: "generate_units" | "detect_salient" | "draft_aggregates"; incremental?: boolean; mode?: "overview" | "decision"; intent?: string }
+export interface ContextVisJobRequest { action: "generate_units" | "detect_salient" | "draft_aggregates" | "refresh_survival"; incremental?: boolean; mode?: "overview" | "decision"; intent?: string }
 export interface ContextVisJob { job_id: string; status: "queued" | "running" | "succeeded" | "failed"; result?: { model: ContextVisModel }; error?: string }
 export interface ContextVisEditRequest {
   revision: number; aggregates?: ContextVisAggregate[]; decision_aggregates?: ContextVisAggregate[];
