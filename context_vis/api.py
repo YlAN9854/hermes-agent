@@ -104,11 +104,13 @@ def list_context_sessions(profile: str | None = None, limit: int = 50):
 def get_context_session(session_id: str, profile: str | None = None):
     _, sid, db, repo, adapter = _resources(profile, session_id)
     try:
-        model, transcript, _ = ContextVisService(adapter, repo).load()
+        service = ContextVisService(adapter, repo)
+        model, transcript, _ = service.load()
         active = adapter.get_active_context()
         events = adapter.get_compression_events()
         return {
             "session_id": sid,
+            "survival_stale": service.survival_is_stale(model),
             "capabilities": {
                 "tier": adapter.tier,
                 "compression_events": bool(events),
@@ -137,6 +139,8 @@ def _run_job(home: Path, session_id: str, job_id: str, request: dict[str, Any]) 
             result = service.detect_salient()
         elif action == "draft_aggregates":
             result = service.draft_aggregates(request.get("mode") or "overview", request.get("intent"))
+        elif action == "refresh_survival":
+            result = service.refresh_survival()
         else:
             raise ValueError(f"Unsupported action: {action}")
         repo.update_job(job_id, "succeeded", result={"model": result})
@@ -148,7 +152,7 @@ def _run_job(home: Path, session_id: str, job_id: str, request: dict[str, Any]) 
 
 @router.post("/sessions/{session_id}/jobs", status_code=202)
 def create_context_job(session_id: str, body: JobRequest, profile: str | None = None):
-    if body.action not in {"generate_units", "detect_salient", "draft_aggregates"}:
+    if body.action not in {"generate_units", "detect_salient", "draft_aggregates", "refresh_survival"}:
         raise HTTPException(status_code=400, detail="Unsupported action")
     home, sid, db, repo, _ = _resources(profile, session_id)
     job_id = f"cvjob-{uuid.uuid4().hex}"

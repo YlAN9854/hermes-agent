@@ -544,6 +544,84 @@ def test_salient_detection_keeps_rule_and_ai_guess_separate(tmp_path):
     repo.close()
 
 
+class Tier2FakeAdapter(FakeAdapter):
+    """Duck-typed Tier 2 adapter. Survival makes no LLM calls, so tests can
+    pass responses=[] and any accidental call surfaces as StopIteration."""
+
+    tier = 2
+
+    def __init__(self, turns, responses, active_texts, events=()):
+        super().__init__(turns, responses)
+        from context_vis.domain import ActiveContext, ActiveEntry
+        self.active = ActiveContext([
+            ActiveEntry("assistant" if synthetic else "user", text, None if synthetic else origin, synthetic)
+            for text, synthetic, origin in active_texts
+        ])
+        self.events = list(events)
+
+    def get_active_context(self): return self.active
+    def get_compression_events(self): return self.events
+
+
+def test_detect_salient_computes_survival_without_an_extra_llm_call(tmp_path):
+    turns = [Turn("t1", "user", "You must keep citations. Prefer short titles.", None, 1)]
+    generated = {"units": [{"title": "Rules", "covered_turn_ids": ["t1"], "summary_sentences": [{"text": "Rules stated", "sources": [{"turn_id": "t1", "quote": "You must keep citations."}]}]}]}
+    guessed = {"items": []}
+    # A dropped the turn entirely and replaced it with an unrelated summary.
+    adapter = Tier2FakeAdapter(turns, [generated, guessed], [("Unrelated compaction summary.", True, None)])
+    repo = ContextVisRepository(tmp_path)
+    service = ContextVisService(adapter, repo)
+    service.generate_units(False)
+
+    result = service.detect_salient()
+
+    assert [i["status_in_A"] for i in result["units"][0]["salient_infos"]] == ["absent"]
+    assert result["survival"]["event_count"] == 0
+    assert result["survival"]["active_fingerprint"]
+    # Exactly two LLM calls: units + exploratory salient. Survival adds none.
+    assert len(adapter.prompts) == 2
+    repo.close()
+
+
+def test_refresh_survival_job_persists_statuses_and_flags_staleness(tmp_path):
+    constraint = "You must keep citations."
+    turns = [Turn("t1", "user", f"{constraint} Prefer short titles.", None, 1)]
+    generated = {"units": [{"title": "Rules", "covered_turn_ids": ["t1"], "summary_sentences": [{"text": "Rules", "sources": [{"turn_id": "t1", "quote": constraint}]}]}]}
+    adapter = Tier2FakeAdapter(turns, [generated, {"items": []}], [(f"Reminder: {constraint}", True, None)])
+    repo = ContextVisRepository(tmp_path)
+    service = ContextVisService(adapter, repo)
+    service.generate_units(False)
+    service.detect_salient()
+
+    model, _, _ = service.load()
+    assert service.survival_is_stale(model) is False
+
+    # A changes: the constraint is gone from what the model sees.
+    from context_vis.domain import ActiveContext, ActiveEntry
+    adapter.active = ActiveContext([ActiveEntry("assistant", "Totally different summary.", None, True)])
+    model, _, _ = service.load()
+    assert service.survival_is_stale(model) is True
+
+    refreshed = service.refresh_survival()
+
+    assert [i["status_in_A"] for i in refreshed["units"][0]["salient_infos"]] == ["absent"]
+    model, _, _ = service.load()
+    assert service.survival_is_stale(model) is False
+    repo.close()
+
+
+def test_survival_stale_is_false_without_salient_infos_or_tier_two(tmp_path):
+    turns = [Turn("t1", "user", "Build the index.", None, 1)]
+    generated = {"units": [{"title": "Index", "covered_turn_ids": ["t1"], "summary_sentences": [{"text": "Index", "sources": [{"turn_id": "t1", "quote": "Build the index."}]}]}]}
+    repo = ContextVisRepository(tmp_path)
+    service = ContextVisService(Tier2FakeAdapter(turns, [generated], [("anything", True, None)]), repo)
+    service.generate_units(False)
+
+    model, _, _ = service.load()
+    assert service.survival_is_stale(model) is False  # no salient infos to judge
+    repo.close()
+
+
 def test_repository_rejects_stale_revision_and_only_recovers_jobs_explicitly(tmp_path):
     repo = ContextVisRepository(tmp_path)
     revision = repo.save("s", ContextVisModel().to_dict(), None)

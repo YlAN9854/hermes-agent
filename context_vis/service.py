@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import time
 import unicodedata
 import uuid
 from typing import Any
 
 from .codec import model_from_dict
 from .domain import (
-    AggregateNode, BacktrackLink, ContextVisModel, SalientInfo, SemanticUnit,
-    SpanRef, SummarySentence, Turn, validate_model,
+    ActiveContext, AggregateNode, BacktrackLink, ContextVisModel, SalientInfo, SemanticUnit,
+    SpanRef, SummarySentence, SurvivalState, Turn, validate_model,
 )
 from .repository import ContextVisRepository
+from .survival import update_survival
 
 CONSTRAINT_RE = re.compile(r"(?:必须|不要|不能|始终|禁止|务必|不得|绝不|切勿|请勿|must\b|never\b|always\b|do not\b|don't\b)", re.I)
 
@@ -145,6 +148,17 @@ def _resolve_quote(turn: Turn, quote: str, start_hint: int | None = None, allow_
     return SpanRef(turn.turn_id, first, first + len(quote))
 
 
+def active_fingerprint(active: ActiveContext | None) -> str:
+    """Cheap identity of A, so stored statuses can be told apart from stale ones."""
+    if active is None:
+        return ""
+    digest = hashlib.sha256()
+    for entry in active.entries:
+        digest.update(entry.content.encode("utf-8", "replace"))
+        digest.update(b"\x00")
+    return digest.hexdigest()
+
+
 class ContextVisService:
     def __init__(self, adapter: Any, repository: ContextVisRepository):
         self.adapter = adapter
@@ -157,6 +171,57 @@ class ContextVisService:
         model.tier = self.adapter.tier
         model.legacy_transcript_warning = self.adapter.legacy_warning
         return model, transcript, last
+
+    def _active(self) -> ActiveContext | None:
+        """A, or None for a Tier 1 adapter that does not implement it.
+
+        Spec §1 requires only get_full_transcript + llm_complete of a Tier 1
+        adapter, so the Tier 2 methods may legitimately be absent.
+        """
+        getter = getattr(self.adapter, "get_active_context", None)
+        return getter() if callable(getter) else None
+
+    def _events(self) -> list[Any]:
+        getter = getattr(self.adapter, "get_compression_events", None)
+        return list(getter()) if callable(getter) else []
+
+    def survival_is_stale(self, model: ContextVisModel) -> bool:
+        """Whether stored statuses were computed against a different A.
+
+        Read-side only: recomputing here would persist on every GET, bumping
+        the revision under the user and turning their next save into a 409.
+        """
+        if not any(unit.salient_infos for unit in model.units):
+            return False
+        if model.tier < 2:
+            return False
+        if model.survival is None:
+            return True
+        return model.survival.active_fingerprint != active_fingerprint(self._active())
+
+    def _apply_survival(self, model: ContextVisModel, transcript: list[Turn]) -> None:
+        active = self._active()
+        events = self._events()
+        update_survival(model, transcript, active)
+        reconstructed = [e for e in events if e.fidelity == "reconstructed"]
+        model.survival = SurvivalState(
+            computed_at=time.time(),
+            fidelity=(active.fidelity if active else None),
+            event_count=len(events),
+            active_fingerprint=active_fingerprint(active),
+            note=(
+                f"{len(reconstructed)} of {len(events)} compaction(s) were reconstructed from archived "
+                "rows rather than observed, so their boundaries are approximate."
+                if reconstructed else None
+            ),
+        )
+
+    def refresh_survival(self) -> dict[str, Any]:
+        model, transcript, last = self.load()
+        self._apply_survival(model, transcript)
+        validate_model(model, transcript)
+        model.revision = self.repo.save(self.adapter.session_id, model.to_dict(), last)
+        return model.to_dict()
 
     def generate_units(self, incremental: bool) -> dict[str, Any]:
         model, transcript, last = self.load()
@@ -328,6 +393,9 @@ TRANSCRIPT_JSON:\n{_turn_payload(transcript)}"""
             )
             first_seen[_norm_salient_text(item["quote"])] = info
             unit.salient_infos.append(info)
+        # Compute statuses in the same save that creates the infos, so a fresh
+        # detection is never shown as a full column of "unknown".
+        self._apply_survival(model, transcript)
         validate_model(model, transcript)
         model.revision = self.repo.save(self.adapter.session_id, model.to_dict(), last)
         return model.to_dict()

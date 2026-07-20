@@ -20,12 +20,21 @@ from .domain import ActiveContext, ContextVisModel, Turn
 # invalid: SequenceMatcher.ratio() is 2*M/T over the combined length, so a
 # 43-char constraint inside a 2.8k-char summary scores ~0.02 even when the
 # summary genuinely restates it. Fragment scoring restores the intended
-# semantics. Calibrated against the c6 eval case — see evals/context_vis.
-REFRAME_MATCH_THRESHOLD = 0.62
+# semantics.
+#
+# Calibrated on genuine reframings (0.38-0.90) against unrelated text
+# (0.0-0.41, the non-zero ones being character noise such as "and the ").
+# 0.50 rejects every measured false match, at the cost of missing the most
+# heavily reworded paraphrase. The asymmetry is deliberate per 铁律 6: a false
+# "reframed" tells the user the model still knows a constraint when it does
+# not, whereas a false "absent" merely under-claims.
+REFRAME_MATCH_THRESHOLD = 0.50
 
-# The longest common block must cover this fraction of the constraint before a
-# fragment is scored at all: a cheap reject that also stops a handful of shared
-# stopwords from manufacturing a "reframing".
+# Matching text must cover this fraction of the constraint before a fragment is
+# scored at all: a cheap reject that stops a handful of shared stopwords from
+# manufacturing a "reframing". Measured over ALL common blocks, not just the
+# longest: a heavily reworded paraphrase matches in several short runs, and
+# gating on the longest run alone rejected genuine reframings.
 MIN_ANCHOR_COVERAGE = 0.35
 
 # Fragment window width, as a multiple of the constraint length.
@@ -100,9 +109,12 @@ def _best_fragment(needle: str, entry_norm: str, offsets: list[int], raw: str) -
     junk, which for prose silently discards spaces and most vowels.
     """
     matcher = SequenceMatcher(None, needle, entry_norm, autojunk=False)
-    anchor = max(matcher.get_matching_blocks(), key=lambda block: block.size)
-    if anchor.size < MIN_ANCHOR_COVERAGE * len(needle):
+    blocks = matcher.get_matching_blocks()
+    if sum(block.size for block in blocks) < MIN_ANCHOR_COVERAGE * len(needle):
         return 0.0, ""
+    # The longest block positions the window even though the gate above spans
+    # all of them: it is the most reliable centre for the restated text.
+    anchor = max(blocks, key=lambda block: block.size)
     width = max(int(len(needle) * FRAGMENT_WINDOW_SCALE), anchor.size)
     centre = anchor.b + anchor.size // 2
     best_score, best_bounds = 0.0, None
