@@ -307,6 +307,74 @@ def test_adapter_deduplicates_provenance_copies_and_hides_summary(tmp_path):
     db.close()
 
 
+def _compacted_session(tmp_path, summary="[CONTEXT SUMMARY]: the user forbade dropping production"):
+    """Build a session that has been compacted in place, plus its adapter."""
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("s", "cli")
+    db.append_message("s", "user", "never drop the production database")
+    db.append_message("s", "assistant", "understood")
+    db.append_message("s", "user", "carry on")
+    loaded = db.get_messages_as_conversation("s")
+    db.archive_and_compact("s", [
+        {"role": "assistant", "content": summary, "_compressed_summary": True},
+        loaded[2],
+    ])
+    return db, HermesContextAdapter(db, "s", tmp_path)
+
+
+def test_active_context_keeps_the_summary_that_transcript_b_excludes(tmp_path):
+    db, adapter = _compacted_session(tmp_path)
+
+    active = adapter.get_active_context()
+    transcript = adapter.get_full_transcript()
+
+    # A holds the summary (the model sees it); B never does.
+    summary_entries = [e for e in active.entries if e.synthetic]
+    assert len(summary_entries) == 1
+    assert summary_entries[0].origin_turn_id is None
+    assert not any("CONTEXT SUMMARY" in t.content for t in transcript)
+    # The surviving turn keeps its B linkage.
+    assert [e.origin_turn_id for e in active.entries if not e.synthetic] == ["hermes-msg:3"]
+    assert adapter.tier == 2
+    db.close()
+
+
+def test_tier_degrades_to_one_without_an_active_context(tmp_path):
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("empty", "cli")
+    adapter = HermesContextAdapter(db, "empty", tmp_path)
+
+    assert adapter.get_active_context() is None
+    assert adapter.tier == 1
+    assert adapter.get_compression_events() == []
+    db.close()
+
+
+def test_adapter_reads_probe_events_and_skips_unknown_versions(tmp_path):
+    db, adapter = _compacted_session(tmp_path)
+    directory = tmp_path / "context-vis" / "compaction"
+    directory.mkdir(parents=True)
+    (directory / "s.jsonl").write_text("\n".join([
+        json.dumps({"v": 1, "event_id": "e2", "ts": 200.0, "before_turn_ids": ["hermes-msg:1", "hermes-msg:3"],
+                    "after_turn_ids": ["hermes-msg:3"], "summary_text": "second", "unlinked_before": 2}),
+        json.dumps({"v": 1, "event_id": "e1", "ts": 100.0, "before_turn_ids": ["hermes-msg:1", "hermes-msg:2"],
+                    "after_turn_ids": ["hermes-msg:2"], "summary_text": "first"}),
+        json.dumps({"v": 99, "event_id": "future", "ts": 300.0}),
+        "not json at all",
+    ]), encoding="utf-8")
+
+    events = adapter.get_compression_events()
+
+    # Sorted by time, sequence-numbered, unknown version and torn line skipped.
+    assert [e.event_id for e in events] == ["e1", "e2"]
+    assert [e.sequence for e in events] == [1, 2]
+    assert events[0].dropped_turn_ids == ["hermes-msg:1"]
+    assert events[0].fidelity == "observed"
+    assert events[0].note is None
+    assert "no transcript provenance" in events[1].note
+    db.close()
+
+
 def test_backlinks_only_point_backwards():
     transcript = [Turn("t1", "user", "one", None, 1), Turn("t2", "user", "two", None, 2)]
     from context_vis.domain import SemanticUnit, SummarySentence, SpanRef
@@ -329,9 +397,13 @@ def test_dashboard_context_vis_endpoint_reads_isolated_profile_home(_isolate_her
     db.close()
 
     payload = get_context_session("api-session")
-    assert payload["capabilities"] == {"tier": 1, "compression_events": False, "preserve": False}
+    # A is readable, so Tier 2 — but this session was never compressed, so the
+    # compression affordances stay off. Those are separate axes.
+    assert payload["capabilities"] == {
+        "tier": 2, "compression_events": False, "compression_fidelity": "observed", "preserve": False,
+    }
     assert payload["transcript"][0]["content"] == "immutable truth"
-    assert payload["model"]["tier"] == 1
+    assert payload["model"]["tier"] == 2
 
 
 def _survival_fixture(constraint: str, active_texts: list[tuple[str, bool]], tier: int = 2):

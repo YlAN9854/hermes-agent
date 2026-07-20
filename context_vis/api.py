@@ -61,7 +61,7 @@ def _resources(profile: str | None, session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     sid = db.resolve_resume_session_id(sid)
     repo = ContextVisRepository(home)
-    adapter = HermesContextAdapter(db, sid)
+    adapter = HermesContextAdapter(db, sid, home)
     return home, sid, db, repo, adapter
 
 
@@ -105,9 +105,18 @@ def get_context_session(session_id: str, profile: str | None = None):
     _, sid, db, repo, adapter = _resources(profile, session_id)
     try:
         model, transcript, _ = ContextVisService(adapter, repo).load()
+        active = adapter.get_active_context()
+        events = adapter.get_compression_events()
         return {
             "session_id": sid,
-            "capabilities": {"tier": 1, "compression_events": False, "preserve": False},
+            "capabilities": {
+                "tier": adapter.tier,
+                "compression_events": bool(events),
+                "compression_fidelity": (
+                    events[-1].fidelity if events else (active.fidelity if active else None)
+                ),
+                "preserve": False,
+            },
             "model": model.to_dict(),
             "transcript": [t.__dict__ for t in transcript],
         }
@@ -120,7 +129,7 @@ def _run_job(home: Path, session_id: str, job_id: str, request: dict[str, Any]) 
     db = SessionDB(db_path=home / "state.db")
     try:
         repo.update_job(job_id, "running")
-        service = ContextVisService(HermesContextAdapter(db, session_id), repo)
+        service = ContextVisService(HermesContextAdapter(db, session_id, home), repo)
         action = request["action"]
         if action == "generate_units":
             result = service.generate_units(bool(request.get("incremental")))
