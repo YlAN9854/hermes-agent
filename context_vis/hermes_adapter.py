@@ -128,7 +128,10 @@ class HermesContextAdapter:
         Wholesale replace: the given spans become the entire pin set, so pinning
         and unpinning are both just "send the new set" (an empty list clears).
         Spans finer than a turn pin the whole turn — compaction keeps or drops
-        whole turns. Turns beyond the safety cap are rejected, request order wins.
+        whole turns. Turns are rejected when they are non-preservable (a tool
+        turn, or an assistant turn with no text, whose only payload is a tool
+        call that would be stripped if its paired result were dropped) or would
+        exceed the safety cap; request order wins.
         """
         transcript = {turn.turn_id: turn for turn in self.get_full_transcript()}
         # Resolve spans to distinct turn ids in request order; skip unknown turns.
@@ -140,9 +143,18 @@ class HermesContextAdapter:
 
         accepted: list[str] = []
         rejected: list[str] = []
+        non_preservable: list[str] = []
         used = 0
         for tid in turn_ids:
-            size = len(transcript[tid].content)
+            turn = transcript[tid]
+            # A tool turn, or an assistant turn with no text, cannot be kept
+            # verbatim: its content is a tool call bound to a result the
+            # compaction may drop, leaving the call to be stripped. Refuse it
+            # transparently rather than pin something that won't survive.
+            if turn.role == "tool" or not turn.content.strip():
+                non_preservable.append(tid)
+                continue
+            size = len(turn.content)
             if used + size <= MAX_PINNED_CHARS:
                 accepted.append(tid)
                 used += size
@@ -150,13 +162,18 @@ class HermesContextAdapter:
                 rejected.append(tid)
 
         self._write_pins(accepted)
-        note = None
+        notes = []
+        if non_preservable:
+            notes.append(
+                f"{len(non_preservable)} turn(s) hold only a tool call or no text and cannot be "
+                "preserved verbatim; pin the user/assistant text turn instead."
+            )
         if rejected:
-            note = (
+            notes.append(
                 f"{len(rejected)} turn(s) exceeded the pin budget (~{MAX_PINNED_CHARS} chars) "
                 "and were left unpinned so compaction can still reduce the context."
             )
-        return PreserveResult(True, accepted, rejected, note)
+        return PreserveResult(True, accepted, non_preservable + rejected, " ".join(notes) or None)
 
     def _rows(self, active_only: bool = False) -> list[dict[str, Any]]:
         lineage = self.db.get_compression_lineage(self.session_id) or [self.session_id]

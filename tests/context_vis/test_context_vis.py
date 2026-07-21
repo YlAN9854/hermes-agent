@@ -453,6 +453,28 @@ def test_adapter_request_preserve_writes_pin_file_and_caps_oversized(tmp_path):
     db.close()
 
 
+def test_adapter_rejects_turns_that_cannot_be_preserved_verbatim(tmp_path):
+    """A tool turn, or an assistant turn whose only payload is a tool call
+    (empty text), cannot be kept verbatim — pinning it and dropping its paired
+    result would leave the call to be stripped. Refuse them transparently."""
+    from context_vis.domain import SpanRef
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("s", "cli")
+    db.append_message("s", "user", "must never drop prod")             # msg 1: preservable
+    db.append_message("s", "assistant", "", tool_calls=[{"id": "c1", "function": {"name": "run"}}])  # msg 2: tool-call only
+    db.append_message("s", "tool", "result output", tool_name="run", tool_call_id="c1")  # msg 3: tool turn
+    adapter = HermesContextAdapter(db, "s", tmp_path)
+
+    result = adapter.request_preserve([
+        SpanRef("hermes-msg:1", 0, 5), SpanRef("hermes-msg:2", 0, 1), SpanRef("hermes-msg:3", 0, 5),
+    ])
+
+    assert result.accepted_turn_ids == ["hermes-msg:1"]                # only the text turn
+    assert set(result.rejected_turn_ids) == {"hermes-msg:2", "hermes-msg:3"}
+    assert result.note and "tool call" in result.note
+    db.close()
+
+
 def test_tier_degrades_to_one_without_an_active_context(tmp_path):
     db = SessionDB(tmp_path / "state.db")
     db.create_session("empty", "cli")
