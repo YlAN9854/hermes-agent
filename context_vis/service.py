@@ -60,29 +60,49 @@ def _turn_batches(turns: list[Turn], max_chars: int = 60_000) -> list[list[Turn]
     return batches
 
 
+_LINE_NUMBER_PREFIX = re.compile(r"\d+\|")
+
+
 def _without_markdown_decorators(text: str) -> tuple[str, list[int]]:
     """Return text normalized for quote matching plus raw offsets.
 
     LLMs frequently copy rendered text rather than the literal source: inline
     Markdown decorators disappear (``**label**: `value``` becomes
-    ``label: value``) and hard line wraps inside prose are quoted as a single
-    space (``no such\\nproblem`` becomes ``no such problem``). Both defeat an
-    exact ``str.find``. Strip decorators and fold whitespace runs into one
-    space; the offset map lets quote resolution still produce a SpanRef into
-    the immutable raw transcript rather than into a normalized copy.
+    ``label: value``), hard line wraps inside prose are quoted as a single
+    space (``no such\\nproblem`` becomes ``no such problem``), and the read
+    tool's ``NN|`` line-number prefixes are copied with the wrong number
+    (``54|value`` quoted as ``55|value``). All defeat an exact ``str.find``.
+    Strip decorators and the line-number prefixes, and fold whitespace runs
+    into one space; the offset map lets quote resolution still produce a
+    SpanRef into the immutable raw transcript rather than into a normalized
+    copy. Line numbers stay in the raw transcript — only matching ignores them.
     """
     normalized: list[str] = []
     raw_offsets: list[int] = []
-    for index, char in enumerate(text):
+    at_line_start = True
+    index, length = 0, len(text)
+    while index < length:
+        if at_line_start:
+            prefix = _LINE_NUMBER_PREFIX.match(text, index)
+            if prefix:
+                index = prefix.end()  # drop the whole NN| prefix
+                at_line_start = False
+                continue
+        char = text[index]
         if char in {"*", "`"}:
+            index += 1
             continue
         if char.isspace():
-            if normalized and normalized[-1] == " ":
-                continue
-            normalized.append(" ")
-        else:
-            normalized.append(char)
+            at_line_start = char == "\n"
+            if not (normalized and normalized[-1] == " "):
+                normalized.append(" ")
+                raw_offsets.append(index)
+            index += 1
+            continue
+        normalized.append(char)
         raw_offsets.append(index)
+        at_line_start = False
+        index += 1
     return "".join(normalized), raw_offsets
 
 

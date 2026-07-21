@@ -151,6 +151,24 @@ def test_generation_resolves_rendered_markdown_quote_to_raw_source_span(tmp_path
     repo.close()
 
 
+def test_generation_resolves_quote_with_wrong_line_number_prefix(tmp_path):
+    # The read tool renders code with NN| line prefixes; the LLM copies the
+    # line but miscounts the number (54| quoted as 55|). Matching must ignore
+    # the prefix while the raw transcript keeps it.
+    content = "50|def f():\n51|    x = 1\n52|    return x\n"
+    turns = [Turn("t1", "tool", content, "read_file", 1)]
+    response = {"units": [{"title": "Read", "covered_turn_ids": ["t1"], "summary_sentences": [{
+        "text": "Reads x", "sources": [{"turn_id": "t1", "quote": "99|    x = 1"}],
+    }]}]}
+    repo = ContextVisRepository(tmp_path)
+
+    result = ContextVisService(FakeAdapter(turns, [response]), repo).generate_units(False)
+
+    span = result["units"][0]["summary_sentences"][0]["source_spans"][0]
+    assert "x = 1" in content[span["char_start"]:span["char_end"]]
+    repo.close()
+
+
 def test_generation_resolves_quote_across_hard_line_wraps(tmp_path):
     content = "The listener stalls because there is no such\nproblem in the parked consumer group, and restarts drain it."
     turns = [Turn("t1", "assistant", content, None, 1)]
