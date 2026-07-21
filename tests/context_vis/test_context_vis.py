@@ -296,6 +296,45 @@ def test_repository_delete_model_allows_regeneration(tmp_path):
     repo.close()
 
 
+def test_text_unwraps_tool_result_envelopes_to_readable_text():
+    from context_vis.hermes_adapter import _text
+    # File-read envelope: readable content under "content", escaped newlines.
+    read = json.dumps({"content": "1|# logpipe\n2|\n3|Batch ingestion", "file_size": 748, "truncated": False})
+    assert _text(read) == "1|# logpipe\n2|\n3|Batch ingestion"
+    # Shell envelope: readable output under "output".
+    shell = json.dumps({"error": "", "exit_code": 0, "output": "PASS\n2 files"})
+    assert _text(shell) == "PASS\n2 files"
+    # Edit envelope: readable under "diff".
+    edit = json.dumps({"diff": "@@ -1 +1 @@\n-a\n+b", "success": True, "files_modified": ["x.py"]})
+    assert _text(edit) == "@@ -1 +1 @@\n-a\n+b"
+    # Count-only envelope has no readable field: kept verbatim, never crashes.
+    count = json.dumps({"total_count": 42})
+    assert _text(count) == count
+    # A plain string that merely starts with a brace is not JSON: returned as-is.
+    assert _text("{not json") == "{not json"
+    # Native dict (not a JSON string) is unwrapped too.
+    assert _text({"output": "hi"}) == "hi"
+    # Failed command: empty output falls through to error text.
+    assert _text(json.dumps({"output": "", "error": "boom", "exit_code": 1})) == "boom"
+
+
+def test_active_and_transcript_unwrap_consistently(tmp_path):
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("s", "cli")
+    db.append_message("s", "user", "read the file")
+    db.append_message("s", "tool", json.dumps({"content": "line one\nline two", "file_size": 17}), tool_name="read_file")
+    adapter = HermesContextAdapter(db, "s", tmp_path)
+
+    transcript = adapter.get_full_transcript()
+    active = adapter.get_active_context()
+
+    tool_turn = [t for t in transcript if t.role == "tool"][0]
+    assert tool_turn.content == "line one\nline two"  # B is readable, not JSON
+    tool_entry = [e for e in active.entries if e.role == "tool"][0]
+    assert tool_entry.content == "line one\nline two"  # A extracts identically
+    db.close()
+
+
 def test_adapter_deduplicates_provenance_copies_and_hides_summary(tmp_path):
     db = SessionDB(tmp_path / "state.db")
     db.create_session("s", "cli")
@@ -355,8 +394,11 @@ def test_adapter_reads_probe_events_and_skips_unknown_versions(tmp_path):
     directory = tmp_path / "context-vis" / "compaction"
     directory.mkdir(parents=True)
     (directory / "s.jsonl").write_text("\n".join([
+        # e2 observed the session's one real boundary — its summary matches the
+        # archived synthetic row, so reconstruction of that boundary is suppressed.
         json.dumps({"v": 1, "event_id": "e2", "ts": 200.0, "before_turn_ids": ["hermes-msg:1", "hermes-msg:3"],
-                    "after_turn_ids": ["hermes-msg:3"], "summary_text": "second", "unlinked_before": 2}),
+                    "after_turn_ids": ["hermes-msg:3"],
+                    "summary_text": "[CONTEXT SUMMARY]: the user forbade dropping production", "unlinked_before": 2}),
         json.dumps({"v": 1, "event_id": "e1", "ts": 100.0, "before_turn_ids": ["hermes-msg:1", "hermes-msg:2"],
                     "after_turn_ids": ["hermes-msg:2"], "summary_text": "first"}),
         json.dumps({"v": 99, "event_id": "future", "ts": 300.0}),
@@ -400,22 +442,62 @@ def test_reconstructs_history_for_sessions_that_predate_the_probe(tmp_path):
 
 
 def test_probe_records_suppress_reconstruction_of_the_same_boundary(tmp_path):
-    db, adapter = _compacted_session(tmp_path)
-    assert adapter.get_compression_events()[0].fidelity == "reconstructed"
+    summary = "[CONTEXT SUMMARY]: the user forbade dropping production"
+    db, adapter = _compacted_session(tmp_path, summary=summary)
+    # Without a probe record the one boundary is reconstructed.
+    recon = adapter.get_compression_events()
+    assert [e.fidelity for e in recon] == ["reconstructed"]
+    synthetic_ts = recon[0].timestamp
 
+    # The probe observed the SAME boundary: matching summary, and a wall-clock
+    # ts captured a few ms AFTER the synthetic row was persisted -- the exact
+    # skew that defeated timestamp-based dedup and double-counted the event.
     directory = tmp_path / "context-vis" / "compaction"
     directory.mkdir(parents=True)
     (directory / "s.jsonl").write_text(json.dumps({
-        "v": 1, "event_id": "observed-1", "ts": 1e12,  # after the archived rows
-        "before_turn_ids": ["hermes-msg:1", "hermes-msg:3"], "after_turn_ids": ["hermes-msg:3"],
-        "summary_text": "observed summary",
+        "v": 1, "event_id": "observed-1", "ts": synthetic_ts + 0.015,
+        "before_turn_ids": ["hermes-msg:1", "hermes-msg:2", "hermes-msg:3"],
+        "after_turn_ids": ["hermes-msg:3"], "summary_text": summary,
     }) + "\n", encoding="utf-8")
 
     events = HermesContextAdapter(db, "s", tmp_path).get_compression_events()
 
-    # The older boundary is still reconstructed; the observed one is not duplicated.
+    # Exactly one event: the observed one. The reconstruction is suppressed by
+    # summary match, not by an unreliable timestamp comparison.
+    assert [(e.fidelity, e.event_id) for e in events] == [("observed", "observed-1")]
+    assert events[0].sequence == 1
+    db.close()
+
+
+def test_older_boundary_reconstructed_while_newer_one_observed(tmp_path):
+    """A session compacted before AND after the probe was installed keeps both
+    boundaries: the older reconstructed, the newer observed, no duplication."""
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("s", "cli")
+    for role, text in [("user", "one"), ("assistant", "two"), ("user", "three"), ("assistant", "four")]:
+        db.append_message("s", role, text)
+    loaded = db.get_messages_as_conversation("s")
+    db.archive_and_compact("s", [{"role": "assistant", "content": "[CONTEXT SUMMARY]: gen ONE early", "_compressed_summary": True}, loaded[3]])
+    db.append_message("s", "user", "five")
+    loaded2 = db.get_messages_as_conversation("s")
+    db.archive_and_compact("s", [{"role": "assistant", "content": "[CONTEXT SUMMARY]: gen TWO late", "_compressed_summary": True}, loaded2[-1]])
+
+    # Probe observed only the second (later) boundary.
+    directory = tmp_path / "context-vis" / "compaction"
+    directory.mkdir(parents=True)
+    # ts after the archived rows (which carry real wall-clock time), so the
+    # observed late boundary sorts after the reconstructed early one.
+    (directory / "s.jsonl").write_text(json.dumps({
+        "v": 1, "event_id": "obs-late", "ts": 2e9,
+        "before_turn_ids": ["hermes-msg:4", "hermes-msg:7"], "after_turn_ids": ["hermes-msg:7"],
+        "summary_text": "[CONTEXT SUMMARY]: gen TWO late",
+    }) + "\n", encoding="utf-8")
+
+    events = HermesContextAdapter(db, "s", tmp_path).get_compression_events()
+
     assert [e.fidelity for e in events] == ["reconstructed", "observed"]
-    assert [e.event_id for e in events][-1] == "observed-1"
+    assert "gen ONE early" in events[0].summary_text
+    assert events[1].event_id == "obs-late"
     db.close()
 
 

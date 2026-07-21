@@ -14,6 +14,11 @@ from .domain import ActiveContext, ActiveEntry, CompressionEvent, Turn
 # rather than misread. Kept in sync with agent/compaction_probe.py.
 PROBE_RECORD_VERSION = 1
 
+
+def _norm_summary(text: str | None) -> str:
+    """Whitespace-collapsed summary text, for matching observed vs archived."""
+    return " ".join((text or "").split())
+
 _SUMMARY_PREFIXES = (
     "[CONTEXT COMPACTION — REFERENCE ONLY]",
     "[CONTEXT COMPACTION - REFERENCE ONLY]",
@@ -22,9 +27,43 @@ _SUMMARY_PREFIXES = (
 )
 
 
+# Tool results are stored as structured dicts (JSON-serialised into the
+# content column). Each tool puts its human-readable output under a different
+# key; B must expose that readable text, not the escaped JSON envelope, or the
+# truth layer shows blobs and quote resolution fails against escaped newlines.
+_TOOL_TEXT_KEYS = ("content", "output", "diff", "text", "error")
+
+
+def _unwrap_tool_envelope(data: dict) -> str | None:
+    """Pull the primary readable field out of a tool-result dict, or None."""
+    for key in _TOOL_TEXT_KEYS:
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+        if isinstance(value, list):
+            joined = _text(value)
+            if joined.strip():
+                return joined
+    return None
+
+
 def _text(content: Any) -> str:
     if isinstance(content, str):
+        stripped = content.lstrip()
+        if stripped[:1] in "{[":
+            try:
+                parsed = json.loads(content)
+            except ValueError:
+                return content
+            if isinstance(parsed, dict):
+                unwrapped = _unwrap_tool_envelope(parsed)
+                return unwrapped if unwrapped is not None else content
+            if isinstance(parsed, list):
+                return _text(parsed)
         return content
+    if isinstance(content, dict):
+        unwrapped = _unwrap_tool_envelope(content)
+        return unwrapped if unwrapped is not None else json.dumps(content, ensure_ascii=False)
     if isinstance(content, list):
         return "\n".join(str(p.get("text", "")) for p in content if isinstance(p, dict) and p.get("text"))
     return str(content or "")
@@ -167,7 +206,7 @@ class HermesContextAdapter:
             rows.extend(sorted(self.db.get_messages(sid, include_inactive=True), key=lambda r: r["id"]))
         return rows
 
-    def _reconstructed_events(self, before_ts: float | None) -> list[CompressionEvent]:
+    def _reconstructed_events(self, observed: list[CompressionEvent]) -> list[CompressionEvent]:
         """Derive past compactions from archived rows, for pre-probe history.
 
         A compaction leaves its summary row followed by copies of the turns it
@@ -176,7 +215,17 @@ class HermesContextAdapter:
         earlier block was dropped. This cannot see turns that were never
         flushed, and cannot tell a summarised drop from a pruned tool result,
         hence fidelity="reconstructed".
+
+        A boundary the probe already observed is suppressed by matching the
+        summary text, not the timestamp: the probe's wall-clock ts is captured
+        a few ms after the summary row is persisted, so a timestamp comparison
+        never recognised the same event. The observed summary_text is a prefix
+        of the archived summary row (same text), so containment identifies it.
         """
+        observed_summaries = [
+            _norm_summary(event.summary_text) for event in observed if event.summary_text
+        ]
+
         blocks: list[dict[str, Any]] = []
         current: dict[str, Any] = {"summary": None, "ts": 0.0, "ids": []}
         for row in self._lineage_rows():
@@ -195,8 +244,11 @@ class HermesContextAdapter:
         events: list[CompressionEvent] = []
         for index in range(1, len(blocks)):
             previous, block = blocks[index - 1], blocks[index]
-            if before_ts is not None and block["ts"] >= before_ts:
-                continue  # covered by an observed probe record
+            block_summary = _norm_summary(block["summary"]) if block["summary"] else ""
+            if block_summary and any(
+                block_summary in obs or obs in block_summary for obs in observed_summaries
+            ):
+                continue  # the probe already observed this exact boundary
             # "Kept" means carried across the boundary, so it must appear on
             # both sides: a block also holds turns appended after that
             # compaction, which it did not keep.
@@ -240,10 +292,10 @@ class HermesContextAdapter:
                     if unlinked else None
                 ),
             ))
-        # Reconstruct only what predates the observed records, so a session
-        # compacted both before and after the probe was installed keeps its
-        # full history without deriving the same boundary twice.
-        events.extend(self._reconstructed_events(min((e.timestamp for e in events), default=None)))
+        # Reconstruct pre-probe history, suppressing any boundary the probe
+        # already observed, so a session compacted both before and after the
+        # probe was installed keeps its full history without double-counting.
+        events.extend(self._reconstructed_events(list(events)))
         events.sort(key=lambda e: e.timestamp)
         self._events_cache = [
             replace(event, sequence=index) for index, event in enumerate(events, start=1)
