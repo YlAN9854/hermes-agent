@@ -47,6 +47,24 @@ def test_pinned_middle_turn_survives_verbatim_while_others_summarized():
     assert compressor._keep_turn_ids is None
 
 
+def test_load_pinned_turn_ids_reads_the_adapter_pin_file(tmp_path, monkeypatch):
+    import json
+    import hermes_constants
+    from agent.conversation_compression import _load_pinned_turn_ids
+
+    monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: tmp_path)
+    pins = tmp_path / "context-vis" / "pins"
+    pins.mkdir(parents=True)
+    (pins / "sess.json").write_text(json.dumps({"v": 1, "turn_ids": ["hermes-msg:3", "hermes-msg:7"]}))
+
+    assert _load_pinned_turn_ids("sess") == {"hermes-msg:3", "hermes-msg:7"}
+    # Missing file, unknown session, and bad version all degrade to no pins.
+    assert _load_pinned_turn_ids("other") == set()
+    assert _load_pinned_turn_ids(None) == set()
+    (pins / "v2.json").write_text(json.dumps({"v": 99, "turn_ids": ["x"]}))
+    assert _load_pinned_turn_ids("v2") == set()
+
+
 def test_no_pins_leaves_behaviour_unchanged():
     msgs = _build_messages(20)
     compressor = _compressor()
