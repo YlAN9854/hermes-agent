@@ -66,3 +66,32 @@ Tier 2 的骨架是对的——探针忠实、A/B 分离正确、B 不可变性�
 - **FAIL-1 真实数据确认**：`event_count=1`，无重复。
 
 `reframed` 路径本会话未真实触发（turn 1 逐字存活），已在 c6 合成用例独立验证 3/3。**存活判定正确性**此前已由独立 auditor 在真实 A/B 上复现确认。至此端到端验收全部闭环。
+
+---
+
+# Tier 3 preserve 端到端验收（2026-07-21）
+
+用户主导保留：勾选的原文轮次被 pin，压缩时保留 verbatim 而非摘要掉。后端全做，UI 往后（见 plan）。实现 5 提交：`31f96111`（domain+adapter+核心 pin 感知压缩）、`a19a9f45`（同步 preserve 端点）、`1de06ad7`/`8555b21f`（loader + 全链去混淆测试）、`8809ae30`（拒绝不可保留轮的修复）。单测 72 全绿。
+
+**关键前提**：规格 §5.5 说的"Hermes 方向一已验证的机制"不存在——压缩保护纯位置式（头 N + 尾按 token），无逐消息 keep 标记。本轮建成：adapter 写 pin 文件 `<HOME>/context-vis/pins/<session>.json`，核心 `compress_context` 读纯 JSON（不 import context_vis）设 `_keep_turn_ids`，`compress()` 把 pin 轮移出摘要窗口、摘要后 verbatim 重插。
+
+## 多层验证
+
+- **核心（确定性）**：`compress()` 单测——pin 的中间轮 verbatim 存活、未 pin 的被摘要；无 pin 时逐字节不变。
+- **loader（确定性）**：`_load_pinned_turn_ids` 读 pin 文件，缺失/坏文件/未知版本降级为空集。
+- **全链去混淆（确定性）**：真实 pin 文件 → 真实 loader → 真实 `compress()`，受控消息布局使 pin 轮确在窗口内——pin 轮保留、未 pin 邻居被摘要。
+- **真实会话（独立 auditor 判定）**：见下。
+
+## 真实会话验收（独立 sub agent 判定，两轮）
+
+驱动真实 Hermes agent 连续会话至真实自动压缩，中途 pin 一轮，独立 auditor 从产物+DB 自行核验。
+
+**第一轮 PARTIAL（auditor 抓出真实缺陷）**：盲位置选中的 pin 轮恰是一个"只含 tool_call、无文本"的 assistant 轮；pin 保住了槽位，但其配对 tool_result 被压缩丢弃，`_sanitize_tool_pairs` 剥掉了孤立的 call → 该轮以 `"(tool call removed)"` 存活，**非 verbatim**。这是真实正确性缺陷，非测试假象。
+
+**修复（`8809ae30`）**：`request_preserve` 现在**透明拒绝**不可保留轮（tool 轮、无文本 assistant 轮），在 PreserveResult.note 说明并指向文本轮，而非 pin 一个注定被剥离的东西。预期用途（pin 用户约束＝实质文本轮）不受影响。
+
+**第二轮 PASS（独立 auditor 复核）**：pin 一条实质用户约束轮（msg 5）。真实压缩丢弃了 msg 4 与 6–29 连续块，**只留下 pin 的 msg 5**——`B.content == A.content` 逐字节一致，作为独立 `synthetic=false, role=user` 条目存在（非摘要内引用），两个邻居（4、6）均被摘要。auditor 四点全过 + 回归确认 `"(tool call removed)"` 失败模式消失。
+
+## 结论
+
+Tier 3 后端完成并端到端验证：pin 使一个本会被压缩丢弃的实质文本轮 verbatim 存活于 A。独立验收先抓出 tool-call 轮的真实缺陷、修复后复核为 PASS。安全性：pin 总量有上限（防 thrash），不可保留轮被拒。剩余：UI 勾选/取消（端点已就绪）。
