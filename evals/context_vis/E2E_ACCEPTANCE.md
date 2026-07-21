@@ -53,8 +53,16 @@ Tier 2 的骨架是对的——探针忠实、A/B 分离正确、B 不可变性�
 | FAIL-3 `_text()` 解包工具 JSON 信封 | `fb573b1f` | 22 个 tool turns 0 残留 JSON；auditor 报的失败引文 `API_KEY = os.environ.get("LOGPIPE_API_KEY", "")` 现可解析 |
 | FAIL-1 事件去重改摘要匹配（非时间戳） | `fb573b1f` | 真实会话 `get_compression_events()` 返回 1 个事件（原 2 个） |
 | FAIL-2 重建把 active turn 计入幸存 | `8a9e5958` | 真实边界重建 dropped=13/kept=17，head msg 1–4 正确在 kept，与探针一致 |
-| FAIL-4（附加发现）全角 ； 断句 | `bd…`（本轮） | 三条枚举约束由 1 条拆为 3 条，"Python 3.10" 不误拆 |
+| FAIL-4（附加发现）全角 ； 断句 | `b903630b` | 三条枚举约束由 1 条拆为 3 条，"Python 3.10" 不误拆 |
+| FAIL-5（贯通时新发现）行号前缀 NN\| 引文归一化 | `610c055e` | LLM 引 `55\|` 而 B 是 `54\|`（错行号），归一化忽略前缀后可解析；B 保留行号 |
 
-单测 44→49 全绿。**存活判定本身已验证正确**：auditor 直接在真实 A/B 上复现 `detect_salient`+`update_survival`，三条约束均判 `present`（因压缩逐字保留了 turn 1），与其独立 ground truth 一致；指针纪律 PASS（`span_in_B` 精确引 B、`ActiveEntry` 无 turn_id、A 侧只存纯文本）。
+单测 44→50 全绿。
 
-**残留说明**：完整 `generate_units→detect→survival` 单脚本贯通因 deepseek provider 过载（529）挂在网络等待，非代码问题（已用单测 + 直接引文解析验证 FAIL-3 修复）。reframed/absent 路径在本会话未被真实触发（turn 1 逐字存活），但已在 c6 合成用例独立验证 3/3。provider 恢复后可重跑 `gen_pipeline.py` 补最后一次贯通确认。
+**最终贯通确认（provider 恢复后，2026-07-21）**：完整 `generate_units→detect_salient→refresh_survival` 在真实压缩会话上**一次跑通**，机械完整性核查全部通过：
+- 41 个摘要 span **0 个失效**（全部解析回 B）——五个引文族修复协同生效，`generate_units` 干净完成；
+- 5 条 salient，`span_in_B` 与 `detected_text` **全部精确一致**（指针纪律贯穿全链）；
+- **FAIL-4 真实数据确认**：三条约束是三条独立 badge（第一/第二/第三），各判 `present`（turn 1 逐字存活）；
+- **`absent` 路径真实触发**：被压缩丢弃的 report.py 约束 "the column order is load-bearing" 正确判 `absent`；
+- **FAIL-1 真实数据确认**：`event_count=1`，无重复。
+
+`reframed` 路径本会话未真实触发（turn 1 逐字存活），已在 c6 合成用例独立验证 3/3。**存活判定正确性**此前已由独立 auditor 在真实 A/B 上复现确认。至此端到端验收全部闭环。
