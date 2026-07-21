@@ -441,6 +441,32 @@ def test_reconstructs_history_for_sessions_that_predate_the_probe(tmp_path):
     db.close()
 
 
+def test_reconstruction_keeps_head_survivors_copied_above_the_summary(tmp_path):
+    """In-place compaction keeps head AND tail turns, with head copies placed
+    ABOVE the summary row. The synthetic-delimited block puts them in the
+    pre-boundary block, so without the active-set correction they are reported
+    dropped even though they survived."""
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("s", "cli")
+    for role, text in [("user", "keep head"), ("assistant", "drop me 1"), ("user", "drop me 2"),
+                       ("assistant", "drop me 3"), ("user", "keep tail")]:
+        db.append_message("s", role, text)
+    loaded = db.get_messages_as_conversation("s")
+    # Survivors surround the summary: [head, SUMMARY, tail].
+    db.archive_and_compact("s", [
+        loaded[0],
+        {"role": "assistant", "content": "[CONTEXT SUMMARY]: middle turns compacted", "_compressed_summary": True},
+        loaded[4],
+    ])
+
+    events = HermesContextAdapter(db, "s", tmp_path).get_compression_events()
+
+    assert len(events) == 1
+    assert events[0].kept_turn_ids == ["hermes-msg:1", "hermes-msg:5"]  # head AND tail
+    assert events[0].dropped_turn_ids == ["hermes-msg:2", "hermes-msg:3", "hermes-msg:4"]
+    db.close()
+
+
 def test_probe_records_suppress_reconstruction_of_the_same_boundary(tmp_path):
     summary = "[CONTEXT SUMMARY]: the user forbade dropping production"
     db, adapter = _compacted_session(tmp_path, summary=summary)

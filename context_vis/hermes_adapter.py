@@ -226,9 +226,21 @@ class HermesContextAdapter:
             _norm_summary(event.summary_text) for event in observed if event.summary_text
         ]
 
+        rows = self._lineage_rows()
+        # A turn still active now survived every compaction, so it can never be
+        # in any boundary's dropped list. This is what corrects the in-place
+        # case: head survivors are copied ABOVE the summary row, so the
+        # synthetic-delimited block below would otherwise miscount them.
+        active_tids = {
+            str(row.get("transcript_turn_id") or row.get("_transcript_turn_id"))
+            for row in rows
+            if row.get("active") and not row.get("context_synthetic")
+            and (row.get("transcript_turn_id") or row.get("_transcript_turn_id"))
+        }
+
         blocks: list[dict[str, Any]] = []
         current: dict[str, Any] = {"summary": None, "ts": 0.0, "ids": []}
-        for row in self._lineage_rows():
+        for row in rows:
             content = _text(row.get("content"))
             synthetic = bool(row.get("context_synthetic")) or content.lstrip().startswith(_SUMMARY_PREFIXES)
             turn_id = row.get("transcript_turn_id") or row.get("_transcript_turn_id")
@@ -249,12 +261,11 @@ class HermesContextAdapter:
                 block_summary in obs or obs in block_summary for obs in observed_summaries
             ):
                 continue  # the probe already observed this exact boundary
-            # "Kept" means carried across the boundary, so it must appear on
-            # both sides: a block also holds turns appended after that
-            # compaction, which it did not keep.
-            block_set, previous_set = set(block["ids"]), set(previous["ids"])
-            kept = list(dict.fromkeys(t for t in block["ids"] if t in previous_set))
-            dropped = list(dict.fromkeys(t for t in previous["ids"] if t not in block_set))
+            # A turn survived this boundary if it reappears in the next block OR
+            # is still active now (survivors are split around the summary row).
+            survived = set(block["ids"]) | active_tids
+            kept = list(dict.fromkeys(t for t in previous["ids"] if t in survived))
+            dropped = list(dict.fromkeys(t for t in previous["ids"] if t not in survived))
             if not dropped and not block["summary"]:
                 continue
             events.append(CompressionEvent(
