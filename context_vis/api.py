@@ -80,6 +80,11 @@ class EditRequest(BaseModel):
     backlinks: list[dict[str, Any]] | None = None
 
 
+class PreserveRequest(BaseModel):
+    revision: int
+    turn_ids: list[str]  # the complete desired pin set (empty clears all pins)
+
+
 @router.get("/sessions")
 def list_context_sessions(profile: str | None = None, limit: int = 50):
     home = _home(profile)
@@ -196,5 +201,26 @@ def edit_context_model(session_id: str, body: EditRequest, profile: str | None =
                 raise HTTPException(status_code=409, detail="Model was edited elsewhere; reload and retry")
             raise
         return {"model": model}
+    finally:
+        repo.close(); db.close()
+
+
+@router.post("/sessions/{session_id}/preserve")
+def preserve_context_turns(session_id: str, body: PreserveRequest, profile: str | None = None):
+    """Pin the given turns so compaction keeps them verbatim (Tier 3).
+
+    Synchronous like the model edit (not a job): it changes agent behavior and
+    must return an accept/reject answer. The turn_ids are the complete desired
+    pin set — an empty list clears all pins.
+    """
+    _, _, db, repo, adapter = _resources(profile, session_id)
+    try:
+        try:
+            payload = ContextVisService(adapter, repo).request_preserve(body.turn_ids, body.revision)
+        except RuntimeError as exc:
+            if str(exc) == "revision_conflict":
+                raise HTTPException(status_code=409, detail="Model was edited elsewhere; reload and retry")
+            raise
+        return payload
     finally:
         repo.close(); db.close()

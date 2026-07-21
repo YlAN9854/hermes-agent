@@ -419,6 +419,40 @@ def test_active_context_keeps_the_summary_that_transcript_b_excludes(tmp_path):
     db.close()
 
 
+def test_adapter_request_preserve_writes_pin_file_and_caps_oversized(tmp_path):
+    import json as _json
+    from context_vis import hermes_adapter as ha
+    from context_vis.domain import SpanRef
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("s", "cli")
+    db.append_message("s", "user", "small rule")
+    db.append_message("s", "user", "X" * 100)
+    adapter = HermesContextAdapter(db, "s", tmp_path)
+
+    # Cap low enough that the second (100-char) turn is rejected.
+    original = ha.MAX_PINNED_CHARS
+    ha.MAX_PINNED_CHARS = 50
+    try:
+        result = adapter.request_preserve([
+            SpanRef("hermes-msg:1", 0, 5), SpanRef("hermes-msg:1", 6, 10),  # same turn, dedup
+            SpanRef("hermes-msg:2", 0, 100),
+        ])
+    finally:
+        ha.MAX_PINNED_CHARS = original
+
+    assert result.accepted_turn_ids == ["hermes-msg:1"]
+    assert result.rejected_turn_ids == ["hermes-msg:2"]
+    assert result.note and "budget" in result.note
+    pin_file = _json.loads((tmp_path / "context-vis" / "pins" / "s.json").read_text())
+    assert pin_file == {"v": 1, "turn_ids": ["hermes-msg:1"]}
+
+    # An empty request clears the pins (unpin path).
+    cleared = adapter.request_preserve([])
+    assert cleared.accepted_turn_ids == []
+    assert _json.loads((tmp_path / "context-vis" / "pins" / "s.json").read_text())["turn_ids"] == []
+    db.close()
+
+
 def test_tier_degrades_to_one_without_an_active_context(tmp_path):
     db = SessionDB(tmp_path / "state.db")
     db.create_session("empty", "cli")
@@ -600,6 +634,29 @@ def test_dashboard_context_vis_endpoint_reads_isolated_profile_home(_isolate_her
     assert payload["model"]["tier"] == 3
 
 
+def test_preserve_endpoint_pins_turns_and_writes_pin_file(_isolate_hermes_home):
+    import json as _json
+    from hermes_constants import get_hermes_home
+    from context_vis.api import get_context_session, preserve_context_turns, PreserveRequest
+
+    home = get_hermes_home()
+    db = SessionDB(home / "state.db")
+    db.create_session("api-session", "cli")
+    db.append_message("api-session", "user", "the rule to keep")
+    db.append_message("api-session", "assistant", "understood")
+    db.close()
+
+    revision = get_context_session("api-session")["model"]["revision"]
+    result = preserve_context_turns("api-session", PreserveRequest(revision=revision, turn_ids=["hermes-msg:1"]))
+
+    assert result["result"]["supported"] is True
+    assert result["result"]["accepted_turn_ids"] == ["hermes-msg:1"]
+    assert result["model"]["preserved"] == ["hermes-msg:1"]
+    # The compressor reads this file at compaction time.
+    pin_file = home / "context-vis" / "pins" / "api-session.json"
+    assert _json.loads(pin_file.read_text())["turn_ids"] == ["hermes-msg:1"]
+
+
 def _survival_fixture(constraint: str, active_texts: list[tuple[str, bool]], tier: int = 2):
     """Build (model, transcript, active, info) for one constraint."""
     from context_vis.domain import ActiveContext, ActiveEntry, SalientInfo, SemanticUnit, SpanRef, SummarySentence
@@ -730,6 +787,58 @@ class Tier2FakeAdapter(FakeAdapter):
 
     def get_active_context(self): return self.active
     def get_compression_events(self): return self.events
+
+
+class Tier3FakeAdapter(Tier2FakeAdapter):
+    """Records the spans it was asked to pin so tests can assert them."""
+
+    tier = 3
+    preserve_supported = True
+
+    def __init__(self, turns, responses, active_texts, events=()):
+        super().__init__(turns, responses, active_texts, events)
+        self.preserved_spans = None
+
+    def request_preserve(self, spans_in_B):
+        from context_vis.domain import PreserveResult
+        self.preserved_spans = list(spans_in_B)
+        turn_ids = list(dict.fromkeys(s.turn_id for s in spans_in_B))
+        return PreserveResult(True, turn_ids, [], None)
+
+
+def test_request_preserve_persists_pins_and_returns_result(tmp_path):
+    turns = [Turn("t1", "user", "keep this constraint", None, 1), Turn("t2", "assistant", "ok", None, 2)]
+    adapter = Tier3FakeAdapter(turns, [], [("summary", True, None)])
+    repo = ContextVisRepository(tmp_path)
+    service = ContextVisService(adapter, repo)
+    revision = repo.save("session-1", ContextVisModel().to_dict(), None)
+
+    payload = service.request_preserve(["t1"], revision)
+
+    assert payload["result"]["supported"] is True
+    assert payload["result"]["accepted_turn_ids"] == ["t1"]
+    assert payload["model"]["preserved"] == ["t1"]
+    # The adapter was handed a whole-turn span for t1.
+    assert [s.turn_id for s in adapter.preserved_spans] == ["t1"]
+    assert adapter.preserved_spans[0].char_end == len("keep this constraint")
+    # Round-trips through persistence.
+    reloaded, _, _ = service.load()
+    assert reloaded.preserved == ["t1"]
+    repo.close()
+
+
+def test_request_preserve_degrades_on_adapter_without_support(tmp_path):
+    turns = [Turn("t1", "user", "x", None, 1)]
+    repo = ContextVisRepository(tmp_path)
+    # Plain FakeAdapter has no request_preserve.
+    service = ContextVisService(FakeAdapter(turns, []), repo)
+    repo.save("session-1", ContextVisModel().to_dict(), None)
+
+    payload = service.request_preserve(["t1"], 1)
+
+    assert payload["result"]["supported"] is False
+    assert payload["result"]["rejected_turn_ids"] == ["t1"]
+    repo.close()
 
 
 def test_detect_salient_computes_survival_without_an_extra_llm_call(tmp_path):

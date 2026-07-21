@@ -8,10 +8,12 @@ import unicodedata
 import uuid
 from typing import Any
 
+from dataclasses import asdict
+
 from .codec import model_from_dict
 from .domain import (
-    ActiveContext, AggregateNode, BacktrackLink, ContextVisModel, SalientInfo, SemanticUnit,
-    SpanRef, SummarySentence, SurvivalState, Turn, validate_model,
+    ActiveContext, AggregateNode, BacktrackLink, ContextVisModel, PreserveResult, SalientInfo,
+    SemanticUnit, SpanRef, SummarySentence, SurvivalState, Turn, validate_model,
 )
 from .repository import ContextVisRepository
 from .survival import update_survival
@@ -447,6 +449,32 @@ UNITS_JSON:\n{json.dumps(units, ensure_ascii=False)}"""
         validate_model(model, transcript)
         model.revision = self.repo.save(self.adapter.session_id, model.to_dict(), last)
         return model.to_dict()
+
+    def request_preserve(self, turn_ids: list[str], expected_revision: int) -> dict[str, Any]:
+        """Pin the given turns against compaction (Tier 3). Wholesale replace.
+
+        Accepts turn ids (the natural pin unit — compaction keeps whole turns)
+        and resolves each to a whole-turn span for the adapter. Returns the
+        PreserveResult plus the saved model. Degrades cleanly on adapters that
+        cannot preserve.
+        """
+        model, transcript, last = self.load()
+        getter = getattr(self.adapter, "request_preserve", None)
+        if not callable(getter):
+            result = PreserveResult(False, [], list(dict.fromkeys(turn_ids)),
+                                    "This agent does not support preserving turns.")
+            return {"result": asdict(result), "model": model.to_dict()}
+        by_id = {t.turn_id: t for t in transcript}
+        spans = [
+            SpanRef(tid, 0, len(by_id[tid].content))
+            for tid in dict.fromkeys(turn_ids)
+            if tid in by_id and by_id[tid].content
+        ]
+        result: PreserveResult = getter(spans)
+        model.preserved = list(result.accepted_turn_ids)
+        validate_model(model, transcript)
+        model.revision = self.repo.save(self.adapter.session_id, model.to_dict(), last, expected_revision)
+        return {"result": asdict(result), "model": model.to_dict()}
 
     def save_edits(self, payload: dict[str, Any], expected_revision: int) -> dict[str, Any]:
         model, transcript, last = self.load()
