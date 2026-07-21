@@ -186,6 +186,28 @@ def test_titles_clamp_by_display_width_without_mid_word_cuts(tmp_path, raw_title
     repo.close()
 
 
+def test_salient_splits_enumerated_constraints_on_full_width_semicolon(tmp_path):
+    content = "三条要求：第一，绝对不能改 schema；第二，必须兼容 Python 3.9；第三，不要写死 key。"
+    turns = [Turn("t1", "user", content, None, 1)]
+    generated = {"units": [{"title": "要求", "covered_turn_ids": ["t1"], "summary_sentences": [{
+        "text": "三条", "sources": [{"turn_id": "t1", "quote": "三条要求："}],
+    }]}]}
+    repo = ContextVisRepository(tmp_path)
+    service = ContextVisService(FakeAdapter(turns, [generated, {"items": []}]), repo)
+    service.generate_units(False)
+
+    result = service.detect_salient()
+
+    infos = result["units"][0]["salient_infos"]
+    # Each enumerated clause is its own constraint, not one lumped row.
+    assert [i["detected_text"] for i in infos] == [
+        "三条要求：第一，绝对不能改 schema；",
+        "第二，必须兼容 Python 3.9；",
+        "第三，不要写死 key。",
+    ]
+    repo.close()
+
+
 def test_salient_dedup_by_span_overlap_and_decimal_safe_sentences(tmp_path):
     content = "部署脚本必须使用 Python 3.10 运行。其他版本未验证。\n另外绝不改动 schema 定义。"
     turns = [Turn("t1", "user", content, None, 1)]

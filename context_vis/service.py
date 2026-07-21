@@ -18,10 +18,13 @@ from .survival import update_survival
 
 CONSTRAINT_RE = re.compile(r"(?:必须|不要|不能|始终|禁止|务必|不得|绝不|切勿|请勿|must\b|never\b|always\b|do not\b|don't\b)", re.I)
 
-# ASCII sentence enders count only before whitespace/EOL so decimals and
-# version numbers ("Python 3.10", "p99 2.5ms") stay inside one sentence;
-# CJK enders always break.
-_SENTENCE_BREAK_RE = re.compile(r"(?<=[。！？])|(?<=[.!?])(?=\s|$)")
+# CJK enders (including the full-width semicolon ；, which separates clauses
+# in enumerations like "第一，…；第二，…") always break. The full-width form is
+# Chinese punctuation and never appears in code, so it is safe here; the ASCII
+# ";" is left out because it is common in code and logs. ASCII enders count
+# only before whitespace/EOL so decimals and version numbers ("Python 3.10")
+# stay inside one sentence.
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[。！？；])|(?<=[.!?])(?=\s|$)")
 
 
 def _constraint_sentences(content: str):
