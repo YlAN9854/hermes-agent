@@ -65,6 +65,34 @@ def test_load_pinned_turn_ids_reads_the_adapter_pin_file(tmp_path, monkeypatch):
     assert _load_pinned_turn_ids("v2") == set()
 
 
+def test_full_glue_pin_file_to_kept_turn(tmp_path, monkeypatch):
+    """End-to-end of the wiring compress_context performs: load the adapter's
+    pin file, set _keep_turn_ids, compress. A pinned mid-window turn is kept
+    verbatim while its unpinned neighbour is summarized — the discriminating
+    proof, with a controlled message list so the pinned turn is genuinely in
+    the summarize window (not the protected head/tail)."""
+    import json
+    import hermes_constants
+    from agent.conversation_compression import _load_pinned_turn_ids
+
+    monkeypatch.setattr(hermes_constants, "get_hermes_home", lambda: tmp_path)
+    pins = tmp_path / "context-vis" / "pins"
+    pins.mkdir(parents=True)
+    # Pin a genuine middle turn (t008), not head (t000-002) or tail.
+    (pins / "sess.json").write_text(json.dumps({"v": 1, "turn_ids": ["t008"]}))
+
+    msgs = _build_messages(20)
+    compressor = _compressor()
+    # Exactly what compress_context does before calling compress().
+    compressor._keep_turn_ids = _load_pinned_turn_ids("sess")
+    out = compressor.compress(msgs)
+
+    joined = "\n".join(m.get("content", "") for m in out if isinstance(m.get("content"), str))
+    assert "MIDDLE_TURN_008" in joined      # pinned middle turn survives verbatim
+    assert "MIDDLE_TURN_007" not in joined  # unpinned neighbour summarized away
+    assert "SUMMARY_OF_MIDDLE" in joined
+
+
 def test_no_pins_leaves_behaviour_unchanged():
     msgs = _build_messages(20)
     compressor = _compressor()
