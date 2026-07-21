@@ -8,7 +8,7 @@ from typing import Any
 
 from hermes_state import SessionDB
 
-from .domain import ActiveContext, ActiveEntry, CompressionEvent, Turn
+from .domain import ActiveContext, ActiveEntry, CompressionEvent, PreserveResult, SpanRef, Turn
 
 # Probe record schema this adapter understands; newer records are skipped
 # rather than misread. Kept in sync with agent/compaction_probe.py.
@@ -69,10 +69,17 @@ def _text(content: Any) -> str:
     return str(content or "")
 
 
+# Cap on total pinned content (chars, ~6K tokens). Pins are kept verbatim
+# through compaction, so an unbounded pin set could stop compaction reaching
+# its threshold and thrash; excess pins are rejected rather than honoured.
+MAX_PINNED_CHARS = 24_000
+
+
 class HermesContextAdapter:
     """The only context-vis layer allowed to know Hermes storage/provider details."""
 
     _UNSET = object()
+    preserve_supported = True  # this adapter can pin turns against compaction (Tier 3)
 
     def __init__(self, session_db: SessionDB, session_id: str, home: Path | None = None):
         self.db = session_db
@@ -93,15 +100,63 @@ class HermesContextAdapter:
 
     @property
     def tier(self) -> int:
-        """Tier 2 whenever A is genuinely readable.
+        """Tier 3 when A is readable and this adapter can pin turns; Tier 2 when
+        A is readable but preserve is unavailable; Tier 1 otherwise.
 
         Gated on active context rather than on compression events: a session
         that has never been compressed has zero events, and reporting every
         constraint as truthfully `present` is real data, not fake data.
         Whether the compression framing is meaningful is a separate axis, and
-        that is what ``capabilities.compression_events`` is for.
+        that is what ``capabilities.compression_events`` is for. Tier 3 assumes
+        the compressor honours the pin file (this fork ships both together).
         """
-        return 2 if self.get_active_context() is not None else 1
+        if self.get_active_context() is None:
+            return 1
+        return 3 if self.preserve_supported else 2
+
+    def _pin_path(self) -> Path:
+        return self.home / "context-vis" / "pins" / f"{self.session_id}.json"
+
+    def _write_pins(self, turn_ids: list[str]) -> None:
+        path = self._pin_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"v": 1, "turn_ids": turn_ids}, ensure_ascii=False), encoding="utf-8")
+
+    def request_preserve(self, spans_in_B: list[SpanRef]) -> PreserveResult:
+        """Pin the turns behind the given spans so compaction keeps them verbatim.
+
+        Wholesale replace: the given spans become the entire pin set, so pinning
+        and unpinning are both just "send the new set" (an empty list clears).
+        Spans finer than a turn pin the whole turn — compaction keeps or drops
+        whole turns. Turns beyond the safety cap are rejected, request order wins.
+        """
+        transcript = {turn.turn_id: turn for turn in self.get_full_transcript()}
+        # Resolve spans to distinct turn ids in request order; skip unknown turns.
+        turn_ids: list[str] = []
+        for span in spans_in_B:
+            tid = str(getattr(span, "turn_id", "") or "")
+            if tid in transcript and tid not in turn_ids:
+                turn_ids.append(tid)
+
+        accepted: list[str] = []
+        rejected: list[str] = []
+        used = 0
+        for tid in turn_ids:
+            size = len(transcript[tid].content)
+            if used + size <= MAX_PINNED_CHARS:
+                accepted.append(tid)
+                used += size
+            else:
+                rejected.append(tid)
+
+        self._write_pins(accepted)
+        note = None
+        if rejected:
+            note = (
+                f"{len(rejected)} turn(s) exceeded the pin budget (~{MAX_PINNED_CHARS} chars) "
+                "and were left unpinned so compaction can still reduce the context."
+            )
+        return PreserveResult(True, accepted, rejected, note)
 
     def _rows(self, active_only: bool = False) -> list[dict[str, Any]]:
         lineage = self.db.get_compression_lineage(self.session_id) or [self.session_id]

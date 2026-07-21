@@ -414,7 +414,8 @@ def test_active_context_keeps_the_summary_that_transcript_b_excludes(tmp_path):
     assert not any("CONTEXT SUMMARY" in t.content for t in transcript)
     # The surviving turn keeps its B linkage.
     assert [e.origin_turn_id for e in active.entries if not e.synthetic] == ["hermes-msg:3"]
-    assert adapter.tier == 2
+    # A is readable and this adapter can pin turns → Tier 3.
+    assert adapter.tier == 3
     db.close()
 
 
@@ -589,13 +590,14 @@ def test_dashboard_context_vis_endpoint_reads_isolated_profile_home(_isolate_her
     db.close()
 
     payload = get_context_session("api-session")
-    # A is readable, so Tier 2 — but this session was never compressed, so the
-    # compression affordances stay off. Those are separate axes.
+    # A is readable and this adapter can pin turns → Tier 3, preserve enabled.
+    # This session was never compressed, so the compression affordances stay
+    # off — those are separate axes.
     assert payload["capabilities"] == {
-        "tier": 2, "compression_events": False, "compression_fidelity": "observed", "preserve": False,
+        "tier": 3, "compression_events": False, "compression_fidelity": "observed", "preserve": True,
     }
     assert payload["transcript"][0]["content"] == "immutable truth"
-    assert payload["model"]["tier"] == 2
+    assert payload["model"]["tier"] == 3
 
 
 def _survival_fixture(constraint: str, active_texts: list[tuple[str, bool]], tier: int = 2):

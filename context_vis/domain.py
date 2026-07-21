@@ -90,6 +90,21 @@ class SurvivalState:
     note: str | None = None
 
 
+@dataclass(frozen=True)
+class PreserveResult:
+    """Outcome of a user pin request (Tier 3).
+
+    Compaction keeps or drops whole turns, so a pinned span pins its entire
+    turn. ``rejected_turn_ids`` are turns turned down by the safety cap that
+    keeps pins from preventing compaction reaching its threshold.
+    """
+
+    supported: bool
+    accepted_turn_ids: list[str]
+    rejected_turn_ids: list[str]
+    note: str | None = None
+
+
 @dataclass
 class SummarySentence:
     text: str
@@ -146,6 +161,7 @@ class ContextVisModel:
     revision: int = 0
     legacy_transcript_warning: str | None = None
     survival: SurvivalState | None = None
+    preserved: list[str] = field(default_factory=list)  # turn_ids the user pinned against compaction
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -160,6 +176,8 @@ class ContextAdapter(Protocol):
     def get_active_context(self) -> ActiveContext | None: ...
     def get_compression_events(self) -> list[CompressionEvent]: ...
     def llm_complete(self, prompt: str, **opts: Any) -> str: ...
+    # Tier 3, optional: absent on adapters that cannot pin (service probes with getattr).
+    def request_preserve(self, spans_in_B: list[SpanRef]) -> PreserveResult: ...
 
 
 def validate_model(model: ContextVisModel, transcript: list[Turn]) -> None:

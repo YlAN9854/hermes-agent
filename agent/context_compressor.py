@@ -2947,6 +2947,24 @@ This compaction should PRIORITISE preserving all information related to the focu
             return messages
 
         turns_to_summarize = messages[compress_start:compress_end]
+
+        # Context-vis Tier 3: pull user-pinned turns out of the summarize window
+        # so they survive verbatim. They are re-inserted after the summary below
+        # (Phase 4). Pin whole user/assistant turns only — a lone tool message
+        # would be orphaned from its call and dropped by _sanitize_tool_pairs.
+        _keep_turn_ids = getattr(self, "_keep_turn_ids", None) or set()
+        _pinned_middle: List[Dict[str, Any]] = []
+        if _keep_turn_ids:
+            _pinned = [m for m in turns_to_summarize if m.get("_transcript_turn_id") in _keep_turn_ids]
+            _remaining = [m for m in turns_to_summarize if m.get("_transcript_turn_id") not in _keep_turn_ids]
+            # Only pin if something is still left to summarize; pinning the whole
+            # window would leave nothing to compress and defeat the compaction.
+            if _pinned and _remaining:
+                _pinned_middle = _pinned
+                turns_to_summarize = _remaining
+        # One-shot: don't let a pin-set leak into a later compaction on reuse.
+        self._keep_turn_ids = None
+
         # A persisted handoff summary can sit in the protected head after a
         # resume (commonly immediately after the system prompt). Search from
         # the first non-system message through the compression window so we can
@@ -3159,6 +3177,13 @@ This compaction should PRIORITISE preserving all information related to the focu
                 "content": summary,
                 COMPRESSED_SUMMARY_METADATA_KEY: True,
             })
+
+        # Context-vis Tier 3: re-insert user-pinned middle turns verbatim,
+        # after the summary and before the tail. They lose their original
+        # interleaved position but keep their content; _sanitize_tool_pairs
+        # below cleans any orphaned tool pairs.
+        for _pinned in _pinned_middle:
+            compressed.append(_fresh_compaction_message_copy(_pinned))
 
         for i in range(compress_end, n_messages):
             msg = _fresh_compaction_message_copy(messages[i])

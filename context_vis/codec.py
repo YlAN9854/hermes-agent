@@ -25,4 +25,5 @@ def model_from_dict(data: dict[str, Any] | None) -> ContextVisModel:
         revision=data.get("revision", 0),
         legacy_transcript_warning=data.get("legacy_transcript_warning"),
         survival=SurvivalState(**data["survival"]) if data.get("survival") else None,
+        preserved=list(data.get("preserved", [])),
     )

@@ -52,6 +52,32 @@ COMPACTION_STATUS = (
 )
 
 
+def _load_pinned_turn_ids(session_id: Optional[str]) -> set:
+    """Read the context-vis Tier 3 pin file for this session.
+
+    Returns the set of transcript_turn_id values the user pinned. Reads a plain
+    JSON file the context-vis adapter owns — deliberately no import of the
+    context_vis package, so this core module stays decoupled and rebase-safe.
+    Any problem (missing file, bad JSON, unknown version) yields an empty set,
+    so compaction behaves exactly as before when nothing is pinned.
+    """
+    if not session_id:
+        return set()
+    try:
+        import json
+        from hermes_constants import get_hermes_home
+        path = Path(get_hermes_home()) / "context-vis" / "pins" / f"{session_id}.json"
+        if not path.is_file():
+            return set()
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if record.get("v") != 1:
+            return set()
+        return {str(t) for t in record.get("turn_ids", []) if t}
+    except Exception as exc:
+        logger.debug("context-vis pin load skipped: %s", exc)
+        return set()
+
+
 def _compression_lock_holder(agent: Any) -> str:
     """Build a unique holder id for the lock: pid:tid:agent-instance:uuid.
 
@@ -634,6 +660,11 @@ def compress_context(
             agent._memory_manager.on_pre_compress(messages)
         except Exception:
             pass
+
+    # Context-vis Tier 3: honour user-pinned turns. Reads a plain JSON file the
+    # context-vis adapter writes (no import of that package here); the
+    # compressor keeps these turns verbatim instead of summarising them.
+    agent.context_compressor._keep_turn_ids = _load_pinned_turn_ids(agent.session_id)
 
     try:
         compressed = agent.context_compressor.compress(messages, current_tokens=approx_tokens, focus_topic=focus_topic, force=force)

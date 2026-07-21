@@ -117,7 +117,7 @@ def get_context_session(session_id: str, profile: str | None = None):
                 "compression_fidelity": (
                     events[-1].fidelity if events else (active.fidelity if active else None)
                 ),
-                "preserve": False,
+                "preserve": bool(getattr(adapter, "preserve_supported", False)),
             },
             "model": model.to_dict(),
             "transcript": [t.__dict__ for t in transcript],
