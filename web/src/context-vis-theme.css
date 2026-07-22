@@ -1,0 +1,102 @@
+/* ContextVis — scoped dark data-visualization theme.
+ *
+ * Everything here is scoped to the [data-contextvis-shell] container so the
+ * page gets its own identity WITHOUT touching the global Hermes teal theme.
+ * Two things happen in the scope:
+ *   1. `--cv-*` tokens carry the viz encodings (status / salient / pin / accent).
+ *   2. The base Nous vars (midground/background/fonts) are overridden, so the
+ *      shadcn utilities the DS components use (bg-card, text-foreground,
+ *      border-border, bg-primary, …) — which resolve to those base vars via
+ *      @theme inline — reskin to the viz palette in-scope.
+ *
+ * Style direction (ui-ux-pro-max "Modern Dark" developer-tool): deep slate
+ * canvas (never pure black), indigo/violet identity accent, cyan pin accent,
+ * and a green/amber/red survival triad. Fira Code/Sans are the type target;
+ * we fall back to strong system stacks so the app works offline.
+ */
+
+[data-contextvis-shell] {
+  /* --- viz palette --- */
+  --cv-bg: #0b1120;          /* deep slate canvas */
+  --cv-bg-2: #0e1626;        /* alt canvas / gutters */
+  --cv-surface: #131d31;     /* panels */
+  --cv-surface-2: #1b2740;   /* raised / hover */
+  --cv-border: #273450;
+  --cv-border-strong: #33456a;
+  --cv-text: #e8edf6;
+  --cv-text-dim: #94a3c4;
+  --cv-text-faint: #64748b;
+
+  --cv-accent: #7c8cff;      /* indigo/violet — identity + interactive */
+  --cv-accent-2: #a78bfa;
+  --cv-accent-dim: #3a3f7a;
+  --cv-pin: #22d3ee;         /* cyan — pinned/preserved */
+  --cv-pin-dim: #164e5b;
+
+  /* survival triad */
+  --cv-present: #34d399;     /* green — still visible */
+  --cv-reframed: #fbbf24;    /* amber — reframed */
+  --cv-absent: #f87171;      /* red — no longer visible */
+  --cv-unknown: #64748b;     /* slate — no compression visibility */
+
+  /* salient density ramp (reliable = stronger) */
+  --cv-salient-reliable: #a78bfa;
+  --cv-salient-guessed: #6d5ea8;
+
+  --cv-font-sans: "Fira Sans", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --cv-font-mono: "Fira Code", ui-monospace, "JetBrains Mono", "SF Mono",
+    "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* --- reskin the inherited Nous/shadcn base so DS components look native --- */
+  --background-base: var(--cv-bg);
+  --background: var(--cv-bg);
+  --midground-base: var(--cv-text);
+  --midground: var(--cv-text);
+  --foreground-base: var(--cv-text);
+  --foreground: var(--cv-text);
+  --theme-font-sans: var(--cv-font-sans);
+  --theme-font-mono: var(--cv-font-mono);
+
+  background: var(--cv-bg);
+  color: var(--cv-text);
+  font-family: var(--cv-font-sans);
+}
+
+/* Panels / cards */
+.cv-panel {
+  background: var(--cv-surface);
+  border: 1px solid var(--cv-border);
+  border-radius: 0.625rem;
+}
+.cv-panel-2 { background: var(--cv-surface-2); }
+
+/* A thin left status rail used on unit blocks + salient rows */
+.cv-rail { box-shadow: inset 3px 0 0 0 var(--cv-border-strong); }
+
+/* Status text/backgrounds — used by the survival encoding */
+.cv-present { color: var(--cv-present); }
+.cv-reframed { color: var(--cv-reframed); }
+.cv-absent { color: var(--cv-absent); }
+.cv-pin { color: var(--cv-pin); }
+.cv-accent { color: var(--cv-accent); }
+.cv-dim { color: var(--cv-text-dim); }
+.cv-faint { color: var(--cv-text-faint); }
+
+/* Selected/active outline in the accent */
+.cv-active { outline: 1px solid var(--cv-accent); background: color-mix(in srgb, var(--cv-accent) 10%, transparent); }
+
+/* Custom scrollbars so panels feel like a viz app, not a webpage */
+[data-contextvis-shell] ::-webkit-scrollbar { width: 10px; height: 10px; }
+[data-contextvis-shell] ::-webkit-scrollbar-track { background: transparent; }
+[data-contextvis-shell] ::-webkit-scrollbar-thumb {
+  background: var(--cv-border-strong);
+  border-radius: 6px;
+  border: 2px solid var(--cv-bg);
+}
+[data-contextvis-shell] ::-webkit-scrollbar-thumb:hover { background: #3f5480; }
+
+/* Respect reduced motion for the scroll-sync / expand transitions */
+@media (prefers-reduced-motion: reduce) {
+  [data-contextvis-shell] * { transition: none !important; animation: none !important; }
+}

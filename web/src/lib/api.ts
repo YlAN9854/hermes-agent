@@ -369,6 +369,10 @@ export const api = {
     fetchJSON<{ model: ContextVisModel }>(appendProfileParam(`/api/context-vis/sessions/${encodeURIComponent(id)}/model`, profile), {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }),
+  preserveContextVisTurns: (id: string, body: { revision: number; turn_ids: string[] }, profile = getManagementProfile()) =>
+    fetchJSON<ContextVisPreserveResponse>(appendProfileParam(`/api/context-vis/sessions/${encodeURIComponent(id)}/preserve`, profile), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }),
   getSessionDetail: (id: string, profile = getManagementProfile()) =>
     fetchJSON<SessionInfo>(
       appendProfileParam(`/api/sessions/${encodeURIComponent(id)}`, profile),
@@ -1940,6 +1944,11 @@ export interface ContextVisModel {
   decision_intent: string | null; backlinks: ContextVisBacklink[]; tier: 1 | 2 | 3;
   revision: number; legacy_transcript_warning: string | null;
   survival: ContextVisSurvivalState | null;
+  preserved: string[];  // turn_ids the user pinned against compaction (Tier 3)
+}
+export interface ContextVisPreserveResponse {
+  result: { supported: boolean; accepted_turn_ids: string[]; rejected_turn_ids: string[]; note: string | null };
+  model: ContextVisModel;
 }
 export interface ContextVisSurvivalState {
   computed_at: number; fidelity: "observed" | "reconstructed" | null;

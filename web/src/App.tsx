@@ -382,6 +382,9 @@ export default function App() {
   const isDocsRoute = pathname === "/docs" || pathname === "/docs/";
   const normalizedPath = pathname.replace(/\/$/, "") || "/";
   const isChatRoute = normalizedPath === "/chat";
+  // ContextVis is a standalone visualization app — it renders full-bleed
+  // (its own shell), outside the dashboard sidebar/header, with its own theme.
+  const isContextVisRoute = normalizedPath === "/context-vis";
   const embeddedChat = isDashboardEmbeddedChatEnabled();
 
   // `dashboard.show_token_analytics` gates the Analytics nav item.  The
@@ -483,6 +486,16 @@ export default function App() {
     mql.addEventListener("change", onChange);
     return () => mql.removeEventListener("change", onChange);
   }, []);
+
+  if (isContextVisRoute) {
+    return (
+      <ProfileProvider>
+        <div data-contextvis-shell className="h-dvh max-h-dvh w-screen overflow-hidden">
+          <ContextVisPage />
+        </div>
+      </ProfileProvider>
+    );
+  }
 
   return (
     <ProfileProvider>

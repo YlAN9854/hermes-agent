@@ -1,4 +1,23 @@
-import type { ContextVisInfo, ContextVisSpan } from "./api";
+import type { ContextVisInfo, ContextVisSpan, ContextVisUnit } from "./api";
+
+/** The most severe survival status among a set of infos, for coloring a unit's
+ *  status rail. absent > reframed > present. Null below Tier 2 or when nothing
+ *  is known — so a Tier 1 unit gets no status color, not a misleading "present". */
+export function dominantSurvival(infos: ContextVisInfo[], tier: number): "present" | "reframed" | "absent" | null {
+  if (tier < 2) return null;
+  const known = infos.map((i) => i.status_in_A).filter((s) => s !== "unknown");
+  if (known.includes("absent")) return "absent";
+  if (known.includes("reframed")) return "reframed";
+  if (known.includes("present")) return "present";
+  return null;
+}
+
+/** Whether any turn a unit covers is currently pinned against compaction. */
+export function unitIsPinned(unit: ContextVisUnit, preserved: string[]): boolean {
+  if (!preserved.length) return false;
+  const set = new Set(preserved);
+  return unit.covered_turns.some((t) => set.has(t));
+}
 
 /** Roll up survival counts for a set of salient infos.
  *

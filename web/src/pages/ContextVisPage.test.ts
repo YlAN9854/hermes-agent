@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildHighlightSegments, summariseSurvival } from "@/lib/context-vis";
-import type { ContextVisInfo } from "@/lib/api";
+import { buildHighlightSegments, summariseSurvival, dominantSurvival, unitIsPinned } from "@/lib/context-vis";
+import type { ContextVisInfo, ContextVisUnit } from "@/lib/api";
 
 const info = (status: ContextVisInfo["status_in_A"]): ContextVisInfo => ({
   info_id: `i-${status}-${Math.random()}`, kind: "user_stated_constraint", detected_text: "x",
@@ -42,5 +42,26 @@ describe("ContextVis survival roll-up", () => {
   it("ignores unknown entries when some statuses are known", () => {
     expect(summariseSurvival([info("unknown"), info("reframed")], 2))
       .toEqual({ total: 1, present: 0, reframed: 1, absent: 0 });
+  });
+});
+
+describe("ContextVis spine encoding", () => {
+  it("dominantSurvival returns the most severe known status", () => {
+    expect(dominantSurvival([info("present"), info("reframed"), info("absent")], 2)).toBe("absent");
+    expect(dominantSurvival([info("present"), info("reframed")], 2)).toBe("reframed");
+    expect(dominantSurvival([info("present"), info("unknown")], 2)).toBe("present");
+  });
+
+  it("dominantSurvival stays null below Tier 2 or with nothing known, so no misleading color", () => {
+    expect(dominantSurvival([info("absent")], 1)).toBeNull();
+    expect(dominantSurvival([info("unknown")], 2)).toBeNull();
+    expect(dominantSurvival([], 2)).toBeNull();
+  });
+
+  it("unitIsPinned is true iff a covered turn is preserved", () => {
+    const unit = { covered_turns: ["t1", "t2", "t3"] } as ContextVisUnit;
+    expect(unitIsPinned(unit, ["t2"])).toBe(true);
+    expect(unitIsPinned(unit, ["t9"])).toBe(false);
+    expect(unitIsPinned(unit, [])).toBe(false);
   });
 });
