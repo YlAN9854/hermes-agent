@@ -26,6 +26,30 @@ const SURVIVAL: Record<string, { v: string; icon: string; label: string }> = {
   absent: { v: "var(--cv-absent)", icon: "○", label: "no longer visible" },
 };
 
+// A recessive key for the spine's visual encodings — survival glyph/color and
+// pin. Gated the same way the marks are: survival at Tier >= 2, pin at Tier >= 3,
+// so the legend never names an encoding the view can't show.
+function SpineLegend({ tier }: { tier: number }) {
+  if (tier < 2) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 border-b shrink-0 text-[10px] font-mono"
+      style={{ borderColor: "var(--cv-border)", background: "var(--cv-surface-2)", color: "var(--cv-text-faint)" }}>
+      <span className="uppercase tracking-wide">Encoding</span>
+      {Object.values(SURVIVAL).map((s) => (
+        <span key={s.label} className="inline-flex items-center gap-1" style={{ color: "var(--cv-text-dim)" }}>
+          <span aria-hidden style={{ color: s.v }}>{s.icon}</span>{s.label}
+        </span>
+      ))}
+      {tier >= 3 && <span className="inline-flex items-center gap-1" style={{ color: "var(--cv-text-dim)" }}>
+        <Pin className="h-3 w-3" style={{ color: "var(--cv-pin)" }} />pinned
+      </span>}
+      <span className="inline-flex items-center gap-1" style={{ color: "var(--cv-text-dim)" }}>
+        left rail = dominant status
+      </span>
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------- pills */
 
 function Pill({ children, color, title }: { children: React.ReactNode; color?: string; title?: string }) {
@@ -406,6 +430,8 @@ export default function ContextVisPage() {
               <Button size="sm" outlined disabled={working || (mode === "decision" && !intent.trim())} onClick={() => void runJob({ action: "draft_aggregates", mode, intent })}>Draft aggregation</Button>
             </div>
 
+            <SpineLegend tier={tier} />
+
             <div className="min-h-0 flex-1 overflow-auto px-3 py-3 space-y-3">
               {detail.model.legacy_transcript_warning && <div className="rounded-lg px-3 py-2 text-xs" style={{ color: "var(--cv-reframed)", background: "color-mix(in srgb, var(--cv-reframed) 10%, transparent)" }}>{detail.model.legacy_transcript_warning}</div>}
 
@@ -446,7 +472,7 @@ function SegToggle<T extends string>({ value, onChange, options }: {
   return <div className="inline-flex rounded-md p-0.5" style={{ background: "var(--cv-surface)", border: "1px solid var(--cv-border)" }}>
     {options.map((o) => <button key={o.v} onClick={() => onChange(o.v)}
       className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
-      style={value === o.v ? { background: "var(--cv-accent)", color: "#0b1120" } : { color: "var(--cv-text-dim)" }}>
+      style={value === o.v ? { background: "var(--cv-accent)", color: "var(--cv-on-accent)" } : { color: "var(--cv-text-dim)" }}>
       {o.icon}{o.label}</button>)}
   </div>;
 }

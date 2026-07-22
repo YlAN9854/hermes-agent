@@ -1,4 +1,4 @@
-/* ContextVis — scoped dark data-visualization theme.
+/* ContextVis — scoped light data-visualization theme.
  *
  * Everything here is scoped to the [data-contextvis-shell] container so the
  * page gets its own identity WITHOUT touching the global Hermes teal theme.
@@ -6,42 +6,49 @@
  *   1. `--cv-*` tokens carry the viz encodings (status / salient / pin / accent).
  *   2. The base Nous vars (midground/background/fonts) are overridden, so the
  *      shadcn utilities the DS components use (bg-card, text-foreground,
- *      border-border, bg-primary, …) — which resolve to those base vars via
- *      @theme inline — reskin to the viz palette in-scope.
+ *      border-border, bg-primary, etc.) — which resolve to those base vars via
+ *      the @theme inline layer — reskin to the viz palette in-scope.
  *
- * Style direction (ui-ux-pro-max "Modern Dark" developer-tool): deep slate
- * canvas (never pure black), indigo/violet identity accent, cyan pin accent,
- * and a green/amber/red survival triad. Fira Code/Sans are the type target;
- * we fall back to strong system stacks so the app works offline.
+ * Style direction: a light, scholarly information-visualization surface in the
+ * Tufte tradition — a near-white canvas, near-black ink, recessive hairline
+ * borders, one restrained academic-blue accent, a distinct violet pin accent,
+ * and a green/amber/red survival triad. Status colors always ship with a glyph
+ * and a text label, so hue never carries meaning alone. Palette values are the
+ * dataviz skill's validated light-mode instances (blue #2a78d6, status triad
+ * #0ca30c / amber / #d03b3b), tuned for contrast on the light canvas.
  */
 
 [data-contextvis-shell] {
-  /* --- viz palette --- */
-  --cv-bg: #0b1120;          /* deep slate canvas */
-  --cv-bg-2: #0e1626;        /* alt canvas / gutters */
-  --cv-surface: #131d31;     /* panels */
-  --cv-surface-2: #1b2740;   /* raised / hover */
-  --cv-border: #273450;
-  --cv-border-strong: #33456a;
-  --cv-text: #e8edf6;
-  --cv-text-dim: #94a3c4;
-  --cv-text-faint: #64748b;
+  /* --- viz palette (light) --- */
+  --cv-bg: #f6f7f9;          /* light canvas */
+  --cv-bg-2: #eef1f5;        /* alt canvas / gutters */
+  --cv-surface: #ffffff;     /* panels */
+  --cv-surface-2: #f4f6f9;   /* raised / hover */
+  --cv-border: #e4e8ee;
+  --cv-border-strong: #cdd4de;
+  --cv-text: #1a1f29;
+  --cv-text-dim: #59626f;
+  --cv-text-faint: #98a1af;
 
-  --cv-accent: #7c8cff;      /* indigo/violet — identity + interactive */
-  --cv-accent-2: #a78bfa;
-  --cv-accent-dim: #3a3f7a;
-  --cv-pin: #22d3ee;         /* cyan — pinned/preserved */
-  --cv-pin-dim: #164e5b;
+  --cv-accent: #2a78d6;      /* academic blue — identity + interactive */
+  --cv-accent-2: #1f5fae;
+  --cv-accent-dim: #dce9f8;  /* light tint for accent backgrounds */
+  --cv-on-accent: #ffffff;   /* text/icon on an accent fill */
+  --cv-pin: #7c3aed;         /* violet — pinned/preserved */
+  --cv-pin-dim: #efe7fd;
 
-  /* survival triad */
-  --cv-present: #34d399;     /* green — still visible */
-  --cv-reframed: #fbbf24;    /* amber — reframed */
-  --cv-absent: #f87171;      /* red — no longer visible */
-  --cv-unknown: #64748b;     /* slate — no compression visibility */
+  /* survival triad (validated status palette; always paired with glyph+label) */
+  --cv-present: #0f8a12;     /* green — still visible */
+  --cv-reframed: #b45309;    /* amber — reframed */
+  --cv-absent: #d03b3b;      /* red — no longer visible */
+  --cv-unknown: #98a1af;     /* slate — no compression visibility */
+  --cv-present-dim: #e3f3e3;
+  --cv-reframed-dim: #f8ecdb;
+  --cv-absent-dim: #f9e4e4;
 
-  /* salient density ramp (reliable = stronger) */
-  --cv-salient-reliable: #a78bfa;
-  --cv-salient-guessed: #6d5ea8;
+  /* salient density ramp — monochrome (a count, not a category) */
+  --cv-salient-reliable: #475569;
+  --cv-salient-guessed: #94a3b8;
 
   --cv-font-sans: "Fira Sans", ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, sans-serif;
@@ -84,7 +91,7 @@
 .cv-faint { color: var(--cv-text-faint); }
 
 /* Selected/active outline in the accent */
-.cv-active { outline: 1px solid var(--cv-accent); background: color-mix(in srgb, var(--cv-accent) 10%, transparent); }
+.cv-active { outline: 1px solid var(--cv-accent); background: color-mix(in srgb, var(--cv-accent) 8%, transparent); }
 
 /* Custom scrollbars so panels feel like a viz app, not a webpage */
 [data-contextvis-shell] ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -94,7 +101,7 @@
   border-radius: 6px;
   border: 2px solid var(--cv-bg);
 }
-[data-contextvis-shell] ::-webkit-scrollbar-thumb:hover { background: #3f5480; }
+[data-contextvis-shell] ::-webkit-scrollbar-thumb:hover { background: #aab3c0; }
 
 /* Respect reduced motion for the scroll-sync / expand transitions */
 @media (prefers-reduced-motion: reduce) {
