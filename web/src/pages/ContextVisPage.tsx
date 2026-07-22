@@ -223,6 +223,7 @@ export default function ContextVisPage() {
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [activeUnit, setActiveUnit] = useState<string | null>(null);
   const [activeSpans, setActiveSpans] = useState<ContextVisSpan[]>([]);
   const [inspecting, setInspecting] = useState<string | null>(null);
@@ -281,11 +282,13 @@ export default function ContextVisPage() {
     const next = new Set(current);
     if (already) covered.forEach((t) => next.delete(t));
     else covered.forEach((t) => next.add(t));
-    setWorking(true); setError(null);
+    setWorking(true); setError(null); setNotice(null);
     try {
       const res = await api.preserveContextVisTurns(selected, { revision: detail.model.revision, turn_ids: [...next] }, profile);
       setDetail({ ...detail, model: res.model });
-      if (res.result.rejected_turn_ids.length && res.result.note) setError(res.result.note);
+      // A unit's tool-only turns can't be preserved verbatim — that's expected,
+      // and the text turns still pinned, so it's a notice, not an error.
+      if (res.result.rejected_turn_ids.length && res.result.note) setNotice(res.result.note);
     } catch (e) { setError(String(e)); } finally { setWorking(false); }
   };
 
@@ -351,7 +354,10 @@ export default function ContextVisPage() {
       </div>
     </header>
 
-    {error && <div className="px-4 py-2 text-xs font-mono shrink-0" style={{ color: "var(--cv-absent)", background: "color-mix(in srgb, var(--cv-absent) 10%, transparent)" }}>{error}</div>}
+    {error && <div className="px-4 py-2 text-xs font-mono shrink-0 flex items-center gap-2" style={{ color: "var(--cv-absent)", background: "color-mix(in srgb, var(--cv-absent) 10%, transparent)" }}>
+      <span className="flex-1">{error}</span><button onClick={() => setError(null)}><X className="h-3.5 w-3.5" /></button></div>}
+    {notice && <div className="px-4 py-2 text-xs shrink-0 flex items-center gap-2" style={{ color: "var(--cv-reframed)", background: "color-mix(in srgb, var(--cv-reframed) 10%, transparent)" }}>
+      <Pin className="h-3.5 w-3.5 shrink-0" style={{ color: "var(--cv-pin)" }} /><span className="flex-1">{notice}</span><button onClick={() => setNotice(null)}><X className="h-3.5 w-3.5" /></button></div>}
 
     {/* body: 35% conversation | 65% spine */}
     <div className="flex min-h-0 flex-1">
