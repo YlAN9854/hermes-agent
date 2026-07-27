@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -p . --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:react-doctor": "react-doctor --json --no-score --no-supply-chain --no-parallel --max-duration 120",
+    "check:react-dev-tools": "node -e \"const fs=require('node:fs');const path=process.env.REACT_DEV_TOOLS_TARGET??'src/main.tsx';const source=fs.readFileSync(path,'utf8');const staticImport=/\\bimport\\s+(?!\\()(?:[^;\\n]+?\\s+from\\s+)?['\\\"]react-(?:grab|scan)(?:\\/[^'\\\"]*)?['\\\"]/.test(source);const dynamic=[...source.matchAll(/import\\(\\s*['\\\"](react-grab|react-scan)(?:\\/[^'\\\"]*)?['\\\"]\\s*\\)/g)];const unguarded=dynamic.filter(({index})=>{const prefix=source.slice(0,index);const guard=prefix.lastIndexOf('if (import.meta.env.DEV)');const close=prefix.lastIndexOf('}');return guard<0||close>guard;});if(staticImport||unguarded.length){console.error('FAIL: React dev-tool runtime import is not inside an import.meta.env.DEV guard in '+path);process.exit(1)}console.log('PASS: react-grab/react-scan imports are DEV-guarded or absent in '+path);\""
   },
   "dependencies": {
     "@hermes/shared": "file:../apps/shared",
@@ -47,6 +49,9 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
+    "react-doctor": "^0.9.1",
+    "react-grab": "^0.1.50",
+    "react-scan": "^0.5.7",
     "three": "^0.180.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.56.1",

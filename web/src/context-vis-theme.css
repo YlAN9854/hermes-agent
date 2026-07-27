@@ -101,7 +101,40 @@
   border-radius: 6px;
   border: 2px solid var(--cv-bg);
 }
-[data-contextvis-shell] ::-webkit-scrollbar-thumb:hover { background: #aab3c0; }
+[data-contextvis-shell] ::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--cv-border-strong) 65%, var(--cv-text-dim));
+}
+
+[data-contextvis-shell] :where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--cv-accent);
+  outline-offset: 2px;
+}
+
+.cv-turn-content {
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  word-break: normal;
+}
+
+@supports (word-break: auto-phrase) {
+  .cv-turn-content { word-break: auto-phrase; }
+}
+
+.cv-cjk-phrase { white-space: nowrap; }
+
+@media (max-width: 480px) {
+  [data-contextvis-shell] .cv-page-header {
+    gap: 0.5rem;
+    padding-inline: 0.75rem;
+  }
+
+  [data-contextvis-shell] .cv-session-menu {
+    position: fixed;
+    inset-inline: 1rem;
+    top: 5rem;
+    width: auto !important;
+  }
+}
 
 /* Respect reduced motion for the scroll-sync / expand transitions */
 @media (prefers-reduced-motion: reduce) {

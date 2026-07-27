@@ -1939,12 +1939,22 @@ export interface ContextVisAggregate {
   origin: "llm_draft" | "user_edited"; intent_tag: string | null;
 }
 export interface ContextVisBacklink { from_unit_id: string; to_unit_id: string; note: string }
+export interface ContextVisIntentSegment {
+  readonly segment_id: string;
+  readonly label: string;
+  readonly from_unit_id: string;
+  readonly to_unit_id: string;
+  readonly trigger_span: ContextVisSpan | null;
+  readonly note: string;
+  readonly origin: "llm_draft" | "user_edited";
+}
 export interface ContextVisModel {
   units: ContextVisUnit[]; aggregates: ContextVisAggregate[]; decision_aggregates: ContextVisAggregate[];
   decision_intent: string | null; backlinks: ContextVisBacklink[]; tier: 1 | 2 | 3;
   revision: number; legacy_transcript_warning: string | null;
   survival: ContextVisSurvivalState | null;
   preserved: string[];  // turn_ids the user pinned against compaction (Tier 3)
+  intent_segments: ContextVisIntentSegment[];
 }
 export interface ContextVisPreserveResponse {
   result: { supported: boolean; accepted_turn_ids: string[]; rejected_turn_ids: string[]; note: string | null };
@@ -1955,6 +1965,27 @@ export interface ContextVisSurvivalState {
   event_count: number; active_fingerprint: string; note: string | null;
 }
 export interface ContextVisTurn { turn_id: string; role: "user" | "assistant" | "tool"; content: string; tool_name: string | null; timestamp: number }
+export interface ContextVisCompressionEvent {
+  readonly event_id: string;
+  readonly timestamp: number;
+  readonly sequence: number;
+  readonly fidelity: "observed" | "reconstructed";
+  readonly kept_turn_ids: readonly string[];
+  readonly dropped_turn_ids: readonly string[];
+  readonly summary_text: string | null;
+  readonly summary_truncated: boolean;
+  readonly note: string | null;
+}
+export interface ContextVisCompression {
+  readonly fidelity: "observed" | "reconstructed";
+  readonly live_turn_ids: readonly string[];
+  readonly synthetic_entries: readonly {
+    readonly role: ContextVisTurn["role"];
+    readonly content: string;
+  }[];
+  readonly unlinked_live_count: number;
+  readonly events: readonly ContextVisCompressionEvent[];
+}
 export interface ContextVisSessionResponse {
   session_id: string;
   capabilities: {
@@ -1963,6 +1994,7 @@ export interface ContextVisSessionResponse {
   };
   survival_stale: boolean;
   model: ContextVisModel; transcript: ContextVisTurn[];
+  compression: ContextVisCompression | null;
 }
 export interface ContextVisSessionsResponse {
   sessions: Array<SessionInfo & { context_vis: { generated: boolean; revision: number; unit_count: number } }>;
@@ -1972,6 +2004,7 @@ export interface ContextVisJob { job_id: string; status: "queued" | "running" | 
 export interface ContextVisEditRequest {
   revision: number; aggregates?: ContextVisAggregate[]; decision_aggregates?: ContextVisAggregate[];
   decision_intent?: string | null; backlinks?: ContextVisBacklink[];
+  intent_segments?: readonly ContextVisIntentSegment[];
 }
 
 export interface LogsResponse {
