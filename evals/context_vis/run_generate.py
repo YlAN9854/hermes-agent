@@ -27,7 +27,7 @@ RUNS_DIR = Path(__file__).parent / "runs"
 # batching), so we only run it for the constraint-focused cases; c4 (>135k
 # chars) would blow the prompt budget — that limitation itself is an eval
 # finding, not something to hide here.
-SALIENT_CASE_IDS = {"c3", "c5", "c6"}
+SALIENT_CASE_IDS = {"c3", "c5", "c6", "c7"}
 
 
 def run_case(home: Path, case_id: str) -> dict:

@@ -42,6 +42,14 @@ class Backtrack:
     note: str
 
 
+@dataclass(frozen=True, slots=True)
+class IntentShift:
+    segment: int
+    kind: str
+    cause_turn: int | None = None
+    note: str = ""
+
+
 @dataclass
 class Compaction:
     """A compaction to replay while seeding, so A differs from B."""
@@ -66,6 +74,7 @@ class Case:
     backtracks: list[Backtrack] = field(default_factory=list)
     compaction: Compaction | None = None
     survival: list[GoldSurvival] = field(default_factory=list)
+    intent_shifts: list[IntentShift] = field(default_factory=list)
 
 
 def validate_case(case: Case) -> list[str]:
@@ -95,6 +104,20 @@ def validate_case(case: Case) -> list[str]:
     for bi, bt in enumerate(case.backtracks):
         if not (0 <= bt.to_segment < bt.from_segment < len(case.segments)):
             errors.append(f"backtrack {bi}: needs to_segment < from_segment, both valid segment indexes")
+    for ii, shift in enumerate(case.intent_shifts):
+        valid_segment = type(shift.segment) is int and 1 <= shift.segment < len(case.segments)
+        if not valid_segment:
+            errors.append(f"intent shift {ii}: segment {shift.segment} must be in 1..{len(case.segments) - 1}")
+        if shift.kind not in ("drift", "return"):
+            errors.append(f"intent shift {ii}: invalid kind {shift.kind!r}")
+        if shift.cause_turn is not None and (
+            type(shift.cause_turn) is not int
+            or not (0 <= shift.cause_turn < n)
+            or (valid_segment and shift.cause_turn > case.segments[shift.segment].start)
+        ):
+            errors.append(
+                f"intent shift {ii}: cause_turn must be in range and no later than segment {shift.segment} start"
+            )
     if case.compaction:
         for kt in case.compaction.kept_turns:
             if not (0 <= kt < n):
@@ -136,4 +159,5 @@ def case_stats(case: Case) -> dict:
         "segments": len(case.segments),
         "constraints": len(case.constraints),
         "backtracks": len(case.backtracks),
+        "intent_shifts": len(case.intent_shifts),
     }

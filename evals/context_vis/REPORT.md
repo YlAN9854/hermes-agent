@@ -322,3 +322,11 @@ Step 0–2 的质量问题（过度切分、引文覆盖、salient 噪声、两�
 | P2 | 真实长会话跑满压缩阈值的端到端验收（本轮用脚本化重放） |
 
 复现：`seed c6` → `run_generate c6` → `run_survival c6` → `metrics c6`；探针端到端：置 `HERMES_CONTEXT_VIS_PROBE=1` 后跑真实压缩，记录落在 `<HERMES_HOME>/context-vis/compaction/<session>.jsonl`。
+
+## c7（2026-07-26）：研究方法头脑风暴的意图漂移 gold
+
+c7 是一个 28 turns、5,105 字符的检索 agent 评估方法头脑风暴，gold 分成四段：A（benchmark question，0–6）→ B（annotation protocol，7–13）→ C（statistical pilot，14–20）→ B return（21–27）。确定性校验观测到 4 个约束、1 个合法 Backtrack（segment 3 → 1）和 3 个 `IntentShift`：segment 1 drift（cause turn 6）、segment 2 drift（cause turn 13）、segment 3 return（cause turn 20）。存活 gold 覆盖 present、reframed、absent 各一条。
+
+三条研究式约束（license 不得再分发 raw passages、annotation budget 上限 `$200`、预注册 query-difficulty 分层）在 `CONSTRAINT_RE` 上均未命中；另一条 `Do not change the held-out test split after analysis begins.` 命中 imperative 规则。该分布是 c7 的确定性输入设计，不是模型召回率结论。
+
+隔离 `HERMES_HOME` 下运行 `uv run --extra dev python -m evals.context_vis.seed c7` 成功创建 `synth-c7`，输出 stats 为 `turns=28`、`chars=5105`、`segments=4`、`constraints=4`、`backtracks=1`、`intent_shifts=3`；随后检查到 11 条存储行、存在合成摘要且 `validate_case` 返回空错误列表。本次隔离 home 未配置 auxiliary provider，故未运行 `run_generate`/survival/metrics，也没有预先声称 c7 的模型 recall 或 survival 分数。

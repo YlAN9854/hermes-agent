@@ -18,7 +18,7 @@ from hermes_state import SessionDB
 
 from .case_schema import Case, case_stats, validate_case
 
-CASE_IDS = ["c1", "c2", "c3", "c4", "c5", "c6"]
+CASE_IDS = ["c1", "c2", "c3", "c4", "c5", "c6", "c7"]
 
 # Matches what the compressor emits, so the seeded rows have production shape.
 SUMMARY_PREFIX = "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below.\n\n"
