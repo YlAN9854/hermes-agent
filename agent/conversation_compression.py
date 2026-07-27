@@ -78,6 +78,24 @@ def _load_pinned_turn_ids(session_id: Optional[str]) -> set:
         return set()
 
 
+def _load_drop_turn_ids(session_id: Optional[str]) -> set:
+    if not session_id:
+        return set()
+    try:
+        import json
+        from hermes_constants import get_hermes_home
+        path = Path(get_hermes_home()) / "context-vis" / "drops" / f"{session_id}.json"
+        if not path.is_file():
+            return set()
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if record.get("v") != 1:
+            return set()
+        return {str(t) for t in record.get("drop_turn_ids", []) if t}
+    except Exception as exc:
+        logger.debug("context-vis drop load skipped: %s", exc)
+        return set()
+
+
 def _compression_lock_holder(agent: Any) -> str:
     """Build a unique holder id for the lock: pid:tid:agent-instance:uuid.
 
@@ -665,6 +683,7 @@ def compress_context(
     # context-vis adapter writes (no import of that package here); the
     # compressor keeps these turns verbatim instead of summarising them.
     agent.context_compressor._keep_turn_ids = _load_pinned_turn_ids(agent.session_id)
+    agent.context_compressor._drop_turn_ids = _load_drop_turn_ids(agent.session_id)
 
     try:
         compressed = agent.context_compressor.compress(messages, current_tokens=approx_tokens, focus_topic=focus_topic, force=force)

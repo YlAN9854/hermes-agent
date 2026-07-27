@@ -407,6 +407,67 @@ def _append_text_to_content(content: Any, text: str, *, prepend: bool = False) -
     return text + rendered if prepend else rendered + text
 
 
+def _split_merged_summary_text(text: str) -> Optional[tuple[str, str]]:
+    prefixes = (
+        SUMMARY_PREFIX,
+        LEGACY_SUMMARY_PREFIX,
+        *_HISTORICAL_SUMMARY_PREFIXES,
+    )
+    match: Optional[tuple[str, str]] = None
+    search_start = 0
+    while True:
+        delimiter_index = text.find(_MERGED_SUMMARY_DELIMITER, search_start)
+        if delimiter_index < 0:
+            return match
+        summary = text[
+            delimiter_index + len(_MERGED_SUMMARY_DELIMITER):
+        ].lstrip()
+        if summary.startswith(prefixes):
+            match = (text[:delimiter_index], summary)
+        search_start = delimiter_index + len(_MERGED_SUMMARY_DELIMITER)
+
+
+def _raw_copy_from_merged_summary_carrier(
+    message: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if not message.get(COMPRESSED_SUMMARY_METADATA_KEY):
+        return None
+
+    content = message.get("content")
+    header = _MERGED_PRIOR_CONTEXT_HEADER + "\n"
+    raw_content: Any
+    if isinstance(content, str):
+        if not content.startswith(header):
+            return None
+        merged = _split_merged_summary_text(content[len(header):])
+        if merged is None or not merged[0].endswith("\n\n"):
+            return None
+        raw_content = merged[0][:-2]
+    elif isinstance(content, list):
+        boundary = "\n\n" + _MERGED_SUMMARY_DELIMITER + "\n\n"
+        if len(content) < 2:
+            return None
+        first = content[0]
+        last = content[-1]
+        if (
+            not isinstance(first, dict)
+            or first.get("type") != "text"
+            or first.get("text") != header
+            or not isinstance(last, dict)
+            or last.get("type") != "text"
+            or not str(last.get("text", "")).startswith(boundary)
+        ):
+            return None
+        raw_content = content[1:-1]
+    else:
+        return None
+
+    raw_message = _fresh_compaction_message_copy(message)
+    raw_message["content"] = raw_content
+    raw_message.pop(COMPRESSED_SUMMARY_METADATA_KEY, None)
+    return raw_message
+
+
 def _strip_image_parts_from_parts(parts: Any) -> Any:
     """Strip image parts from an OpenAI-style content-parts list.
 
@@ -729,6 +790,8 @@ class ContextCompressor(ContextEngine):
         self._context_probed = False
         self._context_probe_persistable = False
         self._previous_summary = None
+        self._keep_turn_ids = None
+        self._drop_turn_ids = None
         self._last_summary_error = None
         self._last_summary_dropped_count = 0
         self._last_summary_fallback_used = False
@@ -766,6 +829,8 @@ class ContextCompressor(ContextEngine):
         surface the moment the owning session ends.
         """
         self._previous_summary = None
+        self._keep_turn_ids = None
+        self._drop_turn_ids = None
         self._last_summary_error = None
         self._last_summary_dropped_count = 0
         self._last_summary_fallback_used = False
@@ -1042,7 +1107,7 @@ class ContextCompressor(ContextEngine):
         protect_last_n: int = 20,
         summary_target_ratio: float = 0.20,
         quiet_mode: bool = False,
-        summary_model_override: str = None,
+        summary_model_override: Optional[str] = None,
         base_url: str = "",
         api_key: str = "",
         config_context_length: int | None = None,
@@ -1134,6 +1199,8 @@ class ContextCompressor(ContextEngine):
 
         # Stores the previous compaction summary for iterative updates
         self._previous_summary: Optional[str] = None
+        self._keep_turn_ids: Optional[set[str]] = None
+        self._drop_turn_ids: Optional[set[str]] = None
         # Anti-thrashing: track whether last compression was effective
         self._last_compression_savings_pct: float = 100.0
         self._ineffective_compression_count: int = 0
@@ -1275,7 +1342,7 @@ class ContextCompressor(ContextEngine):
         self.last_rough_tokens_when_real_prompt_fit = max(baseline, rough_tokens)
         return True
 
-    def should_compress(self, prompt_tokens: int = None) -> bool:
+    def should_compress(self, prompt_tokens: Optional[int] = None) -> bool:
         """Check if context exceeds the compression threshold.
 
         Includes anti-thrashing protection: if the last two compressions
@@ -1990,7 +2057,7 @@ FOCUS TOPIC: "{focus_topic}"
 This compaction should PRIORITISE preserving all information related to the focus topic above. For content related to "{focus_topic}", include full detail — exact values, file paths, command outputs, error messages, and decisions. For content NOT related to the focus topic, summarise more aggressively (brief one-liners or omit if truly irrelevant). The focus topic sections should receive roughly 60-70% of the summary token budget. Even for the focus topic, NEVER preserve API keys, tokens, passwords, or credentials — use [REDACTED]."""
 
         try:
-            call_kwargs = {
+            call_kwargs: Dict[str, Any] = {
                 "task": "compression",
                 "main_runtime": {
                     "model": self.model,
@@ -2236,8 +2303,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         # real summary body is carried forward on re-compaction — otherwise the
         # [PRIOR CONTEXT] header and stale tail content leak into the next
         # summarizer prompt.
-        if _MERGED_SUMMARY_DELIMITER in text:
-            text = text.split(_MERGED_SUMMARY_DELIMITER, 1)[1].strip()
+        merged = _split_merged_summary_text(text)
+        if merged is not None:
+            text = merged[1].strip()
         for prefix in (SUMMARY_PREFIX, LEGACY_SUMMARY_PREFIX, *_HISTORICAL_SUMMARY_PREFIXES):
             if text.startswith(prefix):
                 text = text[len(prefix):].lstrip()
@@ -2263,8 +2331,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         # at the start. Detect the summary in that region too, otherwise callers
         # (auto-focus skip, carry-forward summary find, last-real-user anchor)
         # mistake a merged summary message for a real user turn.
-        if _MERGED_SUMMARY_DELIMITER in text:
-            text = text.split(_MERGED_SUMMARY_DELIMITER, 1)[1].lstrip()
+        merged = _split_merged_summary_text(text)
+        if merged is not None:
+            text = merged[1]
         if text.startswith(SUMMARY_PREFIX) or text.startswith(LEGACY_SUMMARY_PREFIX):
             return True
         return any(text.startswith(p) for p in _HISTORICAL_SUMMARY_PREFIXES)
@@ -2842,7 +2911,13 @@ This compaction should PRIORITISE preserving all information related to the focu
     # Main compression entry point
     # ------------------------------------------------------------------
 
-    def compress(self, messages: List[Dict[str, Any]], current_tokens: int = None, focus_topic: str = None, force: bool = False) -> List[Dict[str, Any]]:
+    def compress(
+        self,
+        messages: List[Dict[str, Any]],
+        current_tokens: Optional[int] = None,
+        focus_topic: Optional[str] = None,
+        force: bool = False,
+    ) -> List[Dict[str, Any]]:
         """Compress conversation messages by summarizing middle turns.
 
         Algorithm:
@@ -2948,23 +3023,6 @@ This compaction should PRIORITISE preserving all information related to the focu
 
         turns_to_summarize = messages[compress_start:compress_end]
 
-        # Context-vis Tier 3: pull user-pinned turns out of the summarize window
-        # so they survive verbatim. They are re-inserted after the summary below
-        # (Phase 4). Pin whole user/assistant turns only — a lone tool message
-        # would be orphaned from its call and dropped by _sanitize_tool_pairs.
-        _keep_turn_ids = getattr(self, "_keep_turn_ids", None) or set()
-        _pinned_middle: List[Dict[str, Any]] = []
-        if _keep_turn_ids:
-            _pinned = [m for m in turns_to_summarize if m.get("_transcript_turn_id") in _keep_turn_ids]
-            _remaining = [m for m in turns_to_summarize if m.get("_transcript_turn_id") not in _keep_turn_ids]
-            # Only pin if something is still left to summarize; pinning the whole
-            # window would leave nothing to compress and defeat the compaction.
-            if _pinned and _remaining:
-                _pinned_middle = _pinned
-                turns_to_summarize = _remaining
-        # One-shot: don't let a pin-set leak into a later compaction on reuse.
-        self._keep_turn_ids = None
-
         # A persisted handoff summary can sit in the protected head after a
         # resume (commonly immediately after the system prompt). Search from
         # the first non-system message through the compression window so we can
@@ -2990,6 +3048,65 @@ This compaction should PRIORITISE preserving all information related to the focu
             # into the summarizer prompt via the iterative-update path.
             self._previous_summary = None
 
+        # Context-vis Tier 3 dispositions apply only to the final live raw
+        # summarize window. This ordering prevents a handoff re-scan from
+        # replacing the filtered window, and leaves protected head/tail turns
+        # scheduled for a later compaction.
+        _keep_turn_ids = getattr(self, "_keep_turn_ids", None) or set()
+        _drop_turn_ids = (
+            getattr(self, "_drop_turn_ids", None) or set()
+        ) - _keep_turn_ids
+        _pinned_middle: List[Dict[str, Any]] = [
+            message
+            for message in (
+                messages[compress_start:summary_idx]
+                if summary_idx is not None and summary_idx > compress_start
+                else []
+            )
+            if message.get("_transcript_turn_id") in _keep_turn_ids
+        ]
+        _raw_kept_summary_carrier: Optional[Dict[str, Any]] = None
+        if (
+            summary_idx is not None
+            and messages[summary_idx].get("_transcript_turn_id") in _keep_turn_ids
+        ):
+            _raw_kept_summary_carrier = _raw_copy_from_merged_summary_carrier(
+                messages[summary_idx]
+            )
+            if (
+                _raw_kept_summary_carrier is not None
+                and summary_idx >= compress_start
+            ):
+                _pinned_middle.append(_raw_kept_summary_carrier)
+        if _keep_turn_ids:
+            _pinned = [
+                message
+                for message in turns_to_summarize
+                if message.get("_transcript_turn_id") in _keep_turn_ids
+            ]
+            _remaining = [
+                message
+                for message in turns_to_summarize
+                if message.get("_transcript_turn_id") not in _keep_turn_ids
+            ]
+            if _pinned and _remaining:
+                _pinned_middle.extend(_pinned)
+                turns_to_summarize = _remaining
+        _dropped_middle = [
+            message
+            for message in turns_to_summarize
+            if message.get("_transcript_turn_id") in _drop_turn_ids
+        ]
+        if _dropped_middle:
+            turns_to_summarize = [
+                message
+                for message in turns_to_summarize
+                if message.get("_transcript_turn_id") not in _drop_turn_ids
+            ]
+        _intentional_all_drop = bool(_dropped_middle) and not turns_to_summarize
+        self._keep_turn_ids = None
+        self._drop_turn_ids = None
+
         if not self.quiet_mode:
             logger.info(
                 "Context compression triggered (%d tokens >= %d threshold)",
@@ -3014,7 +3131,19 @@ This compaction should PRIORITISE preserving all information related to the focu
 
         # Phase 3: Generate structured summary
         summary_focus_topic = focus_topic or self._derive_auto_focus_topic(messages)
-        summary = self._generate_summary(turns_to_summarize, focus_topic=summary_focus_topic)
+        if _intentional_all_drop:
+            summary = (
+                self._with_summary_prefix(self._previous_summary)
+                if self._previous_summary
+                and summary_idx is not None
+                and summary_idx >= compress_start
+                else None
+            )
+        else:
+            summary = self._generate_summary(
+                turns_to_summarize,
+                focus_topic=summary_focus_topic,
+            )
 
         # If summary generation failed, behavior splits on
         # ``abort_on_summary_failure`` (config: compression.abort_on_summary_failure):
@@ -3038,7 +3167,7 @@ This compaction should PRIORITISE preserving all information related to the focu
         # subsequent call fails the same way. So when the failure was an auth
         # error we abort regardless of abort_on_summary_failure, preserving
         # the conversation unchanged until the credential is fixed.
-        if not summary and (
+        if not _intentional_all_drop and not summary and (
             self.abort_on_summary_failure
             or self._last_summary_auth_failure
             or self._last_summary_network_failure
@@ -3079,7 +3208,11 @@ This compaction should PRIORITISE preserving all information related to the focu
         # Phase 4: Assemble compressed message list
         compressed = []
         for i in range(compress_start):
-            msg = _fresh_compaction_message_copy(messages[i])
+            msg = (
+                _fresh_compaction_message_copy(_raw_kept_summary_carrier)
+                if i == summary_idx and _raw_kept_summary_carrier is not None
+                else _fresh_compaction_message_copy(messages[i])
+            )
             if i == 0 and msg.get("role") == "system":
                 existing = msg.get("content")
                 _compression_note = "[Note: Some earlier conversation turns have been compacted into a handoff summary to preserve context space. The current session state may still reflect earlier work, so build on that summary and state rather than re-doing work. Your persistent memory (MEMORY.md, USER.md) remains fully authoritative regardless of compaction.]"
@@ -3093,7 +3226,7 @@ This compaction should PRIORITISE preserving all information related to the focu
         # If LLM summary failed, insert a deterministic fallback so the model
         # gets at least locally recoverable continuity anchors instead of a
         # content-free "N messages were removed" marker.
-        if not summary:
+        if not _intentional_all_drop and not summary:
             if not self.quiet_mode:
                 logger.warning("Summary generation failed — inserting deterministic fallback context summary")
             n_dropped = compress_end - compress_start
@@ -3159,7 +3292,7 @@ This compaction should PRIORITISE preserving all information related to the focu
                 # (e.g. head=assistant, tail=user — neither role works).
                 # Merge the summary into the first tail message instead
                 # of inserting a standalone message that breaks alternation.
-                _merge_summary_into_tail = True
+                _merge_summary_into_tail = bool(summary)
 
         # When the summary lands as a standalone role="user" message,
         # weak models read the verbatim "## Active Task" quote of a past
@@ -3168,10 +3301,10 @@ This compaction should PRIORITISE preserving all information related to the focu
         # summary text as their own output (#33256). In both cases, append
         # the explicit end marker so the model has a clear "summary ends
         # here, respond to the message below" signal.
-        if not _merge_summary_into_tail:
+        if summary and not _merge_summary_into_tail:
             summary = summary + "\n\n" + _SUMMARY_END_MARKER
 
-        if not _merge_summary_into_tail:
+        if summary and not _merge_summary_into_tail:
             compressed.append({
                 "role": summary_role,
                 "content": summary,
@@ -3187,7 +3320,11 @@ This compaction should PRIORITISE preserving all information related to the focu
 
         for i in range(compress_end, n_messages):
             msg = _fresh_compaction_message_copy(messages[i])
-            if _merge_summary_into_tail and i == compress_end:
+            if (
+                _merge_summary_into_tail
+                and summary is not None
+                and i == compress_end
+            ):
                 # Merge the summary into the first tail message, but place
                 # the END MARKER at the very end so the model sees an
                 # unambiguous boundary. Old tail content is preserved as
