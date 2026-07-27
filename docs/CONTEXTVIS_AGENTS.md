@@ -181,6 +181,7 @@ class ContextAdapter(Protocol):
 | `tests/test_compaction_dispositions.py` | 压缩器三路切分 |
 | `tests/test_compaction_disposition_edges.py` | 压缩器边界情况 |
 | `tests/test_compaction_disposition_recompaction.py` | 重压缩交互 |
+| `tests/test_false_boundary_regression.py` | 合并摘要误分类负面回归（20 个） |
 | `web/src/lib/context-vis-p1.test.ts` | 前端 helper 测试 |
 | `web/src/pages/ContextVisPage.p1.test.tsx` | 前端组件测试 |
 
@@ -221,18 +222,16 @@ class ContextAdapter(Protocol):
 | 4 | A-lens 模型视角（ModelViewTranscript + CompressionEvents） | ✅ |
 | 5 | 意图区段后端（IntentSegment + validate_model） | ✅ |
 | 6 | 意图轨道前端（IntentLane + IntentTrack） | ✅ |
-| 7 | 三档处置（keep/summary/drop） | ⚠️ 有 blocker |
+| 7 | 三档处置（keep/summary/drop） | ✅（blocker 已修复） |
 | 8 | Eval c7 + IntentShift schema | ✅ |
 
-**测试状态**：210 测试全绿（113 Python + 97 前端），TypeScript 编译零错误。
+**测试状态**：230 测试全绿（133 Python + 97 前端），TypeScript 编译零错误。
 
-### Step 7 已知 Blocker
+### Step 7 Blocker（已修复 2026-07-27）
 
-**`_split_merged_summary_text` 误分类风险**（`agent/context_compressor.py`）：
+**`T4-P2-NO-FALSE-BOUNDARY-ON-USER-TEXT`**：`_strip_summary_prefix` 和 `_is_context_summary_content` 在任意文本上调用 `_split_merged_summary_text()`，会误分类包含 delimiter+prefix 模式的普通用户文本。
 
-新增的 `_split_merged_summary_text()` 函数会将普通用户文本误识别为合并摘要载体——只要用户文本碰巧包含 `_MERGED_SUMMARY_DELIMITER` + 摘要前缀。这会导致合法的用户内容被当作摘要而被跳过/剥离。
-
-**修复方向**：将 merged-summary 解析限定在真正的 `_MERGED_PRIOR_CONTEXT_HEADER` 包装内，而非接受任意 delimiter+prefix 模式。需要加负面回归测试。
+**修复**（`8a17d455c`）：两个调用点现在要求文本以 `_MERGED_PRIOR_CONTEXT_HEADER` 开头才调用 split。20 个负面回归测试覆盖 current/legacy/historical 全变体。
 
 ---
 
