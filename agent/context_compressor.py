@@ -2303,9 +2303,14 @@ This compaction should PRIORITISE preserving all information related to the focu
         # real summary body is carried forward on re-compaction — otherwise the
         # [PRIOR CONTEXT] header and stale tail content leak into the next
         # summarizer prompt.
-        merged = _split_merged_summary_text(text)
-        if merged is not None:
-            text = merged[1].strip()
+        # Scope the merged-carrier parse to text that actually starts with the
+        # durable header — ordinary user text quoting the delimiter + summary
+        # prefix pattern must NOT be misclassified as a carrier.
+        _header_prefix = _MERGED_PRIOR_CONTEXT_HEADER + "\n"
+        if text.startswith(_header_prefix):
+            merged = _split_merged_summary_text(text)
+            if merged is not None:
+                text = merged[1].strip()
         for prefix in (SUMMARY_PREFIX, LEGACY_SUMMARY_PREFIX, *_HISTORICAL_SUMMARY_PREFIXES):
             if text.startswith(prefix):
                 text = text[len(prefix):].lstrip()
@@ -2326,17 +2331,28 @@ This compaction should PRIORITISE preserving all information related to the focu
     @staticmethod
     def _is_context_summary_content(content: Any) -> bool:
         text = _content_text_for_contains(content).lstrip()
+        # Standalone summaries start directly with a known prefix.
+        if text.startswith(SUMMARY_PREFIX) or text.startswith(LEGACY_SUMMARY_PREFIX):
+            return True
+        if any(text.startswith(p) for p in _HISTORICAL_SUMMARY_PREFIXES):
+            return True
         # Merge-into-tail summaries wrap prior tail content before the summary,
         # so the handoff prefix lands after _MERGED_SUMMARY_DELIMITER rather than
         # at the start. Detect the summary in that region too, otherwise callers
         # (auto-focus skip, carry-forward summary find, last-real-user anchor)
         # mistake a merged summary message for a real user turn.
-        merged = _split_merged_summary_text(text)
-        if merged is not None:
-            text = merged[1]
-        if text.startswith(SUMMARY_PREFIX) or text.startswith(LEGACY_SUMMARY_PREFIX):
-            return True
-        return any(text.startswith(p) for p in _HISTORICAL_SUMMARY_PREFIXES)
+        # Scope the merged-carrier parse to text that actually starts with the
+        # durable header — ordinary user text quoting the delimiter + summary
+        # prefix pattern must NOT be misclassified as a carrier.
+        _header_prefix = _MERGED_PRIOR_CONTEXT_HEADER + "\n"
+        if text.startswith(_header_prefix):
+            merged = _split_merged_summary_text(text)
+            if merged is not None:
+                summary_text = merged[1]
+                if summary_text.startswith(SUMMARY_PREFIX) or summary_text.startswith(LEGACY_SUMMARY_PREFIX):
+                    return True
+                return any(summary_text.startswith(p) for p in _HISTORICAL_SUMMARY_PREFIXES)
+        return False
 
     @staticmethod
     def _has_compressed_summary_metadata(message: Any) -> bool:
