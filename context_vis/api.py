@@ -3,11 +3,12 @@ from __future__ import annotations
 import concurrent.futures
 import threading
 import uuid
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from hermes_constants import get_hermes_home
 from hermes_state import SessionDB
@@ -72,17 +73,39 @@ class JobRequest(BaseModel):
     intent: str | None = None
 
 
+class IntentSpanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    turn_id: str
+    char_start: int
+    char_end: int
+
+
+class IntentSegmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    segment_id: str
+    label: str
+    from_unit_id: str
+    to_unit_id: str
+    trigger_span: IntentSpanRequest | None = None
+    note: str = ""
+    origin: Literal["llm_draft", "user_edited"] = "user_edited"
+
+
 class EditRequest(BaseModel):
     revision: int
     aggregates: list[dict[str, Any]] | None = None
     decision_aggregates: list[dict[str, Any]] | None = None
     decision_intent: str | None = None
     backlinks: list[dict[str, Any]] | None = None
+    intent_segments: list[IntentSegmentRequest] | None = None
 
 
 class PreserveRequest(BaseModel):
     revision: int
     turn_ids: list[str]  # the complete desired pin set (empty clears all pins)
+    drop_turn_ids: list[str] = Field(default_factory=list)
 
 
 @router.get("/sessions")
@@ -123,9 +146,31 @@ def get_context_session(session_id: str, profile: str | None = None):
                     events[-1].fidelity if events else (active.fidelity if active else None)
                 ),
                 "preserve": bool(getattr(adapter, "preserve_supported", False)),
+                "dispositions": bool(
+                    getattr(adapter, "dispositions_supported", False)
+                ),
             },
             "model": model.to_dict(),
             "transcript": [t.__dict__ for t in transcript],
+            "compression": None if active is None else {
+                "fidelity": active.fidelity,
+                "live_turn_ids": list(dict.fromkeys(
+                    entry.origin_turn_id
+                    for entry in active.entries
+                    if not entry.synthetic and entry.origin_turn_id is not None
+                )),
+                "synthetic_entries": [
+                    {"role": entry.role, "content": entry.content}
+                    for entry in active.entries
+                    if entry.synthetic
+                ],
+                "unlinked_live_count": sum(
+                    1
+                    for entry in active.entries
+                    if not entry.synthetic and entry.origin_turn_id is None
+                ),
+                "events": [asdict(event) for event in events],
+            },
         }
     finally:
         repo.close(); db.close()
@@ -196,6 +241,8 @@ def edit_context_model(session_id: str, body: EditRequest, profile: str | None =
         payload.pop("revision", None)
         try:
             model = ContextVisService(adapter, repo).save_edits(payload, body.revision)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except RuntimeError as exc:
             if str(exc) == "revision_conflict":
                 raise HTTPException(status_code=409, detail="Model was edited elsewhere; reload and retry")
@@ -216,7 +263,11 @@ def preserve_context_turns(session_id: str, body: PreserveRequest, profile: str 
     _, _, db, repo, adapter = _resources(profile, session_id)
     try:
         try:
-            payload = ContextVisService(adapter, repo).request_preserve(body.turn_ids, body.revision)
+            payload = ContextVisService(adapter, repo).request_preserve(
+                body.turn_ids,
+                body.revision,
+                body.drop_turn_ids,
+            )
         except RuntimeError as exc:
             if str(exc) == "revision_conflict":
                 raise HTTPException(status_code=409, detail="Model was edited elsewhere; reload and retry")

@@ -12,8 +12,8 @@ from dataclasses import asdict
 
 from .codec import model_from_dict
 from .domain import (
-    ActiveContext, AggregateNode, BacktrackLink, ContextVisModel, PreserveResult, SalientInfo,
-    SemanticUnit, SpanRef, SummarySentence, SurvivalState, Turn, validate_model,
+    ActiveContext, AggregateNode, BacktrackLink, ContextVisModel, IntentSegment, PreserveResult,
+    SalientInfo, SemanticUnit, SpanRef, SummarySentence, SurvivalState, Turn, validate_model,
 )
 from .repository import ContextVisRepository
 from .survival import update_survival
@@ -450,19 +450,32 @@ UNITS_JSON:\n{json.dumps(units, ensure_ascii=False)}"""
         model.revision = self.repo.save(self.adapter.session_id, model.to_dict(), last)
         return model.to_dict()
 
-    def request_preserve(self, turn_ids: list[str], expected_revision: int) -> dict[str, Any]:
-        """Pin the given turns against compaction (Tier 3). Wholesale replace.
+    def request_preserve(
+        self,
+        turn_ids: list[str],
+        expected_revision: int,
+        drop_turn_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Replace the requested keep/drop dispositions (Tier 3).
 
-        Accepts turn ids (the natural pin unit — compaction keeps whole turns)
-        and resolves each to a whole-turn span for the adapter. Returns the
-        PreserveResult plus the saved model. Degrades cleanly on adapters that
-        cannot preserve.
+        Hermes stages both disposition files before this method commits them.
+        The model revision is checked before staging, while rollback protects
+        the files if the repository compare-and-swap later loses a race.
         """
         model, transcript, last = self.load()
+        if model.revision != expected_revision:
+            raise RuntimeError("revision_conflict")
+        desired_drops = list(dict.fromkeys(drop_turn_ids or []))
         getter = getattr(self.adapter, "request_preserve", None)
         if not callable(getter):
-            result = PreserveResult(False, [], list(dict.fromkeys(turn_ids)),
-                                    "This agent does not support preserving turns.")
+            result = PreserveResult(
+                False,
+                [],
+                list(dict.fromkeys(turn_ids)),
+                "This agent does not support preserving or dropping turns.",
+                [],
+                desired_drops,
+            )
             return {"result": asdict(result), "model": model.to_dict()}
         by_id = {t.turn_id: t for t in transcript}
         spans = [
@@ -470,21 +483,113 @@ UNITS_JSON:\n{json.dumps(units, ensure_ascii=False)}"""
             for tid in dict.fromkeys(turn_ids)
             if tid in by_id and by_id[tid].content
         ]
-        result: PreserveResult = getter(spans)
+        drop_spans = [
+            SpanRef(tid, 0, len(by_id[tid].content) if tid in by_id else 0)
+            for tid in desired_drops
+        ]
+        prepare = getattr(self.adapter, "prepare_preserve", None)
+        if callable(prepare) and bool(
+            getattr(self.adapter, "dispositions_supported", False)
+        ):
+            prepared = prepare(spans, drop_spans)
+            result: PreserveResult = prepared.result
+            model.preserved = list(result.accepted_turn_ids)
+            model.dropped = list(result.accepted_drop_turn_ids)
+            try:
+                validate_model(model, transcript)
+            except BaseException:
+                prepared.discard()
+                raise
+            try:
+                prepared.commit()
+            except BaseException:
+                prepared.discard()
+                raise
+            try:
+                model.revision = self.repo.save(
+                    self.adapter.session_id,
+                    model.to_dict(),
+                    last,
+                    expected_revision,
+                )
+            except BaseException:
+                prepared.rollback()
+                raise
+            prepared.finish()
+            return {"result": asdict(result), "model": model.to_dict()}
+
+        result = getter(spans)
+        if desired_drops:
+            unsupported_note = "This agent supports pins but cannot schedule drops."
+            result = PreserveResult(
+                result.supported,
+                list(result.accepted_turn_ids),
+                list(result.rejected_turn_ids),
+                " ".join(
+                    note
+                    for note in (result.note, unsupported_note)
+                    if note
+                ),
+                [],
+                desired_drops,
+            )
         model.preserved = list(result.accepted_turn_ids)
+        model.dropped = []
         validate_model(model, transcript)
         model.revision = self.repo.save(self.adapter.session_id, model.to_dict(), last, expected_revision)
         return {"result": asdict(result), "model": model.to_dict()}
 
     def save_edits(self, payload: dict[str, Any], expected_revision: int) -> dict[str, Any]:
         model, transcript, last = self.load()
-        for field in ("aggregates", "decision_aggregates"):
-            if field in payload:
-                setattr(model, field, [AggregateNode(**{**n, "origin": "user_edited"}) for n in payload[field]])
+        if "aggregates" in payload:
+            model.aggregates = [
+                AggregateNode(
+                    node_id=node["node_id"],
+                    title=node["title"],
+                    child_unit_ids=list(node["child_unit_ids"]),
+                    origin="user_edited",
+                    intent_tag=node.get("intent_tag"),
+                )
+                for node in payload["aggregates"]
+            ]
+        if "decision_aggregates" in payload:
+            model.decision_aggregates = [
+                AggregateNode(
+                    node_id=node["node_id"],
+                    title=node["title"],
+                    child_unit_ids=list(node["child_unit_ids"]),
+                    origin="user_edited",
+                    intent_tag=node.get("intent_tag"),
+                )
+                for node in payload["decision_aggregates"]
+            ]
         if "decision_intent" in payload:
             model.decision_intent = payload["decision_intent"]
         if "backlinks" in payload:
             model.backlinks = [BacktrackLink(**b) for b in payload["backlinks"]]
+        if "intent_segments" in payload:
+            intent_segments: list[IntentSegment] = []
+            for segment in payload["intent_segments"]:
+                raw_trigger = segment.get("trigger_span")
+                trigger_span = (
+                    SpanRef(
+                        turn_id=raw_trigger["turn_id"],
+                        char_start=raw_trigger["char_start"],
+                        char_end=raw_trigger["char_end"],
+                    )
+                    if raw_trigger
+                    else None
+                )
+                intent_segments.append(IntentSegment(
+                    segment_id=segment["segment_id"],
+                    label=segment["label"],
+                    from_unit_id=segment["from_unit_id"],
+                    to_unit_id=segment["to_unit_id"],
+                    trigger_span=trigger_span,
+                    note=segment.get("note", ""),
+                    origin="user_edited",
+                ))
+            model.intent_segments = intent_segments
         validate_model(model, transcript)
         model.revision = self.repo.save(self.adapter.session_id, model.to_dict(), last, expected_revision)
         return model.to_dict()

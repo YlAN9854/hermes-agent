@@ -651,6 +651,7 @@ def test_dashboard_context_vis_endpoint_reads_isolated_profile_home(_isolate_her
     # off — those are separate axes.
     assert payload["capabilities"] == {
         "tier": 3, "compression_events": False, "compression_fidelity": "observed", "preserve": True,
+        "dispositions": True,
     }
     assert payload["transcript"][0]["content"] == "immutable truth"
     assert payload["model"]["tier"] == 3

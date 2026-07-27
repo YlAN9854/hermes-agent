@@ -92,17 +92,20 @@ class SurvivalState:
 
 @dataclass(frozen=True)
 class PreserveResult:
-    """Outcome of a user pin request (Tier 3).
+    """Outcome of a user disposition request (Tier 3).
 
     Compaction keeps or drops whole turns, so a pinned span pins its entire
     turn. ``rejected_turn_ids`` are turns turned down by the safety cap that
-    keeps pins from preventing compaction reaching its threshold.
+    keeps pins from preventing compaction reaching its threshold. Drop fields
+    default empty so existing pin-only adapters remain source compatible.
     """
 
     supported: bool
     accepted_turn_ids: list[str]
     rejected_turn_ids: list[str]
     note: str | None = None
+    accepted_drop_turn_ids: list[str] = field(default_factory=list)
+    rejected_drop_turn_ids: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -150,6 +153,17 @@ class BacktrackLink:
     note: str
 
 
+@dataclass(frozen=True, slots=True)
+class IntentSegment:
+    segment_id: str
+    label: str
+    from_unit_id: str
+    to_unit_id: str
+    trigger_span: SpanRef | None = None
+    note: str = ""
+    origin: Literal["llm_draft", "user_edited"] = "user_edited"
+
+
 @dataclass
 class ContextVisModel:
     units: list[SemanticUnit] = field(default_factory=list)
@@ -157,11 +171,13 @@ class ContextVisModel:
     decision_aggregates: list[AggregateNode] = field(default_factory=list)
     decision_intent: str | None = None
     backlinks: list[BacktrackLink] = field(default_factory=list)
+    intent_segments: list[IntentSegment] = field(default_factory=list)
     tier: Literal[1, 2, 3] = 1
     revision: int = 0
     legacy_transcript_warning: str | None = None
     survival: SurvivalState | None = None
     preserved: list[str] = field(default_factory=list)  # turn_ids the user pinned against compaction
+    dropped: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -177,7 +193,11 @@ class ContextAdapter(Protocol):
     def get_compression_events(self) -> list[CompressionEvent]: ...
     def llm_complete(self, prompt: str, **opts: Any) -> str: ...
     # Tier 3, optional: absent on adapters that cannot pin (service probes with getattr).
-    def request_preserve(self, spans_in_B: list[SpanRef]) -> PreserveResult: ...
+    def request_preserve(
+        self,
+        spans_in_B: list[SpanRef],
+        drop_spans_in_B: list[SpanRef] | None = None,
+    ) -> PreserveResult: ...
 
 
 def validate_model(model: ContextVisModel, transcript: list[Turn]) -> None:
@@ -218,3 +238,39 @@ def validate_model(model: ContextVisModel, transcript: list[Turn]) -> None:
             raise ValueError("backlink references an unknown unit")
         if positions[link.from_unit_id] <= positions[link.to_unit_id] or not link.note.strip():
             raise ValueError("backlinks must point from a later unit to an earlier unit")
+    segment_ids: set[str] = set()
+    previous_start = -1
+    previous_end = -1
+    for segment in model.intent_segments:
+        segment_id = segment.segment_id.strip()
+        if not segment_id:
+            raise ValueError("intent segment segment_id must be nonblank")
+        if segment_id in segment_ids:
+            raise ValueError(f"duplicate intent segment_id: {segment_id}")
+        segment_ids.add(segment_id)
+        if not segment.label.strip():
+            raise ValueError(f"intent segment {segment_id} label must be nonblank")
+        if segment.from_unit_id not in positions or segment.to_unit_id not in positions:
+            raise ValueError(f"intent segment {segment_id} references an unknown unit")
+        start = positions[segment.from_unit_id]
+        end = positions[segment.to_unit_id]
+        if start > end:
+            raise ValueError(f"intent segment {segment_id} must be a closed range in unit order")
+        if start < previous_start:
+            raise ValueError("intent segments must be ordered by their closed unit ranges")
+        if start <= previous_end:
+            raise ValueError(f"intent segment {segment_id} overlaps the previous closed range")
+        previous_start = start
+        previous_end = end
+        span = segment.trigger_span
+        if span is not None:
+            turn = turns.get(span.turn_id)
+            if (
+                turn is None
+                or span.char_start < 0
+                or span.char_end <= span.char_start
+                or span.char_end > len(turn.content)
+            ):
+                raise ValueError(
+                    f"intent segment {segment_id} trigger_span must resolve into transcript B"
+                )

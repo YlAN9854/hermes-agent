@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
@@ -25,6 +27,23 @@ _SUMMARY_PREFIXES = (
     "[CONTEXT SUMMARY]:",
     "[Prior context followed by a compression summary]",
 )
+_MERGED_PRIOR_CONTEXT_HEADER = "[PRIOR CONTEXT — for reference only; not a new message]"
+_MERGED_SUMMARY_DELIMITER = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]"
+_SUMMARY_END_MARKER = (
+    "--- END OF CONTEXT SUMMARY — "
+    "respond to the message below, not the summary above ---"
+)
+
+
+def _split_merged_summary(content: str) -> tuple[str, str] | None:
+    prior, delimiter, summary = content.partition(_MERGED_SUMMARY_DELIMITER)
+    if not delimiter:
+        return None
+    prior = prior.removeprefix(_MERGED_PRIOR_CONTEXT_HEADER).strip()
+    summary = summary.strip()
+    if summary.endswith(_SUMMARY_END_MARKER):
+        summary = summary[: -len(_SUMMARY_END_MARKER)].rstrip()
+    return prior, summary
 
 
 # Tool results are stored as structured dicts (JSON-serialised into the
@@ -75,11 +94,82 @@ def _text(content: Any) -> str:
 MAX_PINNED_CHARS = 24_000
 
 
+def _stage_bytes(path: Path, content: bytes) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        Path(name).unlink(missing_ok=True)
+        raise
+    return Path(name)
+
+
+class PreparedDispositionWrite:
+    def __init__(
+        self,
+        result: PreserveResult,
+        records: list[tuple[Path, bytes]],
+    ) -> None:
+        self.result = result
+        self._staged: list[tuple[Path, Path]] = []
+        self._originals = {
+            path: path.read_bytes() if path.is_file() else None
+            for path, _content in records
+        }
+        self._replaced: list[Path] = []
+        try:
+            for path, content in records:
+                self._staged.append((_stage_bytes(path, content), path))
+        except BaseException:
+            self.discard()
+            raise
+
+    def commit(self) -> None:
+        try:
+            for staged, final in self._staged:
+                os.replace(staged, final)
+                self._replaced.append(final)
+        except BaseException:
+            try:
+                self.rollback()
+            finally:
+                self.discard()
+            raise
+
+    def rollback(self) -> None:
+        for final in reversed(self._replaced):
+            original = self._originals[final]
+            if original is None:
+                final.unlink(missing_ok=True)
+            else:
+                os.replace(_stage_bytes(final, original), final)
+        self._replaced.clear()
+        self.discard()
+
+    def discard(self) -> None:
+        for staged, _final in self._staged:
+            staged.unlink(missing_ok=True)
+
+    def finish(self) -> None:
+        self.discard()
+        self._replaced.clear()
+        self._originals.clear()
+
+
 class HermesContextAdapter:
     """The only context-vis layer allowed to know Hermes storage/provider details."""
 
     _UNSET = object()
     preserve_supported = True  # this adapter can pin turns against compaction (Tier 3)
+    dispositions_supported = True
 
     def __init__(self, session_db: SessionDB, session_id: str, home: Path | None = None):
         self.db = session_db
@@ -117,24 +207,21 @@ class HermesContextAdapter:
     def _pin_path(self) -> Path:
         return self.home / "context-vis" / "pins" / f"{self.session_id}.json"
 
-    def _write_pins(self, turn_ids: list[str]) -> None:
-        path = self._pin_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"v": 1, "turn_ids": turn_ids}, ensure_ascii=False), encoding="utf-8")
+    def _drop_path(self) -> Path:
+        return self.home / "context-vis" / "drops" / f"{self.session_id}.json"
 
-    def request_preserve(self, spans_in_B: list[SpanRef]) -> PreserveResult:
-        """Pin the turns behind the given spans so compaction keeps them verbatim.
+    def prepare_preserve(
+        self,
+        spans_in_B: list[SpanRef],
+        drop_spans_in_B: list[SpanRef] | None = None,
+    ) -> PreparedDispositionWrite:
+        """Stage a wholesale keep/drop update without changing durable files.
 
-        Wholesale replace: the given spans become the entire pin set, so pinning
-        and unpinning are both just "send the new set" (an empty list clears).
-        Spans finer than a turn pin the whole turn — compaction keeps or drops
-        whole turns. Turns are rejected when they are non-preservable (a tool
-        turn, or an assistant turn with no text, whose only payload is a tool
-        call that would be stripped if its paired result were dropped) or would
-        exceed the safety cap; request order wins.
+        The caller commits the prepared files only after its model revision
+        preflight succeeds, and can roll them back if the repository CAS loses
+        a race. Direct ``request_preserve`` calls commit the same transaction.
         """
         transcript = {turn.turn_id: turn for turn in self.get_full_transcript()}
-        # Resolve spans to distinct turn ids in request order; skip unknown turns.
         turn_ids: list[str] = []
         for span in spans_in_B:
             tid = str(getattr(span, "turn_id", "") or "")
@@ -147,10 +234,6 @@ class HermesContextAdapter:
         used = 0
         for tid in turn_ids:
             turn = transcript[tid]
-            # A tool turn, or an assistant turn with no text, cannot be kept
-            # verbatim: its content is a tool call bound to a result the
-            # compaction may drop, leaving the call to be stripped. Refuse it
-            # transparently rather than pin something that won't survive.
             if turn.role == "tool" or not turn.content.strip():
                 non_preservable.append(tid)
                 continue
@@ -161,8 +244,24 @@ class HermesContextAdapter:
             else:
                 rejected.append(tid)
 
-        self._write_pins(accepted)
-        notes = []
+        active = self.get_active_context()
+        live_raw_ids = {
+            entry.origin_turn_id
+            for entry in (active.entries if active is not None else [])
+            if not entry.synthetic and entry.origin_turn_id is not None
+        }
+        accepted_drops: list[str] = []
+        rejected_drops: list[str] = []
+        for span in drop_spans_in_B or []:
+            tid = str(getattr(span, "turn_id", "") or "")
+            if not tid or tid in accepted_drops or tid in rejected_drops:
+                continue
+            if tid in accepted or tid not in live_raw_ids:
+                rejected_drops.append(tid)
+            else:
+                accepted_drops.append(tid)
+
+        notes: list[str] = []
         if non_preservable:
             notes.append(
                 f"{len(non_preservable)} turn(s) hold only a tool call or no text and cannot be "
@@ -173,7 +272,48 @@ class HermesContextAdapter:
                 f"{len(rejected)} turn(s) exceeded the pin budget (~{MAX_PINNED_CHARS} chars) "
                 "and were left unpinned so compaction can still reduce the context."
             )
-        return PreserveResult(True, accepted, non_preservable + rejected, " ".join(notes) or None)
+        if rejected_drops:
+            notes.append(
+                f"{len(rejected_drops)} drop request(s) did not target an eligible live raw "
+                "turn or conflicted with a kept turn."
+            )
+        result = PreserveResult(
+            True,
+            accepted,
+            non_preservable + rejected,
+            " ".join(notes) or None,
+            accepted_drops,
+            rejected_drops,
+        )
+        pin_record = json.dumps(
+            {"v": 1, "turn_ids": accepted},
+            ensure_ascii=False,
+        ).encode()
+        drop_record = json.dumps(
+            {"v": 1, "drop_turn_ids": accepted_drops},
+            ensure_ascii=False,
+        ).encode()
+        return PreparedDispositionWrite(
+            result,
+            [
+                (self._pin_path(), pin_record),
+                (self._drop_path(), drop_record),
+            ],
+        )
+
+    def request_preserve(
+        self,
+        spans_in_B: list[SpanRef],
+        drop_spans_in_B: list[SpanRef] | None = None,
+    ) -> PreserveResult:
+        prepared = self.prepare_preserve(spans_in_B, drop_spans_in_B)
+        try:
+            prepared.commit()
+        except BaseException:
+            prepared.discard()
+            raise
+        prepared.finish()
+        return prepared.result
 
     def _rows(self, active_only: bool = False) -> list[dict[str, Any]]:
         lineage = self.db.get_compression_lineage(self.session_id) or [self.session_id]
@@ -229,11 +369,30 @@ class HermesContextAdapter:
             content = _text(row.get("content"))
             if not content:
                 continue
+            turn_id = row.get("transcript_turn_id") or row.get("_transcript_turn_id")
+            merged = _split_merged_summary(content) if turn_id else None
+            if merged is not None:
+                prior, summary = merged
+                if prior:
+                    entries.append(ActiveEntry(
+                        role=role,
+                        content=prior,
+                        origin_turn_id=str(turn_id),
+                        synthetic=False,
+                        tool_name=row.get("tool_name"),
+                    ))
+                if summary:
+                    entries.append(ActiveEntry(
+                        role=role,
+                        content=summary,
+                        origin_turn_id=None,
+                        synthetic=True,
+                    ))
+                continue
             synthetic = bool(
                 row.get("context_synthetic") or row.get("_compressed_summary")
                 or content.lstrip().startswith(_SUMMARY_PREFIXES)
             )
-            turn_id = row.get("transcript_turn_id") or row.get("_transcript_turn_id")
             if not synthetic and not turn_id:
                 missing_provenance = True
             entries.append(ActiveEntry(
@@ -314,11 +473,16 @@ class HermesContextAdapter:
         current: dict[str, Any] = {"summary": None, "ts": 0.0, "ids": []}
         for row in rows:
             content = _text(row.get("content"))
+            merged = _split_merged_summary(content)
             synthetic = bool(row.get("context_synthetic")) or content.lstrip().startswith(_SUMMARY_PREFIXES)
             turn_id = row.get("transcript_turn_id") or row.get("_transcript_turn_id")
             if synthetic:
                 blocks.append(current)
-                current = {"summary": content, "ts": float(row.get("timestamp") or 0), "ids": []}
+                current = {
+                    "summary": merged[1] if merged is not None else content,
+                    "ts": float(row.get("timestamp") or 0),
+                    "ids": [],
+                }
             if turn_id:
                 # A summary merged into a real tail message is both the
                 # boundary marker and a surviving turn.
